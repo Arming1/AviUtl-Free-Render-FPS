@@ -1,0 +1,8 @@
+﻿These dependencies are intentionally absent from the license-safe RC package.
+Acquire each tool separately, record its exact version/hash/source/license, and install it under the user-selected AviUtl2 plugin runtime policy.
+
+- x264.exe
+- ffmpeg.exe
+- remuxer.exe/muxer.exe
+- mkvmerge.exe/mplex.exe/other audio encoders
+- Microsoft VC++ runtime and .NET Framework

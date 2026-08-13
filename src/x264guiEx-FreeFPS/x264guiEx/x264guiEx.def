@@ -1,0 +1,4 @@
+LIBRARY "x264guiEx-FreeRenderFPS.auo"
+
+EXPORTS
+    GetOutputPluginTable

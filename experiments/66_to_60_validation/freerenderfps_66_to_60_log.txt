@@ -1,0 +1,29 @@
+------------------------------------------------------------------------------------------------------------------------------
+[D:\AviUtl Free Render FPS\experiments\66_to_60_validation\freerenderfps_66_to_60.mp4]
+------------------------------------------------------------------------------------------------------------------------------
+x264guiEx 4.12 / Windows 11 x64 (26300) / AMD Ryzen 9 7845HX with Radeon Graphics [4.00GHz] (12C/24T)
+video: 0:00:05.000 60/1(60.000) fps
+audio: 0:00:05.000 2ch 44.1kHz 220500 samples
+FreeFPS MVP: project=66/1 fps, frames=330; target=60/1 fps, frames=300
+FreeFPS MVP uses the experimental neighbor-frame cache workaround; AFS and keyframe scan are disabled.
+指定 "x264" 为 C:\ProgramData\aviutl2\Plugin\exe_files\x264_3223_x64.exe 。
+指定 "AAC (ffmpeg)" 为 C:\ProgramData\aviutl2\Plugin\exe_files\ffmpeg_audenc.exe 。
+指定 "L-SMASH remuxer" 为 C:\ProgramData\aviutl2\Plugin\exe_files\remuxer_x64.exe 。
+指定 "L-SMASH   muxer" 为 C:\ProgramData\aviutl2\Plugin\exe_files\muxer_x64.exe 。
+converting YUY2 -> nv12p, using AVX512BW
+x264 options...
+ --crf 23 --frames 300 --input-res 1920x1080 --input-csp nv12 --fps 60/1 -o "D:\AviUtl Free Render
+FPS\experiments\66_to_60_validation\freerenderfps_66_to_60.mp4" "-"
+raw [info]: 1920x1080p 0:0 @ 60/1 fps (cfr)
+x264 [info]: using cpu capabilities: MMX2 SSE2Fast SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2 AVX512
+x264 [info]: profile High, level 4.2, 4:2:0, 8-bit
+x264 [error]: malloc of size 7332416 failed
+x264 [error]: x264_encoder_encode failed
+                                                                               
+aborted at input frame 40, output frame 0
+mp4 [error]: failed to finish movie.
+x264 意外终止。可能已将错误参数(选项)传递给了 x264。
+CPU利用率: Aviutl: 6.00% / x264: 2.50%
+Aviutl 平均帧获取时间: 4.575 ms
+x264编码用时 : 0时间 0分 0.5秒
+总编码用时   : 0时间 0分 1.0秒

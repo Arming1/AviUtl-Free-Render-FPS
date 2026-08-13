@@ -1,0 +1,13 @@
+mode	sequence	target_index	requested_frame	target_coordinate	timeline_builder_hits	object_time_seconds	image_hash_fnv1a64	cache_hit_events	result	source_log
+baseline	A	0	80	80.0	1	2.6666666666666665	875555f88e3def2b	0	fresh	cache_hit_A.log + cache_hit_A_watch.log
+baseline	A	1	80	80.5	0	NA	875555f88e3def2b	1	stale_80.0	cache_hit_A.log + cache_hit_A_watch.log
+baseline	A	2	80	80.0	0	NA	875555f88e3def2b	1	cached_80.0	cache_hit_A.log + cache_hit_A_watch.log
+baseline	B	0	80	80.5	1	2.6833333333333331	e8cc2a2b6ddd098f	NA	fresh	baseline_B.log + baseline_B_watch.log
+baseline	B	1	80	80.0	0	NA	e8cc2a2b6ddd098f	NA	stale_80.5	baseline_B.log + baseline_B_watch.log
+baseline	B	2	80	80.5	0	NA	e8cc2a2b6ddd098f	NA	cached_80.5	baseline_B.log + baseline_B_watch.log
+evict	A	0	80	80.0	1	2.6666666666666665	875555f88e3def2b	NA	fresh	evict_A.log + evict_A_watch.log
+evict	A	1	80	80.5	1	2.6833333333333331	e8cc2a2b6ddd098f	NA	fresh	evict_A.log + evict_A_watch.log
+evict	A	2	80	80.0	1	2.6666666666666665	875555f88e3def2b	NA	fresh	evict_A.log + evict_A_watch.log
+evict	B	0	80	80.5	1	2.6833333333333331	e8cc2a2b6ddd098f	NA	fresh	evict_B.log + evict_B_watch.log
+evict	B	1	80	80.0	1	2.6666666666666665	875555f88e3def2b	NA	fresh	evict_B.log + evict_B_watch.log
+evict	B	2	80	80.5	1	2.6833333333333331	e8cc2a2b6ddd098f	NA	fresh	evict_B.log + evict_B_watch.log

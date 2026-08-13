@@ -1,0 +1,103 @@
+MIT License
+
+Copyright (c) 2026 AviUtl2 FreeRenderFPS contributors
+
+Portions of this distribution are derived from x264guiEx and its shared
+common code. The source headers retain their original notices, including:
+
+Copyright (c) 2010-2022 rigaya
+Copyright (c) 2010-2017 rigaya
+Copyright (c) 2011-2016 rigaya
+Copyright (c) 2011-2020 rigaya
+Copyright (c) 2019 rigaya
+Copyright (c) 2021 rigaya
+Copyright (c) 2022 rigaya
+Copyright (c) 2023 rigaya
+
+The AviUtl output header retains:
+
+Copyright (c) 1999-2011 Kenkun
+
+The AviUtl ExEdit2 Plugin SDK snapshot is distributed under its own MIT notice:
+
+Copyright (c) 2025 Kenkun
+
+nlohmann/json (the checked-in `json/` headers) is distributed under the MIT
+license with:
+
+Copyright (c) 2013-2025 Niels Lohmann <https://nlohmann.me>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+## tinyxml2 notice
+
+The checked-in `tinyxml2/` source is by Lee Thomason. Its original notice is
+reproduced here as required by that source distribution:
+
+Original code by Lee Thomason (www.grinninglizard.com)
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any
+damages arising from the use of this software.
+
+Permission is granted to anyone to use this software for any
+purpose, including commercial applications, and to alter and
+redistribute it freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must
+not claim that you wrote the original software. If you use this
+software in a product, an acknowledgment in the product documentation
+would be appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and
+must not be misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source
+distribution.
+
+## AviUtl2 ExEdit2 Plugin SDK MIT notice
+
+The SDK files under `reference/aviutl2_sdk/` include the following complete
+notice (see `reference/aviutl2_sdk/license.txt`):
+
+The MIT License
+
+Copyright (c) 2025 Kenkun
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+The FreeRenderFPS-specific scheduler, cache-workaround, and guarded hook are
+provided under the MIT terms above. Copyright and license notices in source
+files remain authoritative for each copied component.
