@@ -10,15 +10,14 @@ FreeRenderFPS は x264guiEx をベースにした AviUtl2 出力プラグイン�
 
 ## Download
 
-**v1.0.0 は未リリースです。** 現在の成果物は `v1.0.0-rc1` の
-ライセンス安全確認用候補です。既存の外部エンコーダー、muxer、音声ツールは、
-バイナリに対応する完全なソース・由来記録が不足しているため同梱していません。
-RC を完成した一般ユーザー向けリリースとして扱わないでください。
+**v1.0.0 のリリースゲートに合格しました。** ソース対応とハッシュを監査した
+x264、LGPL FFmpeg、ISC L-SMASH を同梱し、全 FPS マトリクスと
+setup/portable 最終パッケージのみを使った実エンコードに合格しました。
 
 ## One-click installation
 
-1. `AviUtl2-FreeRenderFPS-v1.0.0-rc1-setup.zip` を完全に展開します。
-2. `AviUtl2-FreeRenderFPS-v1.0.0-rc1-setup.exe` を実行します。
+1. v1.0.0 setup ZIP を完全に展開します。
+2. `payload` の隣にある setup EXE を実行します。
 3. AviUtl2 を再起動します。
 4. `x264guiEx FreeRenderFPS` を選びます。
 
@@ -30,8 +29,8 @@ RC を完成した一般ユーザー向けリリースとして扱わないで�
 
 ## Manual installation
 
-上級者は portable ZIP の `Plugin\x264guiEx-FreeRenderFPS` を AviUtl2 の
-`Plugin` にコピーできます。正式 AUO2 と 3 個の隣接 INI を同じ場所に保ち、
+v1.0.0 portable ZIP を AviUtl2 ルートへ直接展開します。ZIP には
+`data\Plugin\x264guiEx-FreeRenderFPS` が含まれます。正式 AUO2 と 3 個の INI を保ち、
 Debug、PDB、Probe、watcher、ブレークポイント用ツールをコピーしないでください。
 
 ## Usage
@@ -40,7 +39,7 @@ Debug、PDB、Probe、watcher、ブレークポイント用ツールをコピー
 2. `Free Render FPS` タブを開きます。
 3. `Enable Free Render FPS` を有効にします。
 4. 目標 FPS プリセットを選びます。
-5. ユーザーが用意した x264／音声／mux ツールを設定して出力します。
+5. 同梱監査済み runtime で出力します。
 
 Free Render FPS を無効にすると元の整数フレーム経路を使用します。有効時は
 プロジェクト FPS を変えず、同じ期間を目標 FPS で評価します。
@@ -54,12 +53,12 @@ Free Render FPS を無効にすると元の整数フレーム経路を使用し�
 
 | Project → target | Frames | Video/audio duration | Adjacent duplicates | Status |
 |---|---:|---:|---:|---|
-| 30 → 60 | 322 | 5.366667 / 5.366667 s | 0、全 322 フレーム固有 | 保存済み統合成果物で PASS |
+| 30 → 60 | 300 | 5.000000 / 5.000000 s | 0、全 300 フレーム固有 | PASS |
 | 66 → 60 | 300 | 5.000000 / 5.000000 s | 0、全 300 フレーム固有 | 保存済み統合成果物で PASS |
-| 66 → 59.94 | — | — | — | 復旧後 RC で未再検証 |
-| 66 → 24 | — | — | — | 復旧後 RC で未再検証 |
-| 66 → 120 | — | — | — | 復旧後 RC で未再検証 |
-| 120 → 60 | — | — | — | 復旧後 RC で未再検証 |
+| 66 → 59.94 | 300 | 5.005000 / 5.000000 s | 0、全 300 固有 | PASS |
+| 66 → 24 | 120 | 5.000000 / 5.000000 s | 0、全 120 固有 | PASS |
+| 66 → 120 | 600 | 5.000000 / 5.000000 s | 0、全 600 固有 | PASS |
+| 120 → 60 | 300 | 5.000000 / 5.000000 s | 0、全 300 固有 | PASS |
 
 詳細は [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md) を参照してください。
 
@@ -73,8 +72,9 @@ timeline builder のバイト列と呼び出し関係を検査し、未知のビ
 - 内部 Hook は AviUtl2 のバージョンに依存します。
 - 整数フレームキャッシュには neighbor-frame eviction を使用しています。
 - FreeFPS 有効時は AFS、キーフレーム事前スキャン、timecode 出力を無効化します。
-- RC は再配布監査未完了の外部ツールを同梱しません。
-- クリーンインストールからの完全出力テストと 4 変換が未完了です。
+- FFmpeg/L-SMASH は由来を再現できますが、異なるパスでのバイト完全再現を
+  誤って主張しません。
+- テスト済み portable ZIP は `data\Plugin` への手動配置が必要です。
 - インストーラーは最小のコンソール EXE です。
 
 [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) も参照してください。

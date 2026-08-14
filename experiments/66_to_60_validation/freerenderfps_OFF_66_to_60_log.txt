@@ -1,0 +1,65 @@
+------------------------------------------------------------------------------------------------------------------------------
+[D:\AviUtl Free Render FPS\experiments\66_to_60_validation\freerenderfps_OFF_66_to_60.mp4]
+------------------------------------------------------------------------------------------------------------------------------
+x264guiEx-FreeRenderFPS 1.0.0-rc1 / Windows 11 x64 (26300) / AMD Ryzen 9 7845HX with Radeon Graphics [4.52GHz] (12C/24T)
+video: 0:00:05.000 66/1(66.000) fps
+audio: 0:00:05.000 2ch 44.1kHz 220500 samples
+指定 "x264" 为 data\Plugin\x264guiEx-FreeRenderFPS\exe_files\x264.exe 。
+指定 "AAC (ffmpeg)" 为 data\Plugin\x264guiEx-FreeRenderFPS\exe_files\ffmpeg.exe 。
+指定 "L-SMASH remuxer" 为 data\Plugin\x264guiEx-FreeRenderFPS\exe_files\remuxer.exe 。
+指定 "L-SMASH   muxer" 为 data\Plugin\x264guiEx-FreeRenderFPS\exe_files\muxer.exe 。
+converting YUY2 -> nv12p, using AVX512BW
+x264 options...
+ --crf 23 --frames 330 --input-res 640x360 --input-csp nv12 --fps 66/1 -o "D:\AviUtl Free Render
+FPS\experiments\66_to_60_validation\freerenderfps_OFF_66_to_60.mp4" "-"
+raw [info]: 640x360p 0:0 @ 66/1 fps (cfr)
+x264 [info]: using cpu capabilities: MMX2 SSE2Fast SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2 AVX512
+x264 [info]: profile High, level 3.1, 4:2:0, 8-bit
+x264 [info]: frame I:2     Avg QP: 8.00  size:   366
+x264 [info]: frame P:83    Avg QP:20.67  size:    77
+x264 [info]: frame B:245   Avg QP:16.92  size:    37
+x264 [info]: consecutive B-frames:  0.6%  0.6%  1.8% 97.0%
+x264 [info]: mb I  I16..4: 98.9%  0.0%  1.1%
+x264 [info]: mb P  I16..4:  0.0%  0.2%  0.0%  P16..4:  1.8%  0.3%  0.0%  0.0%  0.0%    skip:97.7%
+x264 [info]: mb B  I16..4:  0.0%  0.0%  0.0%  B16..8:  1.3%  0.1%  0.0%  direct: 0.0%  skip:98.6%  L0:50.9% L1:48.0% BI: 1.1%
+x264 [info]: 8x8 transform intra:7.9% inter:46.7%
+x264 [info]: coded y,uvDC,uvAC intra: 0.7% 0.0% 0.0% inter: 0.0% 0.0% 0.0%
+x264 [info]: i16 v,h,dc,p: 93%  2%  5%  0%
+x264 [info]: i8 v,h,dc,ddl,ddr,vr,hd,vl,hu:  2%  5% 92%  0%  0%  0%  0%  0%  1%
+x264 [info]: i4 v,h,dc,ddl,ddr,vr,hd,vl,hu: 15% 17% 52%  4%  4%  3%  3%  2%  1%
+x264 [info]: i8c dc,h,v,p: 100%  0%  0%  0%
+x264 [info]: Weighted P-Frames: Y:0.0% UV:0.0%
+x264 [info]: ref P L0: 86.0%  1.2% 10.2%  2.5%
+x264 [info]: ref B L0: 80.0% 14.1%  5.9%
+x264 [info]: ref B L1: 96.7%  3.3%
+x264 [info]: kb/s:25.98
+
+encoded 330 frames, 598.91 fps, 27.13 kb/s
+CPU利用率: Aviutl: 7.27% / x264: 6.09%
+Aviutl 平均帧获取时间: 0.571 ms
+x264编码用时 : 0时间 0分 0.5秒
+AAC (ffmpeg) (v8.1.2) 执行音频编码 AAC 指定码率, 256kbps
+"data\Plugin\x264guiEx-FreeRenderFPS\exe_files\ffmpeg.exe"  -f wav -ignore_length 1 -i "-" -y -c:a aac -aac_coder twoloop -vn -b:a 256000 "D:\AviUtl Free Render FPS\experiments\66_to_60_validation\freerenderfps_OFF_66_to_60_audio.m4a" 
+找不到导出音频文件。无法对 AAC (ffmpeg) 中的音频进行编码。
+音频编码命令为…
+"data\Plugin\x264guiEx-FreeRenderFPS\exe_files\ffmpeg.exe"  -f wav -ignore_length 1 -i "-" -y -c:a aac -aac_coder twoloop -vn -b:a 256000 "D:\AviUtl Free Render FPS\experiments\66_to_60_validation\freerenderfps_OFF_66_to_60_audio.m4a" 
+AAC (ffmpeg) [error]: ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers
+AAC (ffmpeg) [error]:   built with gcc 16.2.0 (Rev3, Built by MSYS2 project)
+AAC (ffmpeg) [error]:   configuration: --prefix=/opt/freerenderfps-runtime --arch=x86_64 --target-os=mingw32 --disable-autodetect --disable-debug
+AAC (ffmpeg) [error]: --disable-doc --disable-network --disable-avdevice --disable-swscale --disable-ffplay --disable-ffprobe --disable-sdl2
+AAC (ffmpeg) [error]: --disable-everything --enable-ffmpeg --enable-protocol='file,pipe' --enable-demuxer=wav
+AAC (ffmpeg) [error]: --enable-decoder='pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le' --enable-encoder=aac --enable-muxer='ipod,adts'
+AAC (ffmpeg) [error]: --enable-filter='aformat,aresample,anull' --enable-swresample --enable-static --disable-shared --extra-cflags='-O2
+AAC (ffmpeg) [error]: -ffile-prefix-map=/d/frfps-repro-a=/usr/src/freerenderfps -fdebug-prefix-map=/d/frfps-repro-a=/usr/src/freerenderfps'
+AAC (ffmpeg) [error]: --extra-ldflags='-static -static-libgcc -Wl,--no-insert-timestamp'
+AAC (ffmpeg) [error]:   libavutil      60. 26.102 / 60. 26.102
+AAC (ffmpeg) [error]:   libavcodec     62. 28.102 / 62. 28.102
+AAC (ffmpeg) [error]:   libavformat    62. 12.102 / 62. 12.102
+AAC (ffmpeg) [error]:   libavfilter    11. 14.102 / 11. 14.102
+AAC (ffmpeg) [error]:   libswresample   6.  3.102 /  6.  3.102
+AAC (ffmpeg) [error]: [in#0 @ 00000200c3dee480] Error opening input: Protocol not found
+AAC (ffmpeg) [error]: [in#0 @ 00000200c3dee480] Did you mean file:fd:?
+AAC (ffmpeg) [error]: Error opening input file -.
+AAC (ffmpeg) [error]: Error opening input files: Protocol not found
+AAC (ffmpeg) CPU利用率: 0.79%
+总编码用时   : 0时间 0分 1.0秒

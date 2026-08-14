@@ -5,11 +5,11 @@ using System.Linq;
 using System.Reflection;
 
 [assembly: AssemblyTitle("AviUtl2 FreeRenderFPS Installer")]
-[assembly: AssemblyDescription("License-safe release-candidate installer for x264guiEx FreeRenderFPS")]
+[assembly: AssemblyDescription("Audited offline release-candidate installer for x264guiEx FreeRenderFPS")]
 [assembly: AssemblyProduct("AviUtl2 FreeRenderFPS")]
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
-[assembly: AssemblyInformationalVersion("1.0.0-rc1")]
+[assembly: AssemblyInformationalVersion("1.0.0")]
 
 namespace FreeRenderFPS.Installer;
 
@@ -190,7 +190,7 @@ internal sealed class Options
 
     public static void PrintHelp()
     {
-        Console.WriteLine("FreeRenderFPS Installer (license-safe RC)");
+        Console.WriteLine("FreeRenderFPS Installer 1.0.0 (audited offline runtime)");
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  FreeRenderFPS.Installer.exe [install|upgrade] [options]");
@@ -200,6 +200,7 @@ internal sealed class Options
         Console.WriteLine();
         Console.WriteLine("The default target is %ProgramData%\\aviutl2\\Plugin\\x264guiEx-FreeRenderFPS.");
         Console.WriteLine("Only the FreeRenderFPS directory is changed; the original x264guiEx directory is rejected.");
+        Console.WriteLine("Run elevated only when the selected target is not writable by the current user.");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --source <dir>          Package payload or plugin payload directory");
@@ -267,13 +268,16 @@ internal static class Installer
         "x264guiEx-FreeRenderFPS.en.ini",
         "x264guiEx-FreeRenderFPS.zh.ini"
     };
-    private static readonly string[] MissingTools =
+    private static readonly IReadOnlyDictionary<string, string> AuditedRuntimeHashes =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        "x264.exe (or a user-provided x264 build)",
-        "ffmpeg.exe (for the default external AAC path)",
-        "remuxer.exe/muxer.exe (for the selected MP4 mode)",
-        "mkvmerge.exe, mplex.exe, and other optional muxers/audio encoders"
+        ["x264.exe"] = "52102BAF1A286FAFA2538D23CF409705114F85A340FFC91D2FB4AB49345FD30A",
+        ["ffmpeg.exe"] = "BC5C8D78B67ACEA262586F943DC54F531ABC0F9A78312DC31E4015F73FB091B9",
+        ["muxer.exe"] = "64842603E5D1C7D42AA4B8A254F11E09D08DF3289D6C908988A965650CEE57D5",
+        ["remuxer.exe"] = "B6B875F36FC48FD85A1952850054F49AA6B978F10AF84FBECCA9D0B06377F5FE",
+        ["timelineeditor.exe"] = "F4180B51D5843EF9100C7D420906FE6029A115F32CE2CCA37A3AFFE24BB73F50"
     };
+    private static bool _selfTestAllowsRuntimePlaceholders;
 
     public static string ResolveInstallDirectory(Options options)
     {
@@ -318,8 +322,7 @@ internal static class Installer
         log.Info($"Validated payload: {payload}");
         if (docs is not null)
             log.Info($"Validated documentation payload: {docs}");
-        foreach (var tool in MissingTools)
-            log.Warn($"Not bundled by design (license/provenance unresolved): {tool}. Provide it separately after license and checksum review.");
+        log.Info("Audited runtime set present and SHA-256 verified.");
 
         if (options.DryRun)
         {
@@ -475,6 +478,7 @@ internal static class Installer
 
     public static int RunSelfTest(Options options)
     {
+        _selfTestAllowsRuntimePlaceholders = true;
         var root = options.TestRoot;
         var removeRoot = false;
         if (string.IsNullOrWhiteSpace(root))
@@ -494,6 +498,12 @@ internal static class Installer
             Directory.CreateDirectory(docs);
             foreach (var file in RequiredPluginFiles)
                 File.WriteAllText(System.IO.Path.Combine(payload, file), "test-payload-" + file);
+            Directory.CreateDirectory(System.IO.Path.Combine(payload, "exe_files"));
+            foreach (var runtime in AuditedRuntimeHashes.Keys)
+                File.WriteAllText(System.IO.Path.Combine(payload, "exe_files", runtime), "self-test-placeholder");
+            File.WriteAllText(System.IO.Path.Combine(payload, "THIRD_PARTY_MANIFEST.json"), "{}");
+            File.WriteAllText(System.IO.Path.Combine(payload, "THIRD_PARTY_RELEASE_ARTIFACTS.json"), "{}");
+            File.WriteAllText(System.IO.Path.Combine(payload, "THIRD_PARTY_NOTICES.txt"), "self-test notice");
             Directory.CreateDirectory(System.IO.Path.Combine(payload, "x264guiEx_stg"));
             File.WriteAllText(System.IO.Path.Combine(payload, "x264guiEx_stg", "test.stg"), "preset-v1");
             File.WriteAllText(System.IO.Path.Combine(docs, "RUNTIME_DEPENDENCIES.md"), "test notice");
@@ -592,9 +602,21 @@ internal static class Installer
             var name = System.IO.Path.GetFileName(file);
             if (allowUserData && relative.StartsWith("docs/", StringComparison.OrdinalIgnoreCase))
                 continue;
-            if (relative.IndexOf("exe_files", StringComparison.OrdinalIgnoreCase) >= 0
-                || ForbiddenExtension(name))
-                throw new InstallerException($"Payload contains a prohibited runtime/binary file: {relative}");
+            if (relative.StartsWith("exe_files/", StringComparison.OrdinalIgnoreCase))
+            {
+                var runtimeName = relative.Substring("exe_files/".Length);
+                if (runtimeName.IndexOf('/') >= 0 || !AuditedRuntimeHashes.ContainsKey(runtimeName))
+                    throw new InstallerException($"Payload contains an unaudited runtime file: {relative}");
+                if (!allowUserData && !_selfTestAllowsRuntimePlaceholders)
+                {
+                    var actual = ComputeSha256(file);
+                    if (!actual.Equals(AuditedRuntimeHashes[runtimeName], StringComparison.OrdinalIgnoreCase))
+                        throw new InstallerException($"Audited runtime SHA-256 mismatch: {relative}");
+                }
+                continue;
+            }
+            if (ForbiddenExtension(name))
+                throw new InstallerException($"Payload contains a prohibited binary file: {relative}");
 
             var inPresetDirectory = relative.StartsWith("x264guiEx_stg/", StringComparison.OrdinalIgnoreCase);
             if (inPresetDirectory)
@@ -605,9 +627,21 @@ internal static class Installer
             }
             if (allowUserData && IsConfigFile(file))
                 continue;
-            if (!RequiredPluginFiles.Contains(name, StringComparer.OrdinalIgnoreCase))
+            if (!RequiredPluginFiles.Contains(name, StringComparer.OrdinalIgnoreCase)
+                && !name.Equals("THIRD_PARTY_MANIFEST.json", StringComparison.OrdinalIgnoreCase)
+                && !name.Equals("THIRD_PARTY_RELEASE_ARTIFACTS.json", StringComparison.OrdinalIgnoreCase)
+                && !name.Equals("THIRD_PARTY_NOTICES.txt", StringComparison.OrdinalIgnoreCase))
                 throw new InstallerException($"Unexpected plugin payload file: {relative}");
         }
+        foreach (var runtime in AuditedRuntimeHashes.Keys)
+        {
+            if (!File.Exists(System.IO.Path.Combine(payload, "exe_files", runtime)))
+                throw new InstallerException($"Payload is missing audited runtime: exe_files/{runtime}");
+        }
+        if (!File.Exists(System.IO.Path.Combine(payload, "THIRD_PARTY_MANIFEST.json"))
+            || !File.Exists(System.IO.Path.Combine(payload, "THIRD_PARTY_RELEASE_ARTIFACTS.json"))
+            || !File.Exists(System.IO.Path.Combine(payload, "THIRD_PARTY_NOTICES.txt")))
+            throw new InstallerException("Payload is missing a required third-party manifest or notice file.");
     }
 
     private static void ValidateDocsPayload(string docs)
@@ -636,6 +670,13 @@ internal static class Installer
         var extension = System.IO.Path.GetExtension(path);
         return new[] { ".exe", ".dll", ".sys", ".ocx", ".so", ".dylib", ".lib", ".exp", ".pdb", ".metagen", ".recipe" }
             .Contains(extension, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string ComputeSha256(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return string.Concat(sha.ComputeHash(stream).Select(value => value.ToString("X2")));
     }
 
     private static bool IsConfigFile(string path) => System.IO.Path.GetExtension(path).Equals(".conf", StringComparison.OrdinalIgnoreCase);

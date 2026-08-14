@@ -9,15 +9,14 @@ coordinates. It is not frame duplication and not an FPS-metadata trick.
 
 ## Download
 
-**v1.0.0 is not released.** The current `v1.0.0-rc1` package is a
-license-safe validation candidate. It omits external encoder, muxer, and audio
-binaries whose exact source/provenance is incomplete. Do not present the RC as
-a complete end-user release.
+**v1.0.0 release gates pass.** It bundles source-corresponding, exact-hash
+audited x264, LGPL FFmpeg and ISC L-SMASH runtime. The full FPS matrix and clean
+setup/portable package-only encodes pass.
 
 ## One-click installation
 
-1. Extract `AviUtl2-FreeRenderFPS-v1.0.0-rc1-setup.zip` completely.
-2. Run `AviUtl2-FreeRenderFPS-v1.0.0-rc1-setup.exe`.
+1. Extract the complete v1.0.0 setup ZIP.
+2. Run its adjacent setup EXE.
 3. Restart AviUtl2.
 4. Select `x264guiEx FreeRenderFPS`.
 
@@ -29,10 +28,9 @@ advanced options. The extracted `payload` directory must stay beside the EXE.
 
 ## Manual installation
 
-Advanced users can extract the portable ZIP and copy
-`Plugin\x264guiEx-FreeRenderFPS` into the AviUtl2 `Plugin` directory. Keep the
-four formal adjacent files together. Do not copy Debug, PDB, probe, watcher, or
-breakpoint artifacts. Do not rename the AUO2 or its INIs.
+Extract the v1.0.0 portable ZIP directly over the AviUtl2 root. It already
+contains `data\Plugin\x264guiEx-FreeRenderFPS`. Keep the four formal adjacent
+files together. Do not copy Debug, PDB, probe, watcher, or breakpoint artifacts.
 
 ## Usage
 
@@ -40,7 +38,7 @@ breakpoint artifacts. Do not rename the AUO2 or its INIs.
 2. Open the `Free Render FPS` tab.
 3. Enable `Enable Free Render FPS`.
 4. Choose the target FPS preset.
-5. Configure an externally supplied x264/audio/mux toolchain and export.
+5. Export using the bundled audited runtime.
 
 Turning Free Render FPS off follows the original x264guiEx integer-frame path.
 FreeFPS mode changes the effective video FPS/frame count while retaining the
@@ -55,15 +53,15 @@ The scheduler stores rational rate/scale values; 59.94 is 60000/1001.
 
 | Project → target | Frames | Video/audio duration | Adjacent duplicates | Status |
 |---|---:|---:|---:|---|
-| 30 → 60 | 322 | 5.366667 / 5.366667 s | 0; 322 unique | PASS on retained integrated artifact |
-| 66 → 60 | 300 | 5.000000 / 5.000000 s | 0; 300 unique | PASS on retained integrated artifact |
-| 66 → 59.94 | — | — | — | NOT REVALIDATED on recovered RC |
-| 66 → 24 | — | — | — | NOT REVALIDATED on recovered RC |
-| 66 → 120 | — | — | — | NOT REVALIDATED on recovered RC |
-| 120 → 60 | — | — | — | NOT REVALIDATED on recovered RC |
+| 30 → 60 | 300 | 5.000000 / 5.000000 s | 0; 300 unique | PASS |
+| 66 → 60 | 300 | 5.000000 / 5.000000 s | 0; 300 unique | PASS |
+| 66 → 59.94 | 300 | 5.005000 / 5.000000 s | 0; 300 unique | PASS |
+| 66 → 24 | 120 | 5.000000 / 5.000000 s | 0; 120 unique | PASS |
+| 66 → 120 | 600 | 5.000000 / 5.000000 s | 0; 600 unique | PASS |
+| 120 → 60 | 300 | 5.000000 / 5.000000 s | 0; 300 unique | PASS |
 
-These retained media prove true subframe evaluation in the integrated code
-line, but do not replace the missing clean-package regression matrix. See
+The 60-second 66→59.94 test produced 3597 frames and only 8.333 ms endpoint
+delta, with no accumulated rational drift. See
 [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md).
 
 ## Supported AviUtl2
@@ -77,8 +75,8 @@ are rejected; ordinary output remains available with FreeFPS disabled.
 - The private internal hook is version-specific.
 - Integer host caches are handled with a neighbor-frame eviction workaround.
 - FreeFPS mode disables AFS, x264guiEx keyframe pre-scan, and timecode output.
-- The RC does not include cleared external encoder/mux/audio tools.
-- A complete clean-install output test and four FPS conversions remain pending.
+- FFmpeg and L-SMASH are provenance reproducible but are not falsely claimed
+  byte-for-byte reproducible across different build roots.
 - The installer is a minimal console EXE, not a graphical wizard.
 
 See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).

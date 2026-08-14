@@ -1,0 +1,50 @@
+FreeRenderFPS v1.0.0-rc2 third-party runtime notices
+====================================================
+
+This distribution includes separate command-line programs in exe_files. They
+are aggregated with FreeRenderFPS and are not linked into the plugin.
+
+x264 0.165.3223M, commit 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee
+----------------------------------------------------------------------------
+Source: https://code.videolan.org/videolan/x264.git
+License: GNU General Public License, version 2 or (at your option) later.
+The complete corresponding source archive, COPYING, build script, source lock
+and the L-SMASH source used by its MP4 output module are supplied in the
+matching third-party-sources ZIP. Binary SHA-256:
+5C7698A2CA7CEC9BED5DCEEA4B5D5FFA681EDD86DEF4372B259EC6473FD8D1C5
+
+FFmpeg 8.1.2
+------------
+Source: https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
+License configuration: LGPL version 2.1 or later.
+This minimal static executable uses native AAC and no external libraries. Its
+configuration does not contain --enable-gpl, --enable-nonfree, or
+--enable-version3. The complete source archive, COPYING.LGPLv2.1 and build
+script are supplied in the matching third-party-sources ZIP. Binary SHA-256:
+87C18AABF07D01D92CBA7E874D3BF4D82C8EED9969FEE65F63FA68757FC136A0
+
+L-SMASH 2.16.1 rev1484, commit a3e0b47dd4f1bbb7980d1f92cac93e761925c65a
+--------------------------------------------------------------------------------
+Source: https://github.com/l-smash/l-smash
+Copyright (C) 2010-2017 L-SMASH project
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+Binary SHA-256 values:
+  muxer.exe          8E1A9E815070D617D1BB4F74B3F877D1EC3D3652F27FD78EBBBEC646A7C9813B
+  remuxer.exe        7051E2579C586CEF0358D3E014E7F33DD94B2FC935A89458EFFD9D55DE3AF778
+  timelineeditor.exe FC2BF9A64377839DCEE04CE97ED37AE6D70AD318292B59D072EEB2B5509969CA
+
+The exact source archives, license texts, patches and build recipe are in
+AviUtl2-FreeRenderFPS-v1.0.0-rc2-third-party-sources.zip. The authoritative
+machine-readable record is THIRD_PARTY_MANIFEST.json.

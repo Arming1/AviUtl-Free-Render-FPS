@@ -1,4 +1,4 @@
-# Building AviUtl2 FreeRenderFPS v1.0.0-rc1
+# Building AviUtl2 FreeRenderFPS v1.0.0
 
 ## Supported build target
 
@@ -59,13 +59,18 @@ The script:
 The installer EXE is intentionally accompanied by a `payload` directory inside
 the setup ZIP. Extract the whole ZIP before running it.
 
-## Missing runtime policy
+## Third-party runtime build
 
-The packaging script deliberately excludes the currently staged x264, FFmpeg,
-muxer, external audio, L-SMASH-Works, and helper DLL binaries. Their precise
-source/provenance/notice bundle is incomplete. A formal v1.0.0 package must
-either include a checksum-pinned, source-complete and license-compliant runtime
-set, or implement verified acquisition from official upstream sources.
+Run `tools/build_third_party.ps1` against the pinned MSYS2 and Visual Studio
+toolchains. It verifies official source archives, applies the recorded patches,
+builds x264/FFmpeg/L-SMASH, and validates the selected release hashes. The
+minimal LGPL FFmpeg configuration includes `file`, `pipe`, and `fd`; `fd` is
+required because FFmpeg 8.1.2 resolves x264guiEx's `-i -` input through it.
+
+Source/build provenance is locked independently from a specific release
+artifact hash. Only x264 currently passes cross-root byte-for-byte comparison;
+FFmpeg and L-SMASH remain artifact-hash locked without a false reproducibility
+claim. See `THIRD_PARTY_REPRODUCIBILITY.md`.
 
 See [RUNTIME_DEPENDENCIES.md](RUNTIME_DEPENDENCIES.md).
 
@@ -80,4 +85,5 @@ See [RUNTIME_DEPENDENCIES.md](RUNTIME_DEPENDENCIES.md).
 - installer upgrade/uninstall/rollback and original x264guiEx coexistence;
 - SHA-256 values regenerated after the last source change.
 
-Do not rename RC artifacts to v1.0.0 until every release blocker is closed.
+The v1.0.0 identity, corrected portable layout, installer lifecycle, and final
+setup/portable package-only smoke encodes have been validated.

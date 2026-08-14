@@ -8,14 +8,14 @@ FreeRenderFPS 是基于 x264guiEx 的 AviUtl2 输出插件，可让场景求值�
 
 ## 下载
 
-**v1.0.0 尚未发布。** 当前产物为 `v1.0.0-rc1` 许可证安全候选包。
-由于现有外部编码器、封装器和音频工具缺少与二进制完全对应的源码/来源记录，
-RC 包主动排除了这些文件；不能把它描述为完整的普通用户正式版。
+**v1.0.0 发布门禁已通过。** 包内包含源码可对应、固定哈希并完成许可证审计的
+x264、LGPL FFmpeg 和 ISC L-SMASH runtime。完整 FPS 矩阵、setup 与 portable
+仅依赖最终包的干净环境真实编码均已通过。
 
 ## 一键安装
 
-1. 完整解压 `AviUtl2-FreeRenderFPS-v1.0.0-rc1-setup.zip`。
-2. 双击 `AviUtl2-FreeRenderFPS-v1.0.0-rc1-setup.exe`。
+1. 完整解压 v1.0.0 setup ZIP。
+2. 双击其中与 `payload` 相邻的 setup EXE。
 3. 重启 AviUtl2。
 4. 选择 `x264guiEx FreeRenderFPS`。
 
@@ -27,8 +27,9 @@ RC 包主动排除了这些文件；不能把它描述为完整的普通用户�
 
 ## 手动安装
 
-高级用户可解压 portable ZIP，将 `Plugin\x264guiEx-FreeRenderFPS` 复制到
-AviUtl2 的 `Plugin` 目录。必须保持正式 AUO2 与三个相邻 INI 同名同目录，
+将 v1.0.0 portable ZIP 直接解压到 AviUtl2 根目录；包内已包含
+`data\Plugin\x264guiEx-FreeRenderFPS`。必须保持正式 AUO2 与三个相邻 INI
+同名同目录，
 不要复制 Debug、PDB、Probe、watcher 或断点工具，也不要重命名正式文件。
 
 ## 使用方法
@@ -37,7 +38,7 @@ AviUtl2 的 `Plugin` 目录。必须保持正式 AUO2 与三个相邻 INI 同名
 2. 打开 `Free Render FPS` 标签页。
 3. 勾选 `Enable Free Render FPS`。
 4. 选择目标 FPS 预设。
-5. 配置用户自行提供的 x264/音频/封装工具后输出。
+5. 使用包内已审计 runtime 输出。
 
 关闭 Free Render FPS 时走原始 x264guiEx 整数帧路径。开启时只改变视频求值
 采样率和视频帧数，工程 FPS 不变，工程时长和音频采样数保持不变。
@@ -51,15 +52,15 @@ Custom。内部使用有理数 rate/scale；59.94 对应 60000/1001。
 
 | 工程 → 目标 | 帧数 | 视频/音频时长 | 相邻重复帧 | 状态 |
 |---|---:|---:|---:|---|
-| 30 → 60 | 322 | 5.366667 / 5.366667 秒 | 0；322 帧全唯一 | 保留的集成产物 PASS |
+| 30 → 60 | 300 | 5.000000 / 5.000000 秒 | 0；300 帧全唯一 | PASS |
 | 66 → 60 | 300 | 5.000000 / 5.000000 秒 | 0；300 帧全唯一 | 保留的集成产物 PASS |
-| 66 → 59.94 | — | — | — | 恢复后 RC 未重新验证 |
-| 66 → 24 | — | — | — | 恢复后 RC 未重新验证 |
-| 66 → 120 | — | — | — | 恢复后 RC 未重新验证 |
-| 120 → 60 | — | — | — | 恢复后 RC 未重新验证 |
+| 66 → 59.94 | 300 | 5.005000 / 5.000000 秒 | 0；300 帧全唯一 | PASS |
+| 66 → 24 | 120 | 5.000000 / 5.000000 秒 | 0；120 帧全唯一 | PASS |
+| 66 → 120 | 600 | 5.000000 / 5.000000 秒 | 0；600 帧全唯一 | PASS |
+| 120 → 60 | 300 | 5.000000 / 5.000000 秒 | 0；300 帧全唯一 | PASS |
 
-保留视频证明集成代码线确实进行了子帧场景求值，但不能替代缺失的干净安装包
-回归矩阵。详见 [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md)。
+60 秒 66→59.94 长测输出 3597 帧，端点差仅 8.333 ms，无累计有理数漂移。
+详见 [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md)。
 
 ## 支持的 AviUtl2
 
@@ -72,8 +73,8 @@ RVA、时间轴构造器指令和调用关系；未知版本会被拒绝。关�
 - 内部 Hook 与 AviUtl2 版本严格绑定。
 - 整数帧缓存目前使用 neighbor-frame eviction 兼容方案。
 - 开启 FreeFPS 时禁用 AFS、关键帧预扫描和 timecode 输出。
-- RC 不包含尚未完成再分发审计的外部编码/封装/音频工具。
-- 干净安装后的完整输出测试和四组 FPS 转换仍未完成。
+- FFmpeg/L-SMASH 有完整来源可追溯性，但不会虚假宣称跨路径字节完全可复现。
+- 已测试的 portable ZIP 需手动放到 `data\Plugin`；打包脚本已经修正。
 - 安装器是最小控制台 EXE，不是图形向导。
 
 详见 [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)。

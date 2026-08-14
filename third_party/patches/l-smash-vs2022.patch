@@ -1,0 +1,40 @@
+diff --git a/cli/cli.vcxproj b/cli/cli.vcxproj
+index 9d59e5a..003b87a 100644
+--- a/cli/cli.vcxproj
++++ b/cli/cli.vcxproj
+@@ -404,9 +404,6 @@
+     <PreBuildEvent>
+-      <Command>for /f usebackq %%a in (`git rev-list HEAD ^| find /c /v ""`) do set REV=%%a
+-for /f usebackq %%a in (`git describe --always`) do set HASH=%%a
+-type nul &gt; "$(SolutionDir)config.h"
+-echo #define LSMASH_REV_NUM %REV% &gt;&gt; "$(SolutionDir)config.h"
+-echo #define LSMASH_REV "%REV%" &gt;&gt; "$(SolutionDir)config.h"
+-echo #define LSMASH_GIT_HASH "%HASH%" &gt;&gt; "$(SolutionDir)config.h"
+-echo #define LSMASH_API_IMPORTS &gt;&gt; "$(SolutionDir)config.h"</Command>
++      <Command>type nul &gt; "$(SolutionDir)config.h"
++echo #define LSMASH_REV_NUM 1484 &gt;&gt; "$(SolutionDir)config.h"
++echo #define LSMASH_REV "1484" &gt;&gt; "$(SolutionDir)config.h"
++echo #define LSMASH_GIT_HASH "a3e0b47" &gt;&gt; "$(SolutionDir)config.h"</Command>
+     </PreBuildEvent>
+diff --git a/windows/dllexportgen.csproj b/windows/dllexportgen.csproj
+index 0a7d4ed..ac042a8 100644
+--- a/windows/dllexportgen.csproj
++++ b/windows/dllexportgen.csproj
+@@ -9,7 +9,7 @@
+     <AppDesignerFolder>Properties</AppDesignerFolder>
+     <RootNamespace>dllexportgen</RootNamespace>
+     <AssemblyName>dllexportgen</AssemblyName>
+-    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
++    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+     <FileAlignment>512</FileAlignment>
+   </PropertyGroup>
+   <PropertyGroup>
+@@ -112,7 +112,7 @@
+   </ItemGroup>
+   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+   <PropertyGroup>
+-    <PostBuildEvent>$(TargetPath) $(SolutionDir)</PostBuildEvent>
++    <PostBuildEvent></PostBuildEvent>
+   </PropertyGroup>
+   <!-- To modify your build process, add your task inside one of the targets below and uncomment it.
+        Other similar extension points exist, see Microsoft.Common.targets.

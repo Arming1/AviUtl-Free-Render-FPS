@@ -1,11 +1,10 @@
 # FreeRenderFPS RC installer
 
 This directory contains the source for the managed Windows installer used by
-the v1.0.0-rc1 package. It is deliberately license-safe: the
-installer accepts only the four formal adjacent plugin files (one AUO2 and
-three INIs), `.stg` presets, and documentation. It rejects `exe_files`, DLLs,
-encoders, muxers, debug artifacts, and unknown binaries. Users must acquire
-those third-party tools separately under their own license terms.
+the v1.0.0 package. It accepts only the four formal adjacent plugin files, the
+exact-hash audited x264/FFmpeg/L-SMASH runtime, `.stg` presets, manifests and
+documentation. It rejects unknown executables, DLLs, debug artifacts and
+unapproved payload files.
 
 Build a framework-dependent Windows executable locally:
 

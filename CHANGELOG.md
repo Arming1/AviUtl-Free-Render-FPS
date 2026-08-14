@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.0] — 2026-08-13
+
+- Added audited x264, LGPL FFmpeg and ISC L-SMASH runtime with separate source
+  provenance and release-artifact locks.
+- Fixed FFmpeg standard-input AAC support by enabling the required `fd` protocol.
+- Fixed portable layout to extract directly into AviUtl2 `data\Plugin`.
+- Fixed package input selection so formal builds cannot silently reuse a stale
+  RC1 AUO2; the packager now verifies the AUO2 ProductVersion against the
+  requested release label.
+- Passed the full FPS matrix, 60-second rational-rate test, installer lifecycle
+  self-test, and final setup/portable package-only real H.264/AAC encodes.
+
 ## [1.0.0-rc1] — 2026-08-13
 
 Release-candidate recovery; **not a production v1.0.0 release**.

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "release": "1.0.0",
+  "components": [
+    {
+      "component": "x264",
+      "version": "0.165.3223M",
+      "commit": "0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee",
+      "source": "https://code.videolan.org/videolan/x264.git",
+      "license": "GPL-2.0-or-later",
+      "file": "exe_files/x264.exe",
+      "sha256": "52102BAF1A286FAFA2538D23CF409705114F85A340FFC91D2FB4AB49345FD30A"
+    },
+    {
+      "component": "FFmpeg",
+      "version": "8.1.2",
+      "source": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+      "license": "LGPL-2.1-or-later",
+      "configurationClass": "LGPL; GPL disabled; nonfree disabled; native AAC; no external libraries; fd/file/pipe protocols",
+      "file": "exe_files/ffmpeg.exe",
+      "sha256": "BC5C8D78B67ACEA262586F943DC54F531ABC0F9A78312DC31E4015F73FB091B9"
+    },
+    {
+      "component": "L-SMASH muxer",
+      "version": "2.16.1 rev1484",
+      "commit": "a3e0b47dd4f1bbb7980d1f92cac93e761925c65a",
+      "source": "https://github.com/l-smash/l-smash.git",
+      "license": "ISC",
+      "file": "exe_files/muxer.exe",
+      "sha256": "64842603E5D1C7D42AA4B8A254F11E09D08DF3289D6C908988A965650CEE57D5"
+    },
+    {
+      "component": "L-SMASH remuxer",
+      "version": "2.16.1 rev1484",
+      "commit": "a3e0b47dd4f1bbb7980d1f92cac93e761925c65a",
+      "source": "https://github.com/l-smash/l-smash.git",
+      "license": "ISC",
+      "file": "exe_files/remuxer.exe",
+      "sha256": "B6B875F36FC48FD85A1952850054F49AA6B978F10AF84FBECCA9D0B06377F5FE"
+    },
+    {
+      "component": "L-SMASH timeline editor",
+      "version": "2.16.1 rev1484",
+      "commit": "a3e0b47dd4f1bbb7980d1f92cac93e761925c65a",
+      "source": "https://github.com/l-smash/l-smash.git",
+      "license": "ISC",
+      "file": "exe_files/timelineeditor.exe",
+      "sha256": "F4180B51D5843EF9100C7D420906FE6029A115F32CE2CCA37A3AFFE24BB73F50"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+diff --git a/common/utils.c b/common/utils.c
+index 4a508b1..54bb171 100644
+--- a/common/utils.c
++++ b/common/utils.c
+@@ -30,6 +30,9 @@
+ #include <windows.h>
+ #endif
+ #include <nmmintrin.h>
++#ifdef __GNUC__
++#include <cpuid.h>
++#endif
+ 
+ const void * (*lsmash_memmem)(const void *haystack, size_t haystack_len, const void *needle,
+ 	size_t needle_len) = 0;
+@@ -66,15 +69,15 @@ static const void *lsmash_memmem_sse42(const void *haystack, size_t haystack_len
+ 	int offset;
+ 	for (offset = 0; offset + 16 <= haystack_len; offset += 16 - needle_len + 1) {
+ 		const __m128i data = _mm_loadu_si128((const __m128i*)((const uint8_t*)haystack + offset));
+-		auto r = _mm_cmpestri(needle, needle_len, data, 16, IMM8);
++		int r = _mm_cmpestri(needle, needle_len, data, 16, IMM8);
+ 		if (r + needle_len <= 16) {
+ 			return (const uint8_t*)haystack + offset + r;
+ 		}
+ 	}
+-	auto remain = haystack_len - offset;
++	size_t remain = haystack_len - offset;
+ 	memcpy(tmp_buf, (const uint8_t*)haystack + offset, remain);
+ 	const __m128i data = _mm_loadu_si128((const __m128i*)tmp_buf);
+-	auto r = _mm_cmpestri(needle, needle_len, data, remain, IMM8);
++	int r = _mm_cmpestri(needle, needle_len, data, remain, IMM8);
+ 	if (r + needle_len <= remain) {
+ 		return (const uint8_t*)haystack + offset + r;
+ 	}
+@@ -84,7 +87,13 @@ static const void *lsmash_memmem_sse42(const void *haystack, size_t haystack_len
+ void lsmash_init_sse() {
+ 	if (!lsmash_memmem) {
+ 		int cpuinfo[4];
++#ifdef __GNUC__
++		unsigned int eax, ebx, ecx, edx;
++		__get_cpuid(1, &eax, &ebx, &ecx, &edx);
++		cpuinfo[2] = (int)ecx;
++#else
+ 		__cpuid(cpuinfo, 1);
++#endif
+ 		int sse42_available = (cpuinfo[2] & (1 << 20));
+ 		lsmash_memmem = sse42_available ? lsmash_memmem_sse42 : lsmash_memmem_naive;
+ 	}

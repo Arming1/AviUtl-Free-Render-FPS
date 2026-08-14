@@ -1,0 +1,124 @@
+﻿{
+    "schemaVersion":  2,
+    "generatedUtc":  "2026-08-13T00:00:00Z",
+    "policy":  {
+                   "floatingRefsAllowed":  false,
+                   "nonfreeAllowed":  false,
+                   "releaseRuntimeRoot":  "build/third_party/artifacts",
+                   "artifactHashPolicy":  "Release artifact hashes are recorded separately in THIRD_PARTY_RELEASE_ARTIFACTS.json; source provenance validation must not assume cross-path byte reproducibility."
+                   ,"buildRecipe":  {
+                                          "script":  "tools/build_third_party.ps1",
+                                          "sha256":  "25B51E32D6B825BB0B7276D5C92EA22A7C100C8DE8241D3C1A0E26CD263FD692",
+                                          "ffmpegProtocols":  "file,pipe,fd",
+                                          "releaseRuntimeRoot":  "build/third_party/artifacts"
+                                      }
+               },
+    "reproducibility":  {
+                              "sourceDateEpoch":  1757468456,
+                              "sourceDateEpochOrigin":  "x264 locked commit timestamp, 2025-09-10T01:40:56Z",
+                              "gnuControls":  [
+                                                   "SOURCE_DATE_EPOCH",
+                                                   "ZERO_AR_DATE=1",
+                                                   "-Wl,--no-insert-timestamp",
+                                                   "-ffile-prefix-map and -fdebug-prefix-map",
+                                                   "fixed FFmpeg prefix /opt/freerenderfps-runtime",
+                                                   "strip --strip-all x264.exe"
+                                               ],
+                              "msvcControls":  [
+                                                    "/Brepro for compiler and linker",
+                                                    "/pathmap to C:\\src\\l-smash",
+                                                    "/DEBUG:NONE",
+                                                    "/PDBALTPATH:%_PDB%",
+                                                    "LinkIncremental=false",
+                                                    "Rebuild targets"
+                                                ],
+                              "verification":  "Two clean absolute work roots must be compared before a component is classified byteReproducible."
+                          },
+    "sources":  [
+                    {
+                        "component":  "x264",
+                        "version":  "0.165.3223M",
+                        "commit":  "0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee",
+                        "officialRepository":  "https://code.videolan.org/videolan/x264.git",
+                        "archive":  "x264-0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee.tar.gz",
+                        "archiveOrigin":  "Generated with git archive from the verified official repository commit",
+                        "archiveSha256":  "2EE0208201A22E4637462C566B0FC853DA85DBDA77533B8B7389A7F38FB1DA04",
+                        "license":  "GPL-2.0-or-later",
+                        "licenseFile":  "COPYING"
+                    },
+                    {
+                        "component":  "FFmpeg",
+                        "version":  "8.1.2",
+                        "tag":  "n8.1.2",
+                        "officialSource":  "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+                        "signature":  "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz.asc",
+                        "archive":  "ffmpeg-8.1.2.tar.xz",
+                        "archiveSha256":  "464BEB5E7BF0C311E68B45AE2F04E9CC2AF88851ABB4082231742A74D97B524C",
+                        "signatureSha256":  "0A0963FCCD70597838073F3E31B20F4A4D8CC2B5E577472C9A5A1F22624246F8",
+                        "signingKeyFingerprint":  "FCF986EA15E6E293A5644F10B4322F04D67658D8",
+                        "license":  "LGPL-2.1-or-later",
+                        "licenseFile":  "COPYING.LGPLv2.1"
+                    },
+                    {
+                        "component":  "L-SMASH",
+                        "version":  "2.16.1 rev1484",
+                        "commit":  "a3e0b47dd4f1bbb7980d1f92cac93e761925c65a",
+                        "officialRepository":  "https://github.com/l-smash/l-smash.git",
+                        "officialArchive":  "https://github.com/l-smash/l-smash/archive/a3e0b47dd4f1bbb7980d1f92cac93e761925c65a.tar.gz",
+                        "archive":  "l-smash-a3e0b47.tar.gz",
+                        "archiveSha256":  "11DCFE35160CE8B5D31372D8BF77EAB004E31C025F22D4783B4306419C178890",
+                        "license":  "ISC",
+                        "licenseFile":  "LICENSE",
+                        "patches":  [
+                                        {
+                                            "path":  "third_party/patches/l-smash-gcc16.patch",
+                                            "sha256":  "22BD55CC6A18F2A74DAFD6F92024C5D0625F5DCCDF39872CCC8953F0D7F9BCBD"
+                                        },
+                                        {
+                                            "path":  "third_party/patches/l-smash-vs2022.patch",
+                                            "sha256":  "B8398427D1022FBC396BF265D9EE1345B4A8C4223CCAFA6202B8F4FA88F8EDE6"
+                                        }
+                                    ]
+                    }
+                ],
+    "toolchain":  {
+                      "msys2Installer":  {
+                                             "officialSource":  "https://repo.msys2.org/distrib/x86_64/msys2-base-x86_64-20260611.sfx.exe",
+                                             "sha256":  "C105946E64E08F099AC0E4647461CE762B95333AD211777666476A9A41451D65",
+                                             "authenticodeSubject":  "CN=Christoph Reiter",
+                                             "authenticodeStatus":  "Valid"
+                                         },
+                      "packages":  {
+                                       "base-devel":  "2026.08-1",
+                                       "git":  "2.55.0-1",
+                                       "mingw-w64-ucrt-x86_64-gcc":  "16.2.0-3",
+                                       "mingw-w64-ucrt-x86_64-binutils":  "2.47-3",
+                                       "mingw-w64-ucrt-x86_64-make":  "4.4.1-5",
+                                       "mingw-w64-ucrt-x86_64-nasm":  "3.02-1",
+                                       "mingw-w64-ucrt-x86_64-pkgconf":  "3.0.5-1"
+                                   },
+                      "msvc":  "Visual Studio 2022 Build Tools, v143, x64 CLIRelease"
+                  },
+    "artifactShape":  [
+                              {
+                                  "file":  "x264.exe",
+                                  "minimumBytes":  1000000
+                              },
+                              {
+                                  "file":  "ffmpeg.exe",
+                                  "minimumBytes":  1000000
+                              },
+                              {
+                                  "file":  "muxer.exe",
+                                  "minimumBytes":  500000
+                              },
+                              {
+                                  "file":  "remuxer.exe",
+                                  "minimumBytes":  500000
+                              },
+                              {
+                                  "file":  "timelineeditor.exe",
+                                  "minimumBytes":  500000
+                              }
+                          ]
+}
