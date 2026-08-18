@@ -9,10 +9,17 @@ coordinates. It is not frame duplication and not an FPS-metadata trick.
 
 ## Download
 
-**v1.0.0 is not released.** The current `v1.0.0-rc1` package is a
-license-safe validation candidate. It omits external encoder, muxer, and audio
-binaries whose exact source/provenance is incomplete. Do not present the RC as
-a complete end-user release.
+FreeRenderFPS is currently available as a release candidate for AviUtl2 v2.1.4 x64.
+
+The core project-FPS / output-FPS decoupling feature is working and available for testing. Conversions such as 30 → 60 FPS and 66 → 60 FPS have passed previous integrated validation while preserving the original project duration.
+
+Some additional FPS combinations are still being revalidated on the current RC build, so this release is not yet considered v1.0.0 stable.
+
+The installer currently includes the plugin and required configuration files only. External encoders and muxing tools are not bundled and must be provided separately.
+
+Bug reports and real-world testing are welcome.
+
+For detailed validation and development status, see FINAL_REPORT.md and docs/VALIDATION_MATRIX.md.
 
 ## One-click installation
 
