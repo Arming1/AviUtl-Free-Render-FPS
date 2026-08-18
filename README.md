@@ -14,15 +14,17 @@ change container metadata.
 
 ## Release status
 
-The current deliverable is **v1.0.0-rc1, not v1.0.0**. The recovered Release
-x64 plugin builds and its settings/project-config crash is fixed. The
-license-safe installer and portable package intentionally omit x264, FFmpeg,
-muxers, and external audio tools because the exact staged binaries do not yet
-have a complete, matching redistribution/source record. Several required FPS
-matrix entries also have not been revalidated on the recovered RC binary.
+FreeRenderFPS is currently available as a release candidate for AviUtl2 v2.1.4 x64.
 
-Do not publish this candidate as v1.0.0. See [FINAL_REPORT.md](FINAL_REPORT.md)
-and [the validation matrix](docs/VALIDATION_MATRIX.md).
+The core project-FPS / output-FPS decoupling feature is working and available for testing. Conversions such as 30 → 60 FPS and 66 → 60 FPS have passed previous integrated validation while preserving the original project duration.
+
+Some additional FPS combinations are still being revalidated on the current RC build, so this release is not yet considered v1.0.0 stable.
+
+The installer currently includes the plugin and required configuration files only. External encoders and muxing tools are not bundled and must be provided separately.
+
+Bug reports and real-world testing are welcome.
+
+For detailed validation and development status, see FINAL_REPORT.md and docs/VALIDATION_MATRIX.md.
 
 ## Installation
 
