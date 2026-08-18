@@ -1,6 +1,10 @@
-# AviUtl2 FreeRenderFPS
+<h1 align="center">AviUtl2 FreeRenderFPS</h1>
 
-[简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [English](README.en.md)
+<p align="center">
+  <a href="README.zh-CN.md">简体中文</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.en.md">English</a>
+</p>
 
 FreeRenderFPS is an x264guiEx-based AviUtl2 output plugin that samples the real
 scene timeline at an output FPS independent of the project FPS. A 30 FPS
