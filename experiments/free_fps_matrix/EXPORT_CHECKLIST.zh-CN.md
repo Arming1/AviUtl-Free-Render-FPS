@@ -150,7 +150,7 @@ Copy-Item -LiteralPath "D:\AviUtl Free Render FPS\experiments\free_fps_matrix\fi
    **如果导出出现的文件不在运行目录中, 或者 `66_to_60_validation\` 中的已有文件被修改, 立即停止并报告。**
    不需要手动创建 `out\` 目录。
 
-3. **FreeRenderFPS 开关必须关闭。** 使用 `x264guiEx FreeRenderFPS` 作为输出插件时, 打开 AviUtl2 的 **Free Render FPS** 标签, 确认 **Enable Free Render FPS** 为关闭 (参见 `dist\AviUtl2-FreeRenderFPS-v1.0.1\payload\Docs\README.en.md` 第 70-71 行)。
+3. **FreeRenderFPS 开关必须关闭。** 使用 `x264guiEx FreeRenderFPS` 作为输出插件时, 打开 AviUtl2 的 **Free Render FPS** 标签, 确认 **Enable Free Render FPS** 为关闭 (参见 `dist\AviUtl2-FreeRenderFPS-v1.1.0\payload\Docs\README.en.md` 第 93 行)。
    如果开关为开, 两条路径都会处理帧率, 结果不可用于判定。每次导出前都检查一次。
 
 4. **不要使用 `dry_run_simulated\`。** 该目录的 `SUMMARY.md` 标明为模拟数据 (FAKE/SIMULATED), 不是宿主导出。

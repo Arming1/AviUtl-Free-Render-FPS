@@ -1,4 +1,4 @@
-# Installing FreeRenderFPS v1.0.1
+# Installing FreeRenderFPS v1.1.0
 
 Close AviUtl2 before installation.
 

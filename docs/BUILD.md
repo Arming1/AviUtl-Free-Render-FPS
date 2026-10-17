@@ -1,4 +1,4 @@
-# Building FreeRenderFPS v1.0.1
+# Building FreeRenderFPS v1.1.0
 
 ## Supported build target
 
@@ -106,5 +106,5 @@ See [RUNTIME_DEPENDENCIES.md](RUNTIME_DEPENDENCIES.md).
 - SHA-256 values regenerated after the last source change.
 
 The v1.0.0 identity, corrected portable layout, installer lifecycle, and final
-setup/portable package-only smoke encodes have been validated. v1.0.1 packages
+setup/portable package-only smoke encodes have been validated. v1.1.0 packages
 are produced by the same scripts; their in-host validation is pending.

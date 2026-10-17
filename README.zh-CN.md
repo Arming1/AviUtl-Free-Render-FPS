@@ -6,19 +6,18 @@ FreeRenderFPS 基于 x264guiEx，同时提供 AviUtl2 和旧版 AviUtl 1.x 的�
 可让场景求值采样率独立于工程 FPS。例如 30 FPS 工程输出 60 FPS 时，会真实求值
 0.0、0.5、1.0、1.5……工程帧坐标，而不是复制帧或只修改容器 FPS 元数据。
 
-## v1.0.1 更新
+## v1.1.0 更新
 
-v1.0.1 是维护版本，详见 [CHANGELOG.md](CHANGELOG.md)：
+v1.1.0 将自由帧率导出放入单一 AviUtl2 插件文件，详见 [CHANGELOG.md](CHANGELOG.md)：
 
-- AviUtl 1.x：发布版不再逐帧写入 `freerenderfps_aviutl1_probe.log` 诊断日志。
-- AviUtl 1.x：开启 FreeRenderFPS 时忽略宿主的复制帧标记，不会再误发上一帧画面。
-- 两个宿主：安装/卸载时间轴 Hook 时的线程挂起更安全，不会再因内存锁卡死。
-- 第二个同时进行的导出会被拒绝，并且不会拆掉正在进行的导出的 Hook。
-- 清缓存时顺带渲染的整数帧会被复用：30 → 60 每个输出帧只需渲染一次（原为 1.5 次）。
-- AviUtl 1.x 包不再附带默认 `.conf`，解压不会覆盖用户设置。
+- `x264guiEx-FreeRenderFPS.aux2` 同时包含输出插件和“编辑 > **Free FPS Export...**”菜单项。后者通过 AviUtl2 公开 SDK 重新求值场景，在 AviUtl2 v2.1.12 上可使用任意有理输出帧率。
+- 内置的“启用 Free Render FPS”Hook 仍只支持 AviUtl2 v2.1.4 x64；其他宿主会显示提示，指向 Free FPS Export。
+- 安装器可将旧版 `.auo2` 安装迁移为 `.aux2`，备份保存在 `Plugin` 之外。`--cleanup-legacy-backups` 可把旧备份文件夹移出 `Plugin`（需显式启用，且只移动不删除）。
+- 新增 `.aup2` 帧率转换工具、宿主无关测试和验证工具。
 
-下方的发布门禁和实测表格是 v1.0.0 的结果；1.0.1 二进制尚待在 AviUtl2 v2.1.4
-与 AviUtl 1.10 + ExEdit 0.92 上重新实测。
+下方的发布门禁和实测表格是 v1.0.0 的结果。1.1.0 的 AviUtl2 二进制尚待在 AviUtl2
+v2.1.12（Free FPS Export）和 v2.1.4（内置 Hook）上实测。AviUtl 1.x 包仍为 v1.0.1，
+尚待在 AviUtl 1.10 + ExEdit 0.92 上重新实测。
 
 ## 下载
 
@@ -32,7 +31,7 @@ AviUtl 宿主本体。
 
 ## 一键安装
 
-1. 完整解压 v1.0.1 setup ZIP。
+1. 完整解压 v1.1.0 setup ZIP。
 2. 双击其中与 `payload` 相邻的 setup EXE。
 3. 重启 AviUtl2。
 4. 选择 `x264guiEx FreeRenderFPS`。
@@ -45,7 +44,7 @@ AviUtl 宿主本体。
 
 ## 手动安装
 
-将 v1.0.1 portable ZIP 直接解压到 AviUtl2 根目录；包内已包含
+将 v1.1.0 portable ZIP 直接解压到 AviUtl2 根目录；包内已包含
 `data\Plugin\x264guiEx-FreeRenderFPS`。必须保持正式 `x264guiEx-FreeRenderFPS.aux2`
 与三个相邻 INI 同名同目录，不要复制 Debug、PDB、Probe、watcher 或断点工具，
 也不要重命名正式文件。

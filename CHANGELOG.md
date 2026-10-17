@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.1.0] — 2026-10-17
+
+Free render FPS on AviUtl2 through a single plugin file, plus installer and
+validation-tool updates.
+
+### Added
+
+- `x264guiEx-FreeRenderFPS.aux2` now contains both the x264guiEx FreeRenderFPS
+  output plugin and the Edit > **Free FPS Export...** menu item. The export path
+  re-times the scene through the public AviUtl2 SDK, so any rational output FPS
+  works on AviUtl2 v2.1.12. The built-in timeline hook still supports only
+  AviUtl2 v2.1.4 x64.
+- `.aup2` retimer tool (`tools/aup2_fps_upconvert.py`) with host-free tests in
+  `tests/aup2_upconvert`, plus validation tools (`tools/validate_freefps_output.py`,
+  `tools/host_matrix.py`).
+- `--cleanup-legacy-backups` installer option (opt-in) that moves old
+  `Plugin\x264guiEx-FreeRenderFPS.backup-*` folders into `FreeRenderFPS-backups`.
+  It only moves folders and never deletes them.
+
+### Changed
+
+- On unsupported AviUtl2 hosts, exporting with Enable Free Render FPS shows a
+  message pointing to Edit > Free FPS Export and aborts; it does not render at
+  project FPS.
+- The installer migrates an installed legacy `.auo2` to `.aux2` on upgrade. The
+  old file is kept in a timestamped backup, and backups are kept outside the
+  `Plugin` folder.
+
+### Validation status
+
+- Host-free tests (aup2 up-convert and the FreeRenderFPS scheduler, x64 and x86)
+  pass.
+- The in-host FPS matrix on AviUtl2 v2.1.12 is pending.
+
 ## [1.0.1] — 2026-10-17
 
 Maintenance release for the AviUtl2 and AviUtl 1.x builds.

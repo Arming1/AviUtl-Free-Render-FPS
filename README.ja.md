@@ -8,19 +8,18 @@ FreeRenderFPS は x264guiEx をベースに、AviUtl2 と旧 AviUtl 1.x の
 1.5…というプロジェクトフレーム座標を実際に評価します。フレーム複製や
 メタデータ変更だけではありません。
 
-## v1.0.1 の変更点
+## v1.1.0 の変更点
 
-v1.0.1 は保守リリースです。詳細は [CHANGELOG.md](CHANGELOG.md) を参照してください。
+v1.1.0 は、自由フレームレート出力を単一の AviUtl2 プラグインファイルに統合したリリースです。詳細は [CHANGELOG.md](CHANGELOG.md) を参照してください。
 
-- AviUtl 1.x: リリース版はフレームごとの診断ログ `freerenderfps_aviutl1_probe.log` を書き込まなくなりました。
-- AviUtl 1.x: FreeRenderFPS 有効時はホストのコピーフレームフラグを無視し、直前の画像を再送しません。
-- 両ホスト: タイムラインフックの導入・解除時のスレッド停止を安全化しました。
-- 同時に開始された 2 つ目の出力は拒否され、実行中の出力のフックを外しません。
-- キャッシュ追い出しで描画した整数フレームを再利用し、30 → 60 は出力 1 フレームあたり 1 回の描画で済みます（従来は 1.5 回）。
-- AviUtl 1.x パッケージは既定の `.conf` を同梱しなくなりました。
+- `x264guiEx-FreeRenderFPS.aux2` に出力プラグインと「編集 > **Free FPS Export...**」メニュー項目が含まれます。公開 AviUtl2 SDK でシーンを再評価し、AviUtl2 v2.1.12 では任意の有理数フレームレートで出力できます。
+- 内蔵の Free Render FPS フックは引き続き AviUtl2 v2.1.4 x64 のみ対応です。それ以外のホストでは Free FPS Export への案内が表示されます。
+- インストーラーは旧 `.auo2` を `.aux2` へ移行し、バックアップを `Plugin` の外に保存します。`--cleanup-legacy-backups` は古いバックアップフォルダーを `Plugin` の外へ移動します（明示的な指定が必要で、削除はしません）。
+- `.aup2` のフレームレート変換ツール、ホスト非依存のテスト、検証ツールを追加しました。
 
-以下のリリースゲートと実測値は v1.0.0 の結果です。1.0.1 バイナリは AviUtl2 v2.1.4
-および AviUtl 1.10 + ExEdit 0.92 での再実測が未実施です。
+以下のリリースゲートと実測値は v1.0.0 の結果です。1.1.0 の AviUtl2 バイナリは、
+AviUtl2 v2.1.12（Free FPS Export）と v2.1.4（内蔵フック）での実機検証が未実施です。
+AviUtl 1.x パッケージは引き続き v1.0.1 で、AviUtl 1.10 + ExEdit 0.92 での再検証が未実施です。
 
 ## Download
 
@@ -34,7 +33,7 @@ setup/portable 最終パッケージのみを使った実エンコードに合�
 
 ## One-click installation
 
-1. v1.0.1 setup ZIP を完全に展開します。
+1. v1.1.0 setup ZIP を完全に展開します。
 2. `payload` の隣にある setup EXE を実行します。
 3. AviUtl2 を再起動します。
 4. `x264guiEx FreeRenderFPS` を選びます。
@@ -47,7 +46,7 @@ setup/portable 最終パッケージのみを使った実エンコードに合�
 
 ## Manual installation
 
-v1.0.1 portable ZIP を AviUtl2 ルートへ直接展開します。ZIP には
+v1.1.0 portable ZIP を AviUtl2 ルートへ直接展開します。ZIP には
 `data\Plugin\x264guiEx-FreeRenderFPS` が含まれます。正式な
 `x264guiEx-FreeRenderFPS.aux2` と 3 個の INI を保ち、
 Debug、PDB、Probe、watcher、ブレークポイント用ツールをコピーしないでください。

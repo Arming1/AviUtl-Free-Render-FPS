@@ -8,22 +8,25 @@ FPS. For example, a 30 FPS project rendered at 60 FPS is evaluated at 0.0,
 0.5, 1.0, 1.5... project-frame coordinates. It is not frame duplication and
 not an FPS-metadata trick.
 
-## v1.0.1
+## v1.1.0
 
-v1.0.1 is a maintenance release; see [CHANGELOG.md](CHANGELOG.md).
+v1.1.0 puts Free FPS Export into the single AviUtl2 plugin file; see
+[CHANGELOG.md](CHANGELOG.md).
 
-- AviUtl 1.x: release builds no longer write the per-frame diagnostic log
-  `freerenderfps_aviutl1_probe.log`.
-- AviUtl 1.x: the host copy-frame flag is ignored while FreeRenderFPS is
-  active, so the previous image is never resent.
-- Both hosts: hook installation and removal suspend threads safely.
-- A second concurrent export is rejected without unhooking the active one.
-- Cache-eviction renders are reused: 30 → 60 needs one render per output frame
-  (previously 1.5).
-- The AviUtl 1.x package no longer contains a default `.conf`.
+- `x264guiEx-FreeRenderFPS.aux2` contains the output plugin and Edit >
+  **Free FPS Export...**, which re-times the scene through the public AviUtl2
+  SDK. Any rational output FPS works on AviUtl2 v2.1.12.
+- The built-in Enable Free Render FPS hook still supports AviUtl2 v2.1.4 x64
+  only. Other hosts get a message that points to Free FPS Export.
+- The installer migrates legacy `.auo2` installs to `.aux2` and keeps backups
+  outside `Plugin`. `--cleanup-legacy-backups` moves old backup folders out of
+  `Plugin` (opt-in; it never deletes).
+- Adds the `.aup2` retimer tool, host-free tests and validation tools.
 
-The release gates and measurements below are v1.0.0 results. The 1.0.1 binaries
-still need in-host re-validation on AviUtl2 v2.1.4 and AviUtl 1.10 + ExEdit 0.92.
+The release gates and measurements below are v1.0.0 results. The 1.1.0 AviUtl2
+binary still needs in-host validation on AviUtl2 v2.1.12 (Free FPS Export) and
+v2.1.4 (built-in hook). The AviUtl 1.x package is still v1.0.1 and needs
+re-validation on AviUtl 1.10 + ExEdit 0.92.
 
 ## Download
 
@@ -38,7 +41,7 @@ portable ZIP; the AviUtl host itself is not included.
 
 ## One-click installation
 
-1. Extract the complete v1.0.1 setup ZIP.
+1. Extract the complete v1.1.0 setup ZIP.
 2. Run its adjacent setup EXE.
 3. Restart AviUtl2.
 4. Select `x264guiEx FreeRenderFPS`.
@@ -51,7 +54,7 @@ advanced options. The extracted `payload` directory must stay beside the EXE.
 
 ## Manual installation
 
-Extract the v1.0.1 portable ZIP directly over the AviUtl2 root. It already
+Extract the v1.1.0 portable ZIP directly over the AviUtl2 root. It already
 contains `data\Plugin\x264guiEx-FreeRenderFPS`. Keep
 `x264guiEx-FreeRenderFPS.aux2` and its three adjacent INI files together. Do not
 copy Debug, PDB, probe, watcher, or breakpoint artifacts.

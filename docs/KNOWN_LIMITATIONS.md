@@ -1,6 +1,6 @@
-# Known limitations — v1.0.1
+# Known limitations — v1.1.0
 
-- FreeFPS supports AviUtl2 v2.1.4 x64 only. Its guarded private hook rejects
+- The built-in FreeFPS hook supports AviUtl2 v2.1.4 x64 only. Its guarded private hook rejects
   unknown host image/signature combinations.
 - AviUtl2's observed output cache uses an integer frame key. FreeFPS uses a
   neighbor-frame eviction workaround. Since 1.0.1 the eviction render is reused
@@ -21,5 +21,6 @@
 - The AviUtl 1.x adapter supports official AviUtl 1.10 + ExEdit 0.92 only. Its
   sub-frame precision is 0.01 project frame, and the last output sample may be
   clamped to the final project frame.
-- The 1.0.1 binaries have not yet been re-validated inside AviUtl2 or AviUtl 1.x;
-  the measured matrices are from 1.0.0.
+- The 1.1.0 AviUtl2 binary has not yet been validated inside AviUtl2 v2.1.12
+  (Free FPS Export) or v2.1.4 (built-in hook); the AviUtl 1.x package is still
+  1.0.1 and has not been re-validated. The measured matrices are from 1.0.0.
