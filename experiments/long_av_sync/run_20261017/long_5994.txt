@@ -1,0 +1,17 @@
+文件: D:\AviUtl Free Render FPS\test_kit\2_长视频音画同步\out\long_5994.mp4
+目标帧率: 59.9401  时间戳来源: ffprobe pts
+视频帧数: 解码 107892 / 期望 107892
+闪白数: 1800  嘀声数: 1800  配对数: 1800
+音画偏移 (ms, 正值 = 画面晚于声音):
+  最大值 +8.33  最小值 -8.33  最大绝对值 8.33
+  均值 +0.01  首1分钟均值 +0.58  末1分钟均值 -0.05
+  线性回归斜率 -0.004 ms/min
+时长 (s):
+  视频 1799.997 (start 0.000)  音频 1799.998 (start 0.000)
+  相对误差 (V-A)/A = -0.0001 %
+判定:
+  [PASS] max |offset| <= half target frame + encode tolerance: 8.33 ms <= 28.34 ms
+  [PASS] |drift slope| <= limit: -0.004 ms/min, limit 1.0 ms/min
+  [PASS] |(V - A) / A| <= 0.01 %: -0.0001 %
+  [PASS] flash/beep one-to-one: unmatched flashes 0, beeps 0, duplicates 0
+总判定: PASS

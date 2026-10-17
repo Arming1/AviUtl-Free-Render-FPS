@@ -14,7 +14,7 @@
   cross-check (160 of 160 pairs on 2026-10-17).
 - Long-duration test (`tests/aup2_upconvert/test_long_duration.py`, `run_long.ps1`): 108 host-free cases of 30 and
   60 minutes, checking boundary error, drift, total duration and audio/picture start frames.
-- 30-minute audio-video sync kit (`experiments/long_av_sync/`). It has not yet been run in AviUtl2.
+- 30-minute audio-video sync kit (`experiments/long_av_sync/`). It has been run in AviUtl2 v2.1.12 (see Verification below).
 
 ### Changed
 
@@ -23,12 +23,24 @@
 
 ### Validation status
 
-- Precise mode is verified by host-free tests and the C++/Python cross-check only. Not yet run in AviUtl2 v2.1.12:
-  rebuild the plugin first. Test plan: `experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md`.
-- Not yet verified in AviUtl2: whether values with extra decimals are accepted and kept on load, and the 30-minute
-  audio-video sync.
+- Precise mode is verified by host-free tests, the C++/Python cross-check and in-host runs on AviUtl2 v2.1.12
+  (see Verification below).
+- Not yet verified in AviUtl2: whether values with extra decimals are accepted and kept on load.
 - Known limit: the last output frame of a linear move may end 1.74 px past the original endpoint (30 → 60000/1001),
   or short of it (66 → 24 ends at 197.87).
+
+### Verification
+
+- In-host precise-mode matrix on AviUtl2 v2.1.12 (2026-10-17): all eight cases PASS (60→66, 72→60, 30→60000/1001,
+  66→24, 66→120, 120→60, 60→50, 72→59). Frame counts match, motion residuals are 0.125–0.226 px against a 1.0 px
+  limit, with zero stalls and zero reversals, and speed error is at most 0.007% against the original project slope.
+- The same videos fail the older non-precise `retimed` motion model at 30→60000/1001 and 66→24 (1.75 px and 2.13 px),
+  which confirms that the export took the precise path.
+- 30-minute audio-video sync passes at 66, 50 and 60000/1001 fps: max |offset| ≤ 8.33 ms, drift ≤ 0.004 ms/min,
+  duration error ≤ 0.0001%, and all 1800 flash/beep pairs matched one-to-one.
+- Test binary: the user's installed plugin (`C:\ProgramData\aviutl2\Plugin\x264guiEx-FreeRenderFPS\x264guiEx-FreeRenderFPS.aux2`), SHA-256 `114C307016679E852674DF7A974889CACF4E340449DA475578C3A1A259F6076B`, identical to `dist\AviUtl2-FreeRenderFPS-v1.1.0`.
+- Details and evidence: `docs/VALIDATION_MATRIX.md` (section "AviUtl2 v2.1.12 — Free FPS Export（精确运动模式）"),
+  `experiments/free_fps_matrix/run_20261017_precise/` and `experiments/long_av_sync/run_20261017/`.
 
 ## [1.1.0] — 2026-10-17
 

@@ -23,9 +23,15 @@ v1.1.0 puts Free FPS Export into the single AviUtl2 plugin file; see
   `Plugin` (opt-in; it never deletes).
 - Adds the `.aup2` retimer tool, host-free tests and validation tools.
 
-The release gates and measurements below are v1.0.0 results. The 1.1.0 AviUtl2
-binary still needs in-host validation on AviUtl2 v2.1.12 (Free FPS Export) and
-v2.1.4 (built-in hook). The AviUtl 1.x package is still v1.0.1 and needs
+The release gates and measurements below are v1.0.0 results. Free FPS Export was
+checked in-host on AviUtl2 v2.1.12 on 2026-10-17: 8 conversions with Precise motion
+enabled (frame counts equal the expected values, no duplicate or reversed frames,
+motion residual 0.12–0.23 px against a 1.0 px limit), and a 30-minute A/V sync run
+at 66, 50 and 60000/1001 fps (all PASS; maximum offset 0.00 ms at 66 and 50 fps,
+±8.33 ms, half a frame, at 60000/1001). The tested binary was
+`x264guiEx-FreeRenderFPS.aux2` (version resource 1.1.0, SHA256 114C3070…6076B,
+repacked 2026-10-17 17:52, contains Precise motion); the first 1.1.0 build did
+not contain precise mode. The built-in hook on AviUtl2 v2.1.4 still needs in-host validation. The AviUtl 1.x package is still v1.0.1 and needs
 re-validation on AviUtl 1.10 + ExEdit 0.92.
 
 ## Download

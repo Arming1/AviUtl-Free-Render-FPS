@@ -15,9 +15,9 @@ v1.1.0 将自由帧率导出放入单一 AviUtl2 插件文件，详见 [CHANGELO
 - 安装器可将旧版 `.auo2` 安装迁移为 `.aux2`，备份保存在 `Plugin` 之外。`--cleanup-legacy-backups` 可把旧备份文件夹移出 `Plugin`（需显式启用，且只移动不删除）。
 - 新增 `.aup2` 帧率转换工具、宿主无关测试和验证工具。
 
-下方的发布门禁和旧版 Hook 实测表格是 v1.0.0 的结果。1.1.0 的 Free FPS Export 已在 AviUtl2
-v2.1.12 上实测 8 组（见“Free FPS Export 实测”）。1.1.0 的内置 Hook 尚待在 AviUtl2 v2.1.4 上实测。
-AviUtl 1.x 包仍为 v1.0.1，尚待在 AviUtl 1.10 + ExEdit 0.92 上重新实测。
+下方的发布门禁和旧版 Hook 实测表格是 v1.0.0 的结果。Free FPS Export 已于 2026-10-17 在
+AviUtl2 v2.1.12 上实机测试：精确运动模式 8 组转换和 30 分钟音画同步 3 段，全部通过（见“Free FPS Export 实测”）。测试二进制为 `x264guiEx-FreeRenderFPS.aux2`（版本资源 1.1.0，SHA256 114C3070…6076B，2026-10-17 17:52 重新打包，含 Precise motion）；首版 1.1.0 构建不含精确模式。
+1.1.0 的内置 Hook 尚待在 AviUtl2 v2.1.4 上实测。AviUtl 1.x 包仍为 v1.0.1，尚待在 AviUtl 1.10 + ExEdit 0.92 上重新实测。
 
 ## 下载
 
@@ -86,15 +86,15 @@ INI 放在一起；runtime 位于 `Plugins\exe_files`，预设位于
 
 同一个 `x264guiEx-FreeRenderFPS.aux2` 还会在 AviUtl2 的 **编辑（Edit）** 菜单中加入
 **Free FPS Export...**。在 AviUtl2 v2.1.12 上请用它获得自由渲染帧率：插件用公开 SDK
-接口重新排布工程时间并导出，可输出任意有理数 FPS。导出前需先把工程保存为文件。2026-10-17 在 v2.1.12 上实测 8 组，见下文“Free FPS Export 实测”；按重定时后的运动模型，8 组运动检查全部通过（残差 0.146–0.192 px）。长时长漂移的宿主外测试（108 组）已通过；30 分钟音画同步尚未在宿主中导出。
+接口重新排布工程时间并导出，可输出任意有理数 FPS。导出前需先把工程保存为文件。2026-10-17 在 v2.1.12 上实测 8 组，见下文“Free FPS Export 实测”；按重定时后的运动模型，8 组运动检查全部通过（残差 0.146–0.192 px）。长时长漂移的宿主外测试（108 组）已通过；30 分钟音画同步已在宿主中导出并通过（见下文）。
 
-### 精确模式（未发布，需重新构建插件）
+### 精确模式（Precise motion）
 
 对话框的 **Precise motion (exact speed for linear motion)** 复选框默认勾选。勾选时，直线移动（`直線移動,0`）与常量轨迹的关键帧值会按原曲线在新时刻重新取值，因此直线运动速度与原工程一致；关键帧位置不变。其他模式（加減速、補間、時間制御、`|` 载荷、イージング 等）的对象保持不变，并列在 `.convert.json` 的 `precise.skipped` 中。
 
 - 数值保留原行的小数位。2 位小数时，短而幅度小的段速度误差最大约 0.025%；命令行 `--precise-extra-decimals 2` 时最大约 0.000076%。AviUtl2 是否接受额外小数位，尚未在宿主中验证。
 - 最后一个输出帧可能略微超过或不足原终点：30 → 60000/1001 终点为 201.74（超出 1.74 px），66 → 24 终点为 197.87。
-- 本模式尚未在 AviUtl2 v2.1.12 上实测，1.1.0 构建不含此功能。测试计划见 [experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md](experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md)。
+- 本模式已在 AviUtl2 v2.1.12 上实测通过（测试二进制 `x264guiEx-FreeRenderFPS.aux2`，版本资源 1.1.0，SHA256 114C3070…6076B，2026-10-17 17:52 重新打包，含 Precise motion，见下文）；首版 1.1.0 构建不含精确模式。测试计划见 [experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md](experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md)。
 - 规则与限制见 [tools/aup2_fps_upconvert.md](tools/aup2_fps_upconvert.md) 的“Precise mode”一节。
 
 ## FPS 预设
@@ -121,6 +121,37 @@ Custom。内部使用有理数 rate/scale；59.94 对应 60000/1001。
 终点偏差是运动到达终点的时刻与原工程相比的差，以输出帧计。上限为 |1/源帧率 − 1/目标帧率| + 半个输出帧。
 30 → 59.94 实测 +21.65 ms（1.30 输出帧，上限约 25.0 ms），66 → 24 实测 −26.5 ms（0.64 输出帧，上限约 47 ms）。运动模型按重定时后的帧范围计算；早期按原工程时间计算的模型把 66 → 24 和
 30 → 59.94 判为 FAIL，已弃用。详见 [tools/aup2_fps_upconvert.md](tools/aup2_fps_upconvert.md)。
+
+### 精确运动模式实测（AviUtl2 v2.1.12，2026-10-17）
+
+勾选 **Precise motion** 后同样 8 组，结果在 `experiments/free_fps_matrix/run_20261017_precise/`。测试二进制为 `x264guiEx-FreeRenderFPS.aux2`（版本资源 1.1.0，SHA256 114C3070…6076B，2026-10-17 17:52 重新打包，含 Precise motion）。
+
+| 工程 → 目标 | 帧数（= 期望值） | 状态 |
+|---|---:|---|
+| 60 → 66 | 330 | PASS |
+| 72 → 60 | 300 | PASS |
+| 30 → 59.94 (60000/1001) | 300 | PASS |
+| 66 → 24 | 120 | PASS |
+| 66 → 120 | 600 | PASS |
+| 120 → 60 | 300 | PASS |
+| 60 → 50 | 250 | PASS |
+| 72 → 59 | 295 | PASS |
+
+全部 8 组：零重复帧，无反向运动；运动最大残差 0.12–0.23 px（上限 1.0 px）；实测速度与原工程速度的相对误差最大 0.007%（72 → 60），全部不超过 0.01%。
+
+### 30 分钟音画同步实测（AviUtl2 v2.1.12，2026-10-17）
+
+工程 `long_sync_60fps.aup2`，每秒一次闪白加嘀声，共 1800 对，结果在 `experiments/long_av_sync/run_20261017/`。测试二进制为 `x264guiEx-FreeRenderFPS.aux2`（版本资源 1.1.0，SHA256 114C3070…6076B，2026-10-17 17:52 重新打包，含 Precise motion）。
+
+| 目标 (fps) | 帧数（实测 / 期望） | 音画偏移最大值 | 漂移斜率 | 时长误差 | 状态 |
+|---|---|---|---|---|---|
+| 66 | 118800 / 118800 | 0.00 ms | 0.000 ms/min | 0.0000% | PASS |
+| 50 | 90000 / 90000 | 0.00 ms | 0.000 ms/min | 0.0000% | PASS |
+| 60000/1001 | 107892 / 107892 | ±8.33 ms（取整在半帧以内，均值 +0.01 ms） | −0.004 ms/min | −0.0001% | PASS |
+
+三段的 1800 对闪白与嘀声均一一配对。
+
+以上测量的是画面几何位置（运动残差）、帧数和音画时间，不验证颜色或编码质量。
 
 ## 旧版 AviUtl2 Hook 实测（v1.0.0）
 
@@ -173,7 +204,7 @@ ExEdit detour，是 x86 `.auo` 输出插件。x264/FFmpeg/L-SMASH 作为独立�
 - 旧版适配器的 ExEdit 子帧余数精度为 0.01 个工程帧，并使用受保护的整数帧缓存
   eviction；最后输出样本可能被钳制到项目末帧。
 - 旧版包目前直接验证了 30 → 60，扩展矩阵仍待重新生成实际媒体。
-- 精确模式（`--precise`，未发布）尚未在 AviUtl2 中验证，1.1.0 构建不含此功能；额外小数位与宿主读取后的量化尚未验证。
+- 精确模式（`--precise`，未发布）已在 AviUtl2 v2.1.12 上实测通过（测试二进制 `x264guiEx-FreeRenderFPS.aux2`，版本资源 1.1.0，SHA256 114C3070…6076B，含 Precise motion）；首版 1.1.0 构建不含精确模式，精确模式尚未正式发布。额外小数位与宿主读取后的量化尚未验证。
 
 详见 [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)。
 
