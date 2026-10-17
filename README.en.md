@@ -8,6 +8,23 @@ FPS. For example, a 30 FPS project rendered at 60 FPS is evaluated at 0.0,
 0.5, 1.0, 1.5... project-frame coordinates. It is not frame duplication and
 not an FPS-metadata trick.
 
+## v1.0.1
+
+v1.0.1 is a maintenance release; see [CHANGELOG.md](CHANGELOG.md).
+
+- AviUtl 1.x: release builds no longer write the per-frame diagnostic log
+  `freerenderfps_aviutl1_probe.log`.
+- AviUtl 1.x: the host copy-frame flag is ignored while FreeRenderFPS is
+  active, so the previous image is never resent.
+- Both hosts: hook installation and removal suspend threads safely.
+- A second concurrent export is rejected without unhooking the active one.
+- Cache-eviction renders are reused: 30 → 60 needs one render per output frame
+  (previously 1.5).
+- The AviUtl 1.x package no longer contains a default `.conf`.
+
+The release gates and measurements below are v1.0.0 results. The 1.0.1 binaries
+still need in-host re-validation on AviUtl2 v2.1.4 and AviUtl 1.10 + ExEdit 0.92.
+
 ## Download
 
 **AviUtl2 v1.0.0 release gates pass.** It bundles source-corresponding, exact-hash
@@ -16,12 +33,12 @@ setup/portable package-only encodes pass.
 
 The legacy AviUtl 1.x package is a separate Win32 build for AviUtl 1.10 and
 ExEdit 0.92. It is available at
-`dist\AviUtl1-FreeRenderFPS-v1.0.0` and is distributed as a manual-install
+`dist\AviUtl1-FreeRenderFPS-v1.0.1` and is distributed as a manual-install
 portable ZIP; the AviUtl host itself is not included.
 
 ## One-click installation
 
-1. Extract the complete v1.0.0 setup ZIP.
+1. Extract the complete v1.0.1 setup ZIP.
 2. Run its adjacent setup EXE.
 3. Restart AviUtl2.
 4. Select `x264guiEx FreeRenderFPS`.
@@ -34,13 +51,13 @@ advanced options. The extracted `payload` directory must stay beside the EXE.
 
 ## Manual installation
 
-Extract the v1.0.0 portable ZIP directly over the AviUtl2 root. It already
+Extract the v1.0.1 portable ZIP directly over the AviUtl2 root. It already
 contains `data\Plugin\x264guiEx-FreeRenderFPS`. Keep the four formal adjacent
 files together. Do not copy Debug, PDB, probe, watcher, or breakpoint artifacts.
 
 ### Legacy AviUtl 1.x (Win32)
 
-Extract `AviUtl1-FreeRenderFPS-v1.0.0-portable.zip` over an AviUtl 1.10 root
+Extract `AviUtl1-FreeRenderFPS-v1.0.1-portable.zip` over an AviUtl 1.10 root
 with ExEdit 0.92. Keep `Plugins\x264guiEx-FreeRenderFPS.auo` and its three
 same-basename INIs together. The package places the external runtime under
 `Plugins\exe_files` and presets under `Plugins\x264guiEx-FreeRenderFPS_stg`.
@@ -141,7 +158,7 @@ msbuild .\src\x264guiEx-FreeFPS\x264guiEx\x264guiEx.vcxproj /t:Rebuild /p:Config
 ```
 
 The packaged legacy output is kept under
-`dist\AviUtl1-FreeRenderFPS-v1.0.0`.
+`dist\AviUtl1-FreeRenderFPS-v1.0.1`.
 
 ## Credits
 

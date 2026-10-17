@@ -6,6 +6,20 @@ FreeRenderFPS 基于 x264guiEx，同时提供 AviUtl2 和旧版 AviUtl 1.x 的�
 可让场景求值采样率独立于工程 FPS。例如 30 FPS 工程输出 60 FPS 时，会真实求值
 0.0、0.5、1.0、1.5……工程帧坐标，而不是复制帧或只修改容器 FPS 元数据。
 
+## v1.0.1 更新
+
+v1.0.1 是维护版本，详见 [CHANGELOG.md](CHANGELOG.md)：
+
+- AviUtl 1.x：发布版不再逐帧写入 `freerenderfps_aviutl1_probe.log` 诊断日志。
+- AviUtl 1.x：开启 FreeRenderFPS 时忽略宿主的复制帧标记，不会再误发上一帧画面。
+- 两个宿主：安装/卸载时间轴 Hook 时的线程挂起更安全，不会再因内存锁卡死。
+- 第二个同时进行的导出会被拒绝，并且不会拆掉正在进行的导出的 Hook。
+- 清缓存时顺带渲染的整数帧会被复用：30 → 60 每个输出帧只需渲染一次（原为 1.5 次）。
+- AviUtl 1.x 包不再附带默认 `.conf`，解压不会覆盖用户设置。
+
+下方的发布门禁和实测表格是 v1.0.0 的结果；1.0.1 二进制尚待在 AviUtl2 v2.1.4
+与 AviUtl 1.10 + ExEdit 0.92 上重新实测。
+
 ## 下载
 
 **AviUtl2 v1.0.0 发布门禁已通过。** 包内包含源码可对应、固定哈希并完成许可证审计的
@@ -13,12 +27,12 @@ x264、LGPL FFmpeg 和 ISC L-SMASH runtime。完整 FPS 矩阵、setup 与 porta
 仅依赖最终包的干净环境真实编码均已通过。
 
 AviUtl 1.x 版本是面向 AviUtl 1.10 + ExEdit 0.92 的独立 Win32 构建，位于
-`dist\AviUtl1-FreeRenderFPS-v1.0.0`，提供手动安装 portable ZIP；包内不包含
+`dist\AviUtl1-FreeRenderFPS-v1.0.1`，提供手动安装 portable ZIP；包内不包含
 AviUtl 宿主本体。
 
 ## 一键安装
 
-1. 完整解压 v1.0.0 setup ZIP。
+1. 完整解压 v1.0.1 setup ZIP。
 2. 双击其中与 `payload` 相邻的 setup EXE。
 3. 重启 AviUtl2。
 4. 选择 `x264guiEx FreeRenderFPS`。
@@ -31,14 +45,14 @@ AviUtl 宿主本体。
 
 ## 手动安装
 
-将 v1.0.0 portable ZIP 直接解压到 AviUtl2 根目录；包内已包含
+将 v1.0.1 portable ZIP 直接解压到 AviUtl2 根目录；包内已包含
 `data\Plugin\x264guiEx-FreeRenderFPS`。必须保持正式 AUO2 与三个相邻 INI
 同名同目录，
 不要复制 Debug、PDB、Probe、watcher 或断点工具，也不要重命名正式文件。
 
 ### 旧版 AviUtl 1.x（Win32）
 
-将 `AviUtl1-FreeRenderFPS-v1.0.0-portable.zip` 解压到 AviUtl 1.10 根目录，
+将 `AviUtl1-FreeRenderFPS-v1.0.1-portable.zip` 解压到 AviUtl 1.10 根目录，
 并保持 `Plugins` 结构。`Plugins\x264guiEx-FreeRenderFPS.auo` 必须与三个同名
 INI 放在一起；runtime 位于 `Plugins\exe_files`，预设位于
 `Plugins\x264guiEx-FreeRenderFPS_stg`。不要把 AUO 重命名为旧的
@@ -131,7 +145,7 @@ ExEdit detour，是 x86 `.auo` 输出插件。x264/FFmpeg/L-SMASH 作为独立�
 msbuild .\src\x264guiEx-FreeFPS\x264guiEx\x264guiEx.vcxproj /t:Rebuild /p:Configuration=Release /p:Platform=Win32
 ```
 
-已打包的旧版输出位于 `dist\AviUtl1-FreeRenderFPS-v1.0.0`。
+已打包的旧版输出位于 `dist\AviUtl1-FreeRenderFPS-v1.0.1`。
 
 ## 致谢
 

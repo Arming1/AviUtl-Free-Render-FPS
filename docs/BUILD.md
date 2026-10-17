@@ -1,4 +1,4 @@
-# Building AviUtl2 FreeRenderFPS v1.0.0
+# Building FreeRenderFPS v1.0.1
 
 ## Supported build target
 
@@ -59,6 +59,18 @@ The script:
 The installer EXE is intentionally accompanied by a `payload` directory inside
 the setup ZIP. Extract the whole ZIP before running it.
 
+### AviUtl 1.x package
+
+Build the AviUtl2 package first (it produces the third-party sources ZIP that
+both packages share), then run:
+
+    .\tools\package_aviutl1_release.ps1
+
+It rebuilds the Release Win32 plugin, rejects a version mismatch, probe-log
+code, debug CRT imports, unaudited binaries, and any `.conf`, then writes
+`dist\AviUtl1-FreeRenderFPS-<label>` with a portable ZIP, an expanded `payload`
+and SHA-256 manifests. It refuses to overwrite an existing release folder.
+
 ## Third-party runtime build
 
 Run `tools/build_third_party.ps1` against the pinned MSYS2 and Visual Studio
@@ -86,4 +98,5 @@ See [RUNTIME_DEPENDENCIES.md](RUNTIME_DEPENDENCIES.md).
 - SHA-256 values regenerated after the last source change.
 
 The v1.0.0 identity, corrected portable layout, installer lifecycle, and final
-setup/portable package-only smoke encodes have been validated.
+setup/portable package-only smoke encodes have been validated. v1.0.1 packages
+are produced by the same scripts; their in-host validation is pending.

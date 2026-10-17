@@ -8,9 +8,24 @@ independent from the project FPS. A 30 FPS project can therefore render genuine
 60 FPS states at coordinates 0.0, 0.5, 1.0, 1.5… It does not copy frames or
 merely change FPS metadata.
 
-## v1.0.0
+## v1.0.1
 
-Release gates pass on AviUtl2 v2.1.4 x64:
+v1.0.1 is a maintenance release; see [CHANGELOG.md](CHANGELOG.md).
+
+- AviUtl 1.x: release builds no longer write the per-frame diagnostic log
+  `freerenderfps_aviutl1_probe.log`.
+- AviUtl 1.x: the host copy-frame flag is ignored while FreeRenderFPS is
+  active, so the previous image is never resent.
+- Both hosts: hook installation and removal suspend threads safely.
+- A second concurrent export is rejected without unhooking the active one.
+- Cache-eviction renders are reused: 30 → 60 needs one render per output frame
+  (previously 1.5).
+- The AviUtl 1.x package no longer contains a default `.conf`.
+
+The release gates and measurements below are v1.0.0 results. The 1.0.1 binaries
+still need in-host re-validation on AviUtl2 v2.1.4 and AviUtl 1.10 + ExEdit 0.92.
+
+Release gates passed by v1.0.0 on AviUtl2 v2.1.4 x64:
 
 - FreeFPS OFF compatibility output passes.
 - 30 → 60, 66 → 60, 66 → 59.94, 66 → 24, 66 → 120 and 120 → 60 pass.
@@ -25,7 +40,7 @@ Only AviUtl2 v2.1.4 x64 is supported. Unknown host signatures fail closed.
 
 The AviUtl 1.x adapter supports official AviUtl 1.10 + ExEdit 0.92 only and is
 distributed as an x86 `.auo` manual-install package at
-`dist\AviUtl1-FreeRenderFPS-v1.0.0`. Its current direct media validation covers
+`dist\AviUtl1-FreeRenderFPS-v1.0.1`. Its current direct media validation covers
 30 → 60 with real continuous-motion sub-frame evaluation and preserved audio
 duration; the remaining legacy FPS matrix cases are explicitly pending.
 

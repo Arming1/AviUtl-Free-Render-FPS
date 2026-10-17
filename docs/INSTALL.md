@@ -1,4 +1,4 @@
-# Installing FreeRenderFPS v1.0.0
+# Installing FreeRenderFPS v1.0.1
 
 Supported host: AviUtl2 v2.1.4 x64. Close AviUtl2 before installation.
 

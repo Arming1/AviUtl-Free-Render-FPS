@@ -2,10 +2,12 @@
 param(
     [string]$Configuration = 'Release',
     [string]$Platform = 'x64',
-    [string]$ReleaseLabel = 'v1.0.0',
-    [string]$OutputRoot = (Join-Path $PSScriptRoot '..\dist\AviUtl2-FreeRenderFPS-v1.0.0'),
-    [string]$ThirdPartyRoot = (Join-Path $PSScriptRoot '..\build\third_party\artifacts'),
-    [string]$InstallerProject = (Join-Path $PSScriptRoot 'installer\FreeRenderFPS.Installer.csproj'),
+    [string]$ReleaseLabel = 'v1.0.1',
+    # Path defaults are resolved below: Windows PowerShell 5.1 leaves
+    # $PSScriptRoot empty while evaluating param() defaults under -File.
+    [string]$OutputRoot = '',
+    [string]$ThirdPartyRoot = '',
+    [string]$InstallerProject = '',
     [switch]$SkipBuild,
     [switch]$SkipInstallerBuild,
     [switch]$KeepStaging,
@@ -15,6 +17,12 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if (-not $OutputRoot) { $OutputRoot = Join-Path $PSScriptRoot "..\dist\AviUtl2-FreeRenderFPS-$ReleaseLabel" }
+# The audited runtime set locked by THIRD_PARTY_MANIFEST.json (rc2a FFmpeg
+# with the fd protocol). build\third_party\artifacts holds an older FFmpeg.
+if (-not $ThirdPartyRoot) { $ThirdPartyRoot = Join-Path $PSScriptRoot '..\build\third_party\rc2a-fixed\artifacts' }
+if (-not $InstallerProject) { $InstallerProject = Join-Path $PSScriptRoot 'installer\FreeRenderFPS.Installer.csproj' }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $sourceRoot = Join-Path $repoRoot 'src\x264guiEx-FreeFPS'

@@ -1,7 +1,7 @@
 # FreeRenderFPS RC installer
 
 This directory contains the source for the managed Windows installer used by
-the v1.0.0 package. It accepts only the four formal adjacent plugin files, the
+the v1.0.1 package. It accepts only the four formal adjacent plugin files, the
 exact-hash audited x264/FFmpeg/L-SMASH runtime, `.stg` presets, manifests and
 documentation. It rejects unknown executables, DLLs, debug artifacts and
 unapproved payload files.

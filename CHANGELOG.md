@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.0.1] — 2026-10-17
+
+Maintenance release for the AviUtl2 and AviUtl 1.x builds.
+
+### Fixed
+
+- AviUtl 1.x: release builds no longer append `freerenderfps_aviutl1_probe.log`
+  on every frame request; the diagnostic trace is compiled only with
+  `FREEFPS_AVIUTL1_PROBE_LOG=1`.
+- AviUtl 1.x: the host copy-frame flag is ignored while FreeRenderFPS is active.
+  It was queried with the output sample index and could resend the previous
+  image.
+- Both hosts: installing or removing the timeline hook no longer allocates
+  memory while other threads are suspended, and refuses to patch while a thread
+  is executing the bytes being rewritten.
+- A second concurrent export is rejected without removing the active export's
+  hook.
+- The AviUtl 1.x package no longer ships a default `x264guiEx-FreeRenderFPS.conf`,
+  so extracting it cannot overwrite user settings.
+
+### Changed
+
+- Cache-eviction renders are reused once when the next sample needs exactly
+  that integer coordinate: 30 → 60 now costs one host render per output frame
+  instead of 1.5, and 30 → 120 drops from 1.75 to 1.25.
+
+### Added
+
+- Host-free scheduler test harness in `tests/freefps_scheduler` (x64 and x86).
+- `tools/package_aviutl1_release.ps1` for the AviUtl 1.x package.
+
+### Validation status
+
+- Release x64/Win32 builds and the host-free harness pass. The in-host FPS
+  matrix (AviUtl2 v2.1.4; AviUtl 1.10 + ExEdit 0.92) has not yet been re-run on
+  the 1.0.1 binaries; `docs/VALIDATION_MATRIX.md` and
+  `docs/LEGACY_AVIUTL1_VALIDATION.md` record the 1.0.0 results.
+
 ## [1.0.0] — 2026-08-13
 
 - Added audited x264, LGPL FFmpeg and ISC L-SMASH runtime with separate source
