@@ -1,4 +1,4 @@
-# Known limitations — v1.1.0
+# Known limitations — v1.1.0 and Unreleased (precise motion)
 
 - The built-in FreeFPS hook supports AviUtl2 v2.1.4 x64 only. Its guarded private hook rejects
   unknown host image/signature combinations.
@@ -27,17 +27,27 @@
   steps match the targets. The retimed motion check passes all eight, with
   residuals of 0.146–0.192 px against a 1.0 px limit. Results are in
   `experiments/free_fps_matrix/run_20261017/`.
-- Free FPS Export rounds each object's last frame to the new rate, so a linear
-  motion ends at `e'/Rt` instead of `e/Rp`. The end-time deviation is bounded by
-  `|1/Rp − 1/Rt| + half an output frame`. Measured: +21.65 ms (1.30 output frames)
-  for 30→60000/1001, bound about 25.0 ms; −26.5 ms (0.64 output frames) for 66→24,
-  bound about 47 ms. See `tools/aup2_fps_upconvert.md`, "Motion endpoints".
-- Long-duration cumulative drift and audio-video sync are not yet reported. They
-  are being checked with host-free tests and a 30-minute real-footage run.
-- A speed-error target of ≤ 0.01% needs the `--precise` mode, which is being
-  implemented and is not in the 1.1.0 build. It re-samples linear-move keyframe
-  values from the original curve at the new times (plugin dialog default: on).
-  Its end is extrapolated by at most about one output frame.
+- Without precise motion, Free FPS Export rounds each object's last frame to the new
+  rate, so a linear motion ends at `e'/Rt` instead of `e/Rp`. The end-time deviation
+  is bounded by `|1/Rp − 1/Rt| + half an output frame`. Measured: +21.65 ms (1.30
+  output frames) for 30→60000/1001, bound about 25.0 ms; −26.5 ms (0.64 output
+  frames) for 66→24, bound about 47 ms. See `tools/aup2_fps_upconvert.md`, "Motion
+  endpoints".
+- Long-duration timing: host-free tests pass for 108 cases (30 and 60 minutes × 6
+  source rates × 9 targets). Boundary error is at most half an output frame, drift is
+  not cumulative (maximum 0.008 frame), total duration relative error is at most
+  0.000463 %, and objects that start on the same frame keep the same start frame.
+  Audio-video sync over 30 minutes has not been run in AviUtl2. The kit is in
+  `experiments/long_av_sync/`.
+- Precise motion (`--precise`, plugin checkbox on by default) is implemented in the
+  Python tool and the C++ port, and is not in the 1.1.0 build. It re-samples the
+  trackbar values of linear moves and constant tracks from the original curve, so
+  the speed matches the original. Limits: other effects are unchanged and their
+  objects are listed in `precise.skipped`; the last frame may end past the original
+  endpoint (30→60000/1001 ends at 201.74, +1.74 px) or short of it (66→24 ends at
+  197.87). Not verified in AviUtl2: extra decimals (`--precise-extra-decimals`, command
+  line only) and whether AviUtl2 rounds the values again. The C++ port refuses on 64-bit
+  overflow; the Python tool does not. Plan: `experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md`.
 - The built-in FreeFPS hook (v2.1.4) has not been validated with the 1.1.0 binary.
   The AviUtl 1.x package is still 1.0.1 and has not been re-validated. The
   measured AviUtl 1.x matrices are from 1.0.0.

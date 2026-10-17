@@ -53,6 +53,9 @@ PRECISE_LINEAR_MODE = "直線移動"
 PRECISE_LINEAR_PARAM = "0"
 # --precise: tracks in these modes are left unchanged and do not make their object ineligible.
 PRECISE_EXEMPT_MODES = frozenset({"再生範囲"})
+# --precise: an object with exactly two frame= points that are equal has no segment; it is skipped with this reason
+# (the same text as experiments/free_fps_export/retime.cpp precise_problem()).
+PRECISE_ZERO_LENGTH_REASON = "frame= start equals end; there is no segment to resample"
 # --precise: a track whose quantization error is above this share of its value range gets a note.
 PRECISE_NOTE_RATIO = Fraction(1, 10000)  # 0.01 %
 
@@ -293,7 +296,8 @@ def precise_resample(lines, effect_lines, section_of, object_frame_lines, frame_
     """Resample trackbar values at the new keyframes from the exact original curve (--precise).
 
     An object is resampled only when every trackbar of it (except PRECISE_EXEMPT_MODES) passes
-    precise_track_problem; otherwise it keeps its old values and is listed as skipped.
+    precise_track_problem, and its frame= list is not two equal points (PRECISE_ZERO_LENGTH_REASON);
+    otherwise it keeps its old values and is listed as skipped.
     A resampled track is written with its own decimal count d plus extra_decimals.
     Returns (bodies, report): bodies maps a trackbar line index to its rewritten text, report is the
     "precise" object of the JSON (it has "extra_decimals" only when extra_decimals > 0).
@@ -322,6 +326,9 @@ def precise_resample(lines, effect_lines, section_of, object_frame_lines, frame_
             values = [Fraction(x) for x in parts[:-2]]
             problem = precise_track_problem(idx + 1, parts[-2], parts[-1], values)
             if problem:
+                break
+            if len(frames) == 2 and frames[0] == frames[1]:
+                problem = PRECISE_ZERO_LENGTH_REASON
                 break
             parsed.append((idx, key, parts, values))
         if problem:

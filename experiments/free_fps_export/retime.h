@@ -38,6 +38,26 @@ struct RetimeObjectTiming {
     bool shortened = false;
 };
 
+struct PreciseSkip {
+    std::size_t line = 0;                  // line of the object's frame= (1-based)
+    std::string reason;
+};
+
+struct PreciseTrack {
+    std::size_t object_line = 0;           // line of the object's frame= (1-based)
+    std::size_t line = 0;                  // line of the trackbar row (1-based)
+    std::string max_quant_error;           // 6 decimals
+    std::string max_quant_error_pct;       // percent of the range (max - min of the old values), 6 decimals
+    std::string end_extrapolation;         // new last value - old last value, 6 decimals
+};
+
+struct PreciseReport {
+    std::size_t extra_decimals = 0;        // written to the sidecar only when > 0
+    std::size_t applied = 0;               // objects with at least one trackbar, all of them re-sampled
+    std::vector<PreciseSkip> skipped;
+    std::vector<PreciseTrack> tracks;
+};
+
 struct RetimeResult {
     bool ok = false;
     std::size_t refusal_line = 0;          // 1-based; 0 when the refusal is not about one line
@@ -55,6 +75,7 @@ struct RetimeResult {
     std::string max_start_error_s;
     std::string max_end_error_s;
     std::vector<RetimeObjectTiming> objects;
+    std::optional<PreciseReport> precise;  // set only in precise mode; the sidecar has no "precise" key otherwise
 };
 
 // "REFUSED: line N: reason", or "REFUSED: reason" when no line applies (same text as the Python tool).
@@ -63,10 +84,16 @@ std::string refusal_message(const RetimeResult& result);
 // Re-times in_utf8 (the complete .aup2 file bytes, optional UTF-8 BOM) to the exact target rate.
 // out_path is written into the [project] file= line, so pass the absolute output path (the Python
 // tool writes os.path.abspath(--out)). Never touches the file system.
-RetimeResult retime(std::string_view in_utf8, Rational target, std::wstring out_path);
+// precise: also re-samples the trackbars of each eligible object at the new keyframes, exactly (see PreciseReport).
+// Off by default, and then the output is the same as without the arguments.
+// precise_extra_decimals: precise mode only; each re-sampled row gets this many decimals more than its own
+// largest decimal count (0 keeps the row's own count).
+RetimeResult retime(std::string_view in_utf8, Rational target, std::wstring out_path, bool precise = false,
+                    std::size_t precise_extra_decimals = 0);
 
 // Factor mode: target = scene rate * factor, video.scale unchanged. factor must be >= 2.
-RetimeResult retime_factor(std::string_view in_utf8, std::int64_t factor, std::wstring out_path);
+RetimeResult retime_factor(std::string_view in_utf8, std::int64_t factor, std::wstring out_path,
+                           bool precise = false, std::size_t precise_extra_decimals = 0);
 
 // Sidecar JSON with the layout of the Python tool's <out>.convert.json (indent 2, LF, UTF-8).
 // in_path and out_path must be absolute paths, as the Python tool records them.

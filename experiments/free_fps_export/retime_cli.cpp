@@ -1,6 +1,6 @@
 // Command line wrapper around the pure re-timer, for tests/crosscheck.py.
 // Mirrors the Python tool's arguments and refusals:
-//   retime_cli.exe --in IN --out OUT (--factor K | --target-fps RATE) [--force]
+//   retime_cli.exe --in IN --out OUT (--factor K | --target-fps RATE) [--force] [--precise [--precise-extra-decimals N]]
 // Exit codes: 0 converted, 2 refused or usage error. Writes OUT and OUT.convert.json.
 
 #include <windows.h>
@@ -68,7 +68,8 @@ bool write_file(const std::wstring& path, const std::string& bytes) {
 }
 
 int usage() {
-    say("usage: retime_cli --in IN --out OUT (--factor K | --target-fps RATE) [--force]");
+    say("usage: retime_cli --in IN --out OUT (--factor K | --target-fps RATE) [--force] [--precise "
+        "[--precise-extra-decimals N]]");
     return 2;
 }
 
@@ -98,12 +99,22 @@ int wmain(int argc, wchar_t** argv) {
     bool have_factor = false;
     bool have_target = false;
     bool force = false;
+    bool precise = false;
+    long long extra_decimals = 0;
     long long factor = 0;
 
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--force") {
             force = true;
+        } else if (arg == L"--precise") {
+            precise = true;
+        } else if (i + 1 < argc && arg == L"--precise-extra-decimals") {
+            std::string text;
+            free_fps::wide_to_utf8(argv[++i]).swap(text);
+            if (!parse_int(text, extra_decimals)) {
+                return usage();
+            }
         } else if (i + 1 < argc && arg == L"--in") {
             in_arg = argv[++i];
         } else if (i + 1 < argc && arg == L"--out") {
@@ -139,6 +150,15 @@ int wmain(int argc, wchar_t** argv) {
             return 2;
         }
     }
+    if (extra_decimals < 0 || extra_decimals > 4) {
+        say("REFUSED: --precise-extra-decimals must be an integer from 0 to 4, got " +
+            std::to_string(extra_decimals));
+        return 2;
+    }
+    if (extra_decimals > 0 && !precise) {
+        say("REFUSED: --precise-extra-decimals needs --precise");
+        return 2;
+    }
 
     const std::wstring in_path = full_path(in_arg);
     const std::wstring out_path = full_path(out_arg);
@@ -171,8 +191,9 @@ int wmain(int argc, wchar_t** argv) {
         return 2;
     }
 
-    RetimeResult result = have_factor ? free_fps::retime_factor(in_bytes, factor, out_path)
-                                      : free_fps::retime(in_bytes, target, out_path);
+    const std::size_t extra = static_cast<std::size_t>(extra_decimals);
+    RetimeResult result = have_factor ? free_fps::retime_factor(in_bytes, factor, out_path, precise, extra)
+                                      : free_fps::retime(in_bytes, target, out_path, precise, extra);
     if (!result.ok) {
         say(free_fps::refusal_message(result));
         return 2;

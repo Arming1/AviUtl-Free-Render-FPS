@@ -9,7 +9,8 @@
 // Flow (one run at a time, driven by a 100 ms thread timer on the host main thread):
 //   1. Project path: taken from the project load and save callbacks (PROJECT_FILE::get_project_file_path,
 //      plugin2.h). A project with no path is refused: save it first.
-//   2. Dialog: target FPS (exact rational: 66, 60000/1001; decimals refused) and output file.
+//   2. Dialog: target FPS (exact rational: 66, 60000/1001; decimals refused), output file, and the precise motion
+//      option (on by default: linear trackbars are re-sampled exactly; see retime.h).
 //   3. Confirm: the SDK has no unsaved-changes flag, so the user is always asked whether to save the project to its
 //      own path first. No (or closing the prompt) aborts with no side effects.
 //   4. save_project_file(original) once confirmed, then copy the saved original to
@@ -85,6 +86,7 @@ constexpr int kStateSave = EDIT_HANDLE::EDIT_STATE_SAVE;
 constexpr int kIdRate = 101;
 constexpr int kIdOutput = 102;
 constexpr int kIdBrowse = 103;
+constexpr int kIdPrecise = 104;
 
 LOG_HANDLE* g_logger = nullptr;
 EDIT_HANDLE* g_edit = nullptr;
@@ -271,6 +273,7 @@ bool output_written(const std::wstring& path, const FILETIME& since, long long& 
 
 struct ExportRequest {
     Rational target;
+    bool precise = true;
     std::wstring output;
     std::wstring plugin;
     std::wstring original;  // the project file path, set by begin_export()
@@ -375,7 +378,8 @@ void tick(Run& run) {
             fail(run, L"cannot read the temp copy: " + run.src_path);
             return;
         }
-        const RetimeResult result = free_fps::retime(src_bytes, run.request.target, run.retimed_path);
+        const RetimeResult result =
+            free_fps::retime(src_bytes, run.request.target, run.retimed_path, run.request.precise);
         if (!result.ok) {
             fail(run, to_wide(free_fps::refusal_message(result)));
             return;
@@ -564,6 +568,7 @@ bool begin_export(ExportRequest request) {
 struct DialogValues {
     std::wstring rate;
     std::wstring output;
+    bool precise = true;
 };
 
 class TemplateBuilder {
@@ -635,6 +640,8 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
     switch (message) {
     case WM_INITDIALOG:
         SetWindowLongPtrW(dlg, DWLP_USER, lparam);
+        CheckDlgButton(dlg, kIdPrecise,
+                       reinterpret_cast<DialogValues*>(lparam)->precise ? BST_CHECKED : BST_UNCHECKED);
         return TRUE;
 
     case WM_COMMAND:
@@ -686,6 +693,7 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
             }
             values->rate = rate;
             values->output = output;
+            values->precise = IsDlgButtonChecked(dlg, kIdPrecise) == BST_CHECKED;
             EndDialog(dlg, IDOK);
             return TRUE;
         }
@@ -701,11 +709,11 @@ bool ask_for_request(HWND owner, DialogValues& values) {
     const DWORD style = DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU;
     t.dword(style);
     t.dword(0);
-    t.word(7);  // item count
+    t.word(8);  // item count
     t.word(0);
     t.word(0);
     t.word(262);
-    t.word(90);
+    t.word(104);
     t.word(0);  // no menu
     t.word(0);  // default class
     t.text(kTitle);
@@ -719,8 +727,10 @@ bool ask_for_request(HWND owner, DialogValues& values) {
     add_item(t, static_style, 7, 38, 248, 10, 0xFFFF, 0x0082, L"Output file");
     add_item(t, edit_style, 7, 48, 200, 14, kIdOutput, 0x0081, L"");
     add_item(t, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 211, 48, 44, 14, kIdBrowse, 0x0080, L"Browse...");
-    add_item(t, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 146, 68, 50, 14, IDOK, 0x0080, L"OK");
-    add_item(t, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 200, 68, 50, 14, IDCANCEL, 0x0080, L"Cancel");
+    add_item(t, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, 7, 66, 248, 12, kIdPrecise, 0x0080,
+             L"Precise motion (exact speed for linear motion)");
+    add_item(t, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 146, 84, 50, 14, IDOK, 0x0080, L"OK");
+    add_item(t, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 200, 84, 50, 14, IDCANCEL, 0x0080, L"Cancel");
 
     const INT_PTR result = DialogBoxIndirectParamW(g_instance, reinterpret_cast<LPCDLGTEMPLATEW>(t.data()), owner,
                                                    dialog_proc, reinterpret_cast<LPARAM>(&values));
@@ -751,6 +761,7 @@ void on_menu(void*) {
     }
     ExportRequest request;
     request.target = target;
+    request.precise = values.precise;
     request.output = values.output;
     request.plugin = g_output_name;
     begin_export(request);

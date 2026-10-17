@@ -86,7 +86,16 @@ INI 放在一起；runtime 位于 `Plugins\exe_files`，预设位于
 
 同一个 `x264guiEx-FreeRenderFPS.aux2` 还会在 AviUtl2 的 **编辑（Edit）** 菜单中加入
 **Free FPS Export...**。在 AviUtl2 v2.1.12 上请用它获得自由渲染帧率：插件用公开 SDK
-接口重新排布工程时间并导出，可输出任意有理数 FPS。导出前需先把工程保存为文件。2026-10-17 在 v2.1.12 上实测 8 组，见下文“Free FPS Export 实测”；按重定时后的运动模型，8 组运动检查全部通过（残差 0.146–0.192 px）。长时长累积漂移与音画同步仍在验证中。
+接口重新排布工程时间并导出，可输出任意有理数 FPS。导出前需先把工程保存为文件。2026-10-17 在 v2.1.12 上实测 8 组，见下文“Free FPS Export 实测”；按重定时后的运动模型，8 组运动检查全部通过（残差 0.146–0.192 px）。长时长漂移的宿主外测试（108 组）已通过；30 分钟音画同步尚未在宿主中导出。
+
+### 精确模式（未发布，需重新构建插件）
+
+对话框的 **Precise motion (exact speed for linear motion)** 复选框默认勾选。勾选时，直线移动（`直線移動,0`）与常量轨迹的关键帧值会按原曲线在新时刻重新取值，因此直线运动速度与原工程一致；关键帧位置不变。其他模式（加減速、補間、時間制御、`|` 载荷、イージング 等）的对象保持不变，并列在 `.convert.json` 的 `precise.skipped` 中。
+
+- 数值保留原行的小数位。2 位小数时，短而幅度小的段速度误差最大约 0.025%；命令行 `--precise-extra-decimals 2` 时最大约 0.000076%。AviUtl2 是否接受额外小数位，尚未在宿主中验证。
+- 最后一个输出帧可能略微超过或不足原终点：30 → 60000/1001 终点为 201.74（超出 1.74 px），66 → 24 终点为 197.87。
+- 本模式尚未在 AviUtl2 v2.1.12 上实测，1.1.0 构建不含此功能。测试计划见 [experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md](experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md)。
+- 规则与限制见 [tools/aup2_fps_upconvert.md](tools/aup2_fps_upconvert.md) 的“Precise mode”一节。
 
 ## FPS 预设
 
@@ -164,6 +173,7 @@ ExEdit detour，是 x86 `.auo` 输出插件。x264/FFmpeg/L-SMASH 作为独立�
 - 旧版适配器的 ExEdit 子帧余数精度为 0.01 个工程帧，并使用受保护的整数帧缓存
   eviction；最后输出样本可能被钳制到项目末帧。
 - 旧版包目前直接验证了 30 → 60，扩展矩阵仍待重新生成实际媒体。
+- 精确模式（`--precise`，未发布）尚未在 AviUtl2 中验证，1.1.0 构建不含此功能；额外小数位与宿主读取后的量化尚未验证。
 
 详见 [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)。
 

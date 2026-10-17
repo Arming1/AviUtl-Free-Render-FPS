@@ -3,7 +3,7 @@
 
 Usage:
     python -I experiments/free_fps_matrix/analyze.py RUN_DIR [--label TEXT]
-        [--only ID[,ID...]] [--timeline retimed|original]
+        [--only ID[,ID...]] [--timeline retimed|original|precise]
         [--ffmpeg PATH] [--ffprobe PATH]
 
 RUN_DIR holds one MP4 per case, named <case_id>.mp4 (ids from cases.json).
@@ -18,6 +18,10 @@ For each selected case the script runs:
             (Free FPS Export). Motion runs over the retimed frame range s', e'.
   original  the source fixture's frame range is used unchanged. This is the
             plugin Hook path (dry_run_simulated samples, not retimed exports).
+  precise   the --precise export (tools/aup2_fps_upconvert.py): the line follows the
+            original path in original time, x = X_start + (X_end - X_start)·(t - s/Rp)/T,
+            is held at X_start before the retimed start s'/Rt and is not clamped at X_end,
+            so it runs on to the retimed last frame e'/Rt. The window s', e' is the retimed one.
 The original-time model is always computed as a diagnostic, together with the
 end-time deviation T' - T.
 
@@ -57,16 +61,24 @@ CASES_PATH = HERE / "cases.json"
 MOTION_TOL_PX = 1.0   # max |measured centroid x - model x(t)| allowed
 MASK_DELTA = 30       # object pixels: |Y - frame median luma| > MASK_DELTA
 STEP_EPS_PX = 0.05    # consecutive centroids closer than this are a zero step
-TIMELINE_MODES = ("retimed", "original")
+TIMELINE_MODES = ("retimed", "original", "precise")
 ENDPOINT_NOTE = "已知近似：直线移动终点对齐到重定时后的最后一帧，终点时间偏差 ≤ |1/源帧率 − 1/目标帧率| + 半个输出帧"
 TIMELINE_TITLE = {
     "retimed": "重定时帧范围 (Free FPS Export)",
     "original": "原工程帧范围 (插件 Hook 路径样本, 未重定时)",
+    "precise": "精确模式 (--precise): 沿原工程直线延续到重定时后最后一帧",
 }
 TIMELINE_FORMULA = {
     "retimed": ("起点 t_s = s'/目标帧率, T' = (e' - s')/目标帧率, s' = rhu(s·k), e' = rhu((e+1)·k) - 1, "
                 "k = 目标帧率/源帧率, rhu = 四舍五入向上 (与 tools/aup2_fps_upconvert.py 的 rescale_frames 相同)"),
     "original": "起点 t_s = 0, T = (末帧 - 首帧)/源帧率",
+    "precise": ("窗口 s'/目标帧率 .. e'/目标帧率 (s', e' 与 retimed 相同), 原工程 T = (e - s)/源帧率, "
+                "x(t) 的原点为 s/源帧率"),
+}
+MODEL_FORMULA = {
+    "retimed": "x(t) = W/2 + X_start + (X_end - X_start)·min(max(t - t_s, 0), T)/T, t = n / 目标帧率",
+    "original": "x(t) = W/2 + X_start + (X_end - X_start)·min(max(t - t_s, 0), T)/T, t = n / 目标帧率",
+    "precise": "x(t) = W/2 + X_start + (X_end - X_start)·(t - s/源帧率)/T, t = n / 目标帧率 (不截断, 对象开始前保持 X_start)",
 }
 EXIT_OK, EXIT_FAIL, EXIT_ERROR = 0, 1, 2
 
@@ -99,14 +111,37 @@ class Fixture:
 
 @dataclass(frozen=True)
 class Timeline:
-    """Linear 直線移動 model: X reaches X_end at start + span seconds and holds there."""
+    """Linear 直線移動 model over the motion window [start, end] on the output timeline.
+
+    retimed / original: X reaches X_end at start + span seconds and holds there.
+    precise: u(t) = (t - origin) / travel_span, not clamped. Before start the value is
+    held at X_start; after end the line keeps going (extrapolated), as the --precise
+    trackbar values do. origin = s/Rp and travel_span = T are in original-project time.
+    """
     name: str
-    start: Fraction  # seconds on the output timeline
-    span: Fraction   # seconds
+    start: Fraction  # seconds on the output timeline: start of the motion window
+    span: Fraction   # seconds: length of the motion window (end - start)
+    origin: Fraction | None = None       # precise only: output time at which u = 0
+    travel_span: Fraction | None = None  # precise only: seconds for u = 0 -> 1
+    extrapolate: bool = False            # precise only: do not clamp u at the window end
 
     @property
     def end(self) -> Fraction:
         return self.start + self.span
+
+    @property
+    def travel(self) -> Fraction:
+        """Seconds for the travel X_start -> X_end (equal to span unless travel_span is set)."""
+        return self.span if self.travel_span is None else self.travel_span
+
+    def fraction(self, t: Fraction) -> Fraction:
+        """Fraction of the X_start -> X_end travel at output time t (may exceed 1 when extrapolating)."""
+        if t < self.start:
+            return Fraction(0)
+        origin = self.start if self.origin is None else self.origin
+        if not self.extrapolate:
+            t = min(t, self.end)
+        return (t - origin) / self.travel
 
 
 def fstr(value: Fraction) -> str:
@@ -201,6 +236,17 @@ def retimed_timeline(fixture: Fixture, target: Fraction) -> tuple[Timeline, dict
     return timeline, {"k": fstr(k), "first_frame": new_first, "last_frame": new_last}
 
 
+def precise_timeline(fixture: Fixture, retimed: Timeline) -> Timeline:
+    """Motion model of the --precise export (see Timeline).
+
+    The window [s'/Rt, e'/Rt] is the retimed one. The line is the original line in original
+    time: origin s/Rp, travel T = (e - s)/Rp, the same as original_timeline() for s = 0.
+    """
+    return Timeline("precise", retimed.start, retimed.span,
+                    origin=Fraction(fixture.first_frame) / fixture.rate,
+                    travel_span=fixture.motion_span, extrapolate=True)
+
+
 def probe_dimensions(ffprobe: str, path: Path) -> tuple[int, int]:
     proc = subprocess.run(
         [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
@@ -258,9 +304,11 @@ def motion_check(cx: np.ndarray, cy: np.ndarray, counts: np.ndarray, fixture: Fi
 
     Model (AviUtl centre convention, to be confirmed by the fit diagnostics):
         x0 = W/2 + X_start,  x1 = W/2 + X_end,  y = H/2 + Y_start
-        x(t) = x0 + (x1 - x0) * min(max(t - start, 0), span) / span,  t = n / target
+        x(t) = x0 + (x1 - x0) * timeline.fraction(t),  t = n / target
+    For retimed / original, fraction = min(max(t - start, 0), span) / span, so frames after
+    the end are held at x1. For precise the fraction is not clamped (see Timeline).
     Only frames with start <= t <= end are used for monotonicity, zero-step and the
-    linear-fit diagnostics; frames after the end are held at x1 by the model.
+    linear-fit diagnostics.
     """
     n = cx.shape[0]
     x0 = fixture.width / 2 + float(fixture.x_start)
@@ -270,7 +318,7 @@ def motion_check(cx: np.ndarray, cy: np.ndarray, counts: np.ndarray, fixture: Fi
     if span <= 0:
         raise InputError("motion span must be positive")
     times = [Fraction(i) / target for i in range(n)]
-    model = np.array([x0 + (x1 - x0) * float(min(max(t - timeline.start, 0), span) / span) for t in times])
+    model = np.array([x0 + (x1 - x0) * float(timeline.fraction(t)) for t in times])
     in_motion = [i for i in range(n) if timeline.start <= times[i] <= timeline.end]
     in_idx = np.array(in_motion, dtype=np.int64)
 
@@ -308,7 +356,7 @@ def motion_check(cx: np.ndarray, cy: np.ndarray, counts: np.ndarray, fixture: Fi
         "zero_steps": zero_steps,
         "strictly_monotonic": reversals == 0 and zero_steps == 0,
         "model": {"timeline": timeline.name, "start_s": float(timeline.start), "x0": x0, "x1": x1, "y0": y0,
-                  "T_seconds": float(span), "slope_px_per_s": (x1 - x0) / float(span)},
+                  "T_seconds": float(timeline.travel), "slope_px_per_s": (x1 - x0) / float(timeline.travel)},
         "fit": {"slope_px_per_s": fit_slope, "intercept_px": fit_intercept, "max_abs_residual_px": fit_max_resid},
     }
     rows = []
@@ -358,7 +406,8 @@ def analyse_case(case: dict, run_dir: Path, analysis_dir: Path, ffmpeg: str, ffp
     target = Fraction(case["target_fps"])
     retimed, retime_info = retimed_timeline(fixture, target)
     original = original_timeline(fixture)
-    primary = retimed if timeline_mode == "retimed" else original
+    precise = precise_timeline(fixture, retimed)
+    primary = {"retimed": retimed, "original": original, "precise": precise}[timeline_mode]
     delta = retimed.span - original.span
     # Theoretical bound on |T' - T|. With e' = rhu((e+1)k) - 1 and s' = rhu(s*k), the end term
     # gives e'/Rt - e/Rp = (1/Rp - 1/Rt) + delta_e/Rt with |delta_e| <= 1/2; the start term adds
@@ -440,8 +489,7 @@ def render_summary(result: dict) -> str:
         "",
         "- validator: `tools/validate_freefps_output.py`, `--project-fps` = `--target-fps` = 目标帧率, `--project-frames` = 期望输出帧数。",
         f"- 运动检查: 每帧用 luma 与中位数之差 > {MASK_DELTA} 的像素求质心 x。"
-        f"模型 x(t) = W/2 + X_start + (X_end - X_start)·min(max(t - t_s, 0), T)/T, t = n / 目标帧率; "
-        f"{TIMELINE_FORMULA[mode]}。"
+        f"模型 {MODEL_FORMULA[mode]}; {TIMELINE_FORMULA[mode]}。"
         f"残差上限 {MOTION_TOL_PX} px; 相邻帧 |Δx| < {STEP_EPS_PX} px 记为零步; 要求零反向、零零步、无缺失质心。",
         "",
         "| 用例 | 源 fixture | 目标 FPS | 期望帧 | 期望时长 (s) | 实际帧 | validator | 运动最大残差 (px) | 零步 | 反向 | 结论 |",
@@ -515,6 +563,8 @@ def render_summary(result: dict) -> str:
         "不是名义 5 s。这一点需要宿主实测确认。",
         "- `original` 模式用原工程 frame= 行推出的 T = (末帧 - 首帧)/源帧率。它只适用于插件 Hook 路径样本 "
         "(dry_run_simulated), 这些样本没有经过重定时导出。",
+        "- `precise` 模式对应 `--precise` 导出: 直线沿原工程时间走 (速度与原工程相同), 不在原终点截断, "
+        "一直延续到重定时后对象的最后一帧 e'/目标帧率。非精确导出 (如 1.1.0 矩阵) 在该模式下预期 FAIL。",
         "- x0/x1 取 W/2 + X 值 (AviUtl 画面中心约定), 通过残差与拟合截距检验。",
         "- 结论只覆盖 luma 像素导出的几何位置。不证明颜色、音频或编码器正确性。",
         "",
@@ -538,8 +588,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--label", default="REAL", help="label written into SUMMARY.md and summary.json")
     parser.add_argument("--only", help="comma-separated case ids to check (default: all)")
     parser.add_argument("--timeline", choices=TIMELINE_MODES, default="retimed",
-                        help="motion model for PASS/FAIL: retimed (Free FPS Export, default) or "
-                             "original (plugin Hook samples, not retimed)")
+                        help="motion model for PASS/FAIL: retimed (Free FPS Export, default), "
+                             "original (plugin Hook samples, not retimed) or precise (--precise export)")
     parser.add_argument("--ffmpeg", type=Path, help="ffmpeg executable (default: PATH)")
     parser.add_argument("--ffprobe", type=Path, help="ffprobe executable (default: PATH)")
     args = parser.parse_args(argv)

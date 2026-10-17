@@ -1129,6 +1129,31 @@ def test_precise_skips_ineligible_objects_and_ignores_playback_range():
     assert "Z=5.50,5.50,補間移動,0" in out_text, "constant track must pass unchanged"
 
 
+def test_precise_skips_zero_length_two_point_object():
+    # frame=10,10 has no segment: --precise must skip it (not divide by zero) and keep the plain output.
+    d = case_dir("precise_zero_len")
+    src = os.path.join(d, "zero.aup2")
+    text = read_text_lf(FIX_30).replace("frame=0,149", "frame=10,10", 1)
+    text = text.replace("X=-200.00,200.00,直線移動,0", "X=0.00,0.00,直線移動,0", 1)
+    text = text.replace("Y=0.00,0.00,直線移動,0", "Y=0.00,50.00,直線移動,0", 1)
+    write_bytes(src, text.encode("utf-8"))
+    line_frame = line_number_of(src, "frame=10,10")
+    out_precise = os.path.join(d, "precise.aup2")
+    out_plain = os.path.join(d, "plain.aup2")
+    code, _, err = convert_target(src, out_precise, "60000/1001", extra=["--precise"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    code, _, err = convert_target(src, out_plain, "60000/1001")
+    assert code == 0, "plain: exit %d: %s" % (code, err)
+    precise = read_report(out_precise)["precise"]
+    assert precise["applied"] == 0 and precise["tracks"] == [], precise
+    assert precise["skipped"] == [{"line": line_frame,
+                                   "reason": "frame= start equals end; there is no segment to resample"}], precise
+    assert without_file_line(read_bytes(out_precise)) == without_file_line(read_bytes(out_plain)), \
+        "skipped zero-length object must keep the plain output"
+    assert "Y=0.00,50.00,直線移動,0" in read_text_lf(out_precise), "changing track must be left unchanged"
+    assert "precise" not in read_report(out_plain), sorted(read_report(out_plain))
+
+
 def test_precise_extra_decimals_2_meets_speed_target_on_short_segments():
     name, base, frames, x_values = COLLINEAR_OBJECTS[0]
     d, src = multi_point_fixture(name + "_extra", base, frames, x_values)
@@ -1257,6 +1282,7 @@ TESTS = [
     test_precise_worked_examples_end_values,
     test_precise_property_values_and_speed,
     test_precise_skips_ineligible_objects_and_ignores_playback_range,
+    test_precise_skips_zero_length_two_point_object,
     test_precise_note_when_quantization_error_is_large,
     test_precise_off_by_default_adds_no_json_fields,
     test_precise_extra_decimals_2_meets_speed_target_on_short_segments,

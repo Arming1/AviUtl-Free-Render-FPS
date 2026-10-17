@@ -87,6 +87,60 @@ bool contains(const std::string& text, const std::string& needle) {
     return text.find(needle) != std::string::npos;
 }
 
+// The fixtures are CRLF in a Windows checkout (core.autocrlf) and LF elsewhere, so line-based needles are matched
+// after dropping the CR of each CRLF pair. Only CR immediately before LF is dropped.
+std::string strip_eol_cr(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n') {
+            continue;
+        }
+        out.push_back(text[i]);
+    }
+    return out;
+}
+
+std::string to_lf(const std::string& text) {
+    return strip_eol_cr(text);
+}
+
+std::string to_crlf(const std::string& text) {
+    std::string out;
+    out.reserve(text.size() + text.size() / 16);
+    for (char c : text) {
+        if (c == '\n') {
+            out.push_back('\r');
+        }
+        out.push_back(c);
+    }
+    return out;
+}
+
+bool contains_lines(const std::string& text, const std::string& needle) {
+    return contains(strip_eol_cr(text), needle);
+}
+
+// True when the first LF of text is preceded by CR.
+bool is_crlf(const std::string& text) {
+    const std::size_t lf = text.find('\n');
+    return lf != std::string::npos && lf > 0 && text[lf - 1] == '\r';
+}
+
+// True when every LF in text is preceded by CR (crlf) or by no CR (!crlf).
+bool uniform_eol(const std::string& text, bool crlf) {
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != '\n') {
+            continue;
+        }
+        const bool has_cr = i > 0 && text[i - 1] == '\r';
+        if (has_cr != crlf) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 
 void test_parse_target() {
@@ -111,7 +165,8 @@ void test_fixture_30_to_66() {
     const RetimeResult r = retime_target(text, rate(66));
     check(r.ok, "fixture 30->66: converts", refusal_message(r));
     check(frame_line(r, "frame=") == "frame=0,329", "fixture 30->66: frame=0,329", frame_line(r, "frame="));
-    check(contains(r.output, "video.rate=66\n"), "fixture 30->66: video.rate=66");
+    check(contains_lines(r.output, "video.rate=66\n"), "fixture 30->66: video.rate=66");
+    check(uniform_eol(r.output, is_crlf(text)), "fixture 30->66: output line endings match input");
     check(r.target_rate == "66/1" && r.source_rate == "30/1" && r.k == "11/5", "fixture 30->66: rates as n/d");
     check(r.changes.size() == 3, "fixture 30->66: three changed lines (file, rate, frame)",
           std::to_string(r.changes.size()));
@@ -122,8 +177,9 @@ void test_fixture_30_to_ntsc() {
     const RetimeResult r = retime_target(text, rate(60000, 1001));
     check(r.ok, "fixture 30->60000/1001: converts", refusal_message(r));
     check(frame_line(r, "frame=") == "frame=0,299", "fixture 30->60000/1001: frame=0,299", frame_line(r, "frame="));
-    check(contains(r.output, "video.rate=60000\nvideo.scale=1001\n"),
+    check(contains_lines(r.output, "video.rate=60000\nvideo.scale=1001\n"),
           "fixture 30->60000/1001: video.rate=60000 and video.scale=1001");
+    check(uniform_eol(r.output, is_crlf(text)), "fixture 30->60000/1001: output line endings match input");
     check(r.k == "2000/1001", "fixture 30->60000/1001: k = 2000/1001", r.k);
 }
 
@@ -136,6 +192,38 @@ void test_fixture_66_and_120() {
     const RetimeResult r120 = retime_target(t120, rate(60));
     check(r120.ok && frame_line(r120, "frame=") == "frame=0,299", "fixture 120->60: frame=0,299",
           refusal_message(r120));
+}
+
+// The key fixture cases on both line-ending styles, built in memory from the same LF text. Output must keep the
+// style of its input line for line.
+void test_fixture_eol_variants() {
+    const std::string base = to_lf(read_file(fixture_dir + "\\freerenderfps_30fps.aup2"));
+    check(!base.empty() && !is_crlf(base), "eol variants: LF base readable");
+    const std::string variants[] = {base, to_crlf(base)};
+    const bool crlf[] = {false, true};
+    for (int i = 0; i < 2; ++i) {
+        const std::string tag = crlf[i] ? "CRLF" : "LF";
+        const RetimeResult r66 = retime_target(variants[i], rate(66));
+        check(r66.ok && frame_line(r66, "frame=") == "frame=0,329" && contains_lines(r66.output, "video.rate=66\n") &&
+                  uniform_eol(r66.output, crlf[i]),
+              "eol " + tag + ": 30->66 keeps frame=0,329, video.rate=66 and " + tag + " line endings", refusal_message(r66));
+        const RetimeResult ntsc = retime_target(variants[i], rate(60000, 1001));
+        check(ntsc.ok && frame_line(ntsc, "frame=") == "frame=0,299" &&
+                  contains_lines(ntsc.output, "video.rate=60000\nvideo.scale=1001\n") &&
+                  uniform_eol(ntsc.output, crlf[i]),
+              "eol " + tag + ": 30->60000/1001 keeps frame=0,299, rate, scale and " + tag + " line endings",
+              refusal_message(ntsc));
+        const RetimeResult f2 = free_fps::retime_factor(variants[i], 2, L"D:\\out\\retimed.aup2");
+        check(f2.ok && frame_line(f2, "frame=") == "frame=0,299" && contains_lines(f2.output, "video.rate=60\nvideo.scale=1\n") &&
+                  uniform_eol(f2.output, crlf[i]),
+              "eol " + tag + ": factor 2 keeps frame=0,299, rate 60, scale and " + tag + " line endings",
+              refusal_message(f2));
+        const RetimeResult precise = free_fps::retime(variants[i], rate(60000, 1001), L"D:\\out\\retimed.aup2", true);
+        check(precise.ok && frame_line(precise, "X=") == "X=-200.00,201.74,直線移動,0" &&
+                  uniform_eol(precise.output, crlf[i]),
+              "eol " + tag + ": precise 30->60000/1001 rewrites X and keeps " + tag + " line endings",
+              refusal_message(precise));
+    }
 }
 
 void test_synthetic_60_to_66() {
@@ -215,8 +303,9 @@ void test_bom_and_crlf_preserved() {
 void test_factor_mode() {
     const std::string text = read_file(fixture_dir + "\\freerenderfps_30fps.aup2");
     const RetimeResult r = free_fps::retime_factor(text, 2, L"D:\\out\\retimed.aup2");
-    check(r.ok && contains(r.output, "video.rate=60\nvideo.scale=1\n") && frame_line(r, "frame=") == "frame=0,299",
+    check(r.ok && contains_lines(r.output, "video.rate=60\nvideo.scale=1\n") && frame_line(r, "frame=") == "frame=0,299",
           "factor 2: rate 60, scale kept, frame=0,299", refusal_message(r));
+    check(uniform_eol(r.output, is_crlf(text)), "factor 2: output line endings match input");
     check(r.factor && *r.factor == 2 && r.k == "2/1", "factor 2: factor and k = 2/1");
     const std::string json = free_fps::sidecar_json(r, L"D:\\in.aup2", L"D:\\out\\retimed.aup2");
     check(contains(json, "\"factor\": 2,"), "factor 2: sidecar has factor 2");
@@ -403,6 +492,150 @@ void test_refusals() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Precise mode. Trackbar rows are compared with frame_line(), which drops the CR of CRLF fixtures.
+// ---------------------------------------------------------------------------
+
+// 1-based line of the first occurrence of needle in text (0 when absent).
+std::size_t line_of_first(const std::string& text, const std::string& needle) {
+    std::size_t line = 1;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text.compare(i, needle.size(), needle) == 0) {
+            return line;
+        }
+        if (text[i] == '\n') {
+            ++line;
+        }
+    }
+    return 0;
+}
+
+void test_precise_fixtures() {
+    const std::string t30 = read_file(fixture_dir + "\\freerenderfps_30fps.aup2");
+    const RetimeResult ntsc = free_fps::retime(t30, rate(60000, 1001), L"D:\\out\\retimed.aup2", true);
+    check(ntsc.ok, "precise 30->60000/1001: converts", refusal_message(ntsc));
+    check(frame_line(ntsc, "frame=") == "frame=0,299", "precise 30->60000/1001: frame=0,299", frame_line(ntsc, "frame="));
+    check(frame_line(ntsc, "X=") == "X=-200.00,201.74,直線移動,0", "precise 30->60000/1001: X ends at 201.74",
+          frame_line(ntsc, "X="));
+    check(frame_line(ntsc, "Y=") == "Y=0.00,0.00,直線移動,0", "precise 30->60000/1001: constant Y unchanged",
+          frame_line(ntsc, "Y="));
+    check(ntsc.precise && ntsc.precise->applied == 1 && ntsc.precise->skipped.empty() &&
+              ntsc.precise->tracks.size() == 3,
+          "precise 30->60000/1001: one object applied, three trackbar rows reported");
+    check(ntsc.notes.empty(), "precise 30->60000/1001: no quantization warning (0.0009% of the change)");
+    if (ntsc.precise && !ntsc.precise->tracks.empty()) {
+        const free_fps::PreciseTrack& x = ntsc.precise->tracks[0];
+        check(x.object_line == 36 && x.line == 47, "precise: X report names object line 36 and row line 47",
+              std::to_string(x.object_line) + "/" + std::to_string(x.line));
+        check(x.max_quant_error == "0.003624", "precise: X max quantization error, 6 decimals", x.max_quant_error);
+        check(x.max_quant_error_pct == "0.000906", "precise: X error as % of the range, 6 decimals",
+              x.max_quant_error_pct);
+        check(x.end_extrapolation == "1.740000", "precise: X end extrapolation, 6 decimals", x.end_extrapolation);
+    }
+    const std::string ntsc_json = free_fps::sidecar_json(ntsc, L"D:\\in.aup2", L"D:\\out\\retimed.aup2");
+    check(contains(ntsc_json, "  \"notes\": [],\n  \"precise\": {\n    \"enabled\": true,\n    \"applied\": 1,\n"
+                              "    \"skipped\": [],\n    \"tracks\": [\n      {\n        \"object_line\": 36,\n"),
+          "precise: sidecar has the precise key after notes, with enabled, applied, skipped, tracks");
+    check(!contains(free_fps::sidecar_json(retime_target(t30, rate(60000, 1001)), L"D:\\in.aup2",
+                                           L"D:\\out\\retimed.aup2"),
+                    "\"precise\""),
+          "precise off: no precise key in the sidecar");
+
+    const RetimeResult extra = free_fps::retime(t30, rate(60000, 1001), L"D:\\out\\retimed.aup2", true, 2);
+    check(extra.ok && frame_line(extra, "X=") == "X=-200.0000,201.7436,直線移動,0",
+          "precise extra decimals 2: X has 4 decimals", frame_line(extra, "X="));
+
+    const RetimeResult f2 = free_fps::retime_factor(t30, 2, L"D:\\out\\retimed.aup2", true);
+    check(f2.ok && frame_line(f2, "X=") == "X=-200.00,201.34,直線移動,0", "precise factor 2: X ends at 201.34",
+          refusal_message(f2));
+
+    const std::string t66 = read_file(fixture_dir + "\\freerenderfps_66fps.aup2");
+    const RetimeResult p24 = free_fps::retime(t66, rate(24), L"D:\\out\\retimed.aup2", true);
+    check(p24.ok && frame_line(p24, "frame=") == "frame=0,119", "precise 66->24: frame=0,119", refusal_message(p24));
+    check(frame_line(p24, "X=") == "X=-200.00,197.87,直線移動,0", "precise 66->24: X ends at 197.87",
+          frame_line(p24, "X="));
+}
+
+void test_precise_off_is_unchanged() {
+    const std::string text = read_file(fixture_dir + "\\freerenderfps_30fps.aup2");
+    const RetimeResult plain = retime_target(text, rate(60000, 1001));
+    const RetimeResult off = free_fps::retime(text, rate(60000, 1001), L"D:\\out\\retimed.aup2", false);
+    check(plain.ok && off.ok && plain.output == off.output, "precise off: output identical to the default call");
+    check(frame_line(plain, "X=") == "X=-200.00,200.00,直線移動,0", "precise off: trackbar values unchanged",
+          frame_line(plain, "X="));
+    check(!plain.precise && !off.precise, "precise off: no precise report");
+    check(!contains(free_fps::sidecar_json(plain, L"D:\\in.aup2", L"D:\\out\\retimed.aup2"), "\"precise\""),
+          "precise off: sidecar has no precise key");
+}
+
+void test_precise_skips_ineligible_objects() {
+    const std::string body = "[0]\nlayer=0\nframe=0,29\n[0.0]\neffect.name=標準描画\nX=0.00,100.00,補間移動,0\n"
+                             "[1]\nlayer=1\nframe=0,29\n[1.0]\neffect.name=標準描画\nZ=0.00,50.00,直線移動,0\n"
+                             "[2]\nlayer=2\nframe=0,29\n[2.0]\neffect.name=標準描画\nW=0.00,100.00,直線移動,0\n"
+                             "R=0,29,再生範囲,1\n";
+    const std::string text = project(scene30(), body);
+    const RetimeResult r = retime_target(text, rate(60));
+    check(r.ok, "precise skip: converts without precise mode", refusal_message(r));
+    const RetimeResult p = free_fps::retime(text, rate(60), L"D:\\out\\retimed.aup2", true);
+    check(p.ok, "precise skip: converts in precise mode", refusal_message(p));
+    check(p.precise && p.precise->applied == 2, "precise skip: objects 1 and 2 applied");
+    check(p.precise && p.precise->skipped.size() == 1 &&
+              p.precise->skipped[0].line == line_of_first(text, "frame=0,29\n[0.0]") &&
+              contains(p.precise->skipped[0].reason, "補間移動"),
+          "precise skip: object 0 skipped at its frame= line, reason names the mode",
+          p.precise && !p.precise->skipped.empty() ? p.precise->skipped[0].reason : std::string("no skip"));
+    check(frame_line(p, "X=") == "X=0.00,100.00,補間移動,0", "precise skip: skipped row keeps its values",
+          frame_line(p, "X="));
+    check(frame_line(p, "Z=") == "Z=0.00,50.86,直線移動,0", "precise: eligible object 1 is re-sampled",
+          frame_line(p, "Z="));
+    check(frame_line(p, "W=") == "W=0.00,101.72,直線移動,0", "precise: eligible object 2 is re-sampled",
+          frame_line(p, "W="));
+    check(frame_line(p, "R=") == "R=0,29,再生範囲,1", "precise: 再生範囲 row is left alone", frame_line(p, "R="));
+}
+
+void test_precise_zero_length_skipped() {
+    // A 2-point object with start == end has no segment: the Python tool divides by zero there, the port skips it.
+    const std::string text = project(scene30(), "[0]\nlayer=0\nframe=5,5\n[0.0]\neffect.name=標準描画\n"
+                                                 "X=0.00,10.00,直線移動,0\n"
+                                                 "[1]\nlayer=1\nframe=5,5\n[1.0]\neffect.name=標準描画\n"
+                                                 "Y=3.00,3.00,直線移動,0\n");
+    const RetimeResult p = free_fps::retime(text, rate(60), L"D:\\out\\retimed.aup2", true);
+    check(p.ok && p.precise && p.precise->applied == 0 && p.precise->skipped.size() == 2 &&
+              p.precise->skipped[0].line == line_of_first(text, "frame=5,5\n[0.0]") &&
+              contains(p.precise->skipped[0].reason, "start equals end") &&
+              contains(p.precise->skipped[1].reason, "start equals end"),
+          "precise: a 2-point object with start == end is skipped, linear or constant", refusal_message(p));
+    check(frame_line(p, "Y=") == "Y=3.00,3.00,直線移動,0", "precise: the skipped constant row keeps its values");
+}
+
+void test_precise_rounding_warning() {
+    // 30 -> 15: the object becomes frames 0..4. At frame 4 the value is -1/900, which rounds to 0.00 (no "-0.00").
+    const std::string text = project(scene30(), "[0]\nlayer=0\nframe=0,9\n[0.0]\neffect.name=標準描画\n"
+                                                "X=-0.01,0.00,直線移動,0\n");
+    const RetimeResult p = free_fps::retime(text, rate(15), L"D:\\out\\retimed.aup2", true);
+    check(p.ok, "precise rounding: converts", refusal_message(p));
+    check(frame_line(p, "X=") == "X=-0.01,0.00,直線移動,0", "precise rounding: -1/900 rounds to 0.00, not -0.00",
+          frame_line(p, "X="));
+    check(p.precise && p.precise->tracks.size() == 1 && p.precise->tracks[0].max_quant_error == "0.001111" &&
+              p.precise->tracks[0].max_quant_error_pct == "11.111111" &&
+              p.precise->tracks[0].end_extrapolation == "0.000000",
+          "precise rounding: error 0.001111, 11.111111% of the range, end extrapolation 0.000000");
+    const std::string x_line = std::to_string(line_of_first(text, "X=-0.01"));
+    const std::string frame_line_no = std::to_string(line_of_first(text, "frame=0,9"));
+    check(p.notes.size() == 1 &&
+              contains(p.notes[0], "precise: trackbar at line " + x_line + " (object at line " + frame_line_no + ")") &&
+              contains(p.notes[0], "quantization error is 11.111111% of its range, above 0.01%"),
+          "precise rounding: warning in notes above 0.01%", p.notes.empty() ? "" : p.notes[0]);
+}
+
+void test_precise_overflow_refused() {
+    // 19 decimals: 10^19 does not fit in 64 bits.
+    const std::string text = project(scene30(), "[0]\nlayer=0\nframe=0,29\n[0.0]\neffect.name=標準描画\n"
+                                                "X=0.0000000000000000001,1.00,直線移動,0\n");
+    const RetimeResult p = free_fps::retime(text, rate(60), L"D:\\out\\retimed.aup2", true);
+    check(!p.ok && contains(p.refusal_reason, "overflow"), "precise: overflow is refused", refusal_message(p));
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -418,6 +651,7 @@ int main(int argc, char** argv) {
     test_fixture_30_to_66();
     test_fixture_30_to_ntsc();
     test_fixture_66_and_120();
+    test_fixture_eol_variants();
     test_synthetic_60_to_66();
     test_synthetic_72_to_60();
     test_touching_neighbours_survive();
@@ -427,6 +661,12 @@ int main(int argc, char** argv) {
     test_factor_mode();
     test_sidecar_shape();
     test_refusals();
+    test_precise_fixtures();
+    test_precise_off_is_unchanged();
+    test_precise_skips_ineligible_objects();
+    test_precise_zero_length_skipped();
+    test_precise_rounding_warning();
+    test_precise_overflow_refused();
     std::printf("%s (%d failure%s)\n", g_failures == 0 ? "ALL PASS" : "FAILED", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures == 0 ? 0 : 1;

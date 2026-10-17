@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Precise motion for Free FPS Export. The **Precise motion (exact speed for linear motion)** checkbox is on by
+  default. With it, the trackbar values of linear moves (`直線移動,0`) and constant tracks are re-sampled from the
+  original curve at the new keyframe times, so the speed of a linear move matches the original project. Keyframe
+  frames are unchanged. Other objects are left as they are and listed in the `precise.skipped` section of the
+  `.convert.json` sidecar.
+- `tools/aup2_fps_upconvert.py --precise` and `--precise-extra-decimals N` (0 to 4, needs `--precise`), with the same
+  options in the C++ re-timer (`retime_cli.exe`). The C++ and Python outputs are byte-identical in the
+  cross-check (160 of 160 pairs on 2026-10-17).
+- Long-duration test (`tests/aup2_upconvert/test_long_duration.py`, `run_long.ps1`): 108 host-free cases of 30 and
+  60 minutes, checking boundary error, drift, total duration and audio/picture start frames.
+- 30-minute audio-video sync kit (`experiments/long_av_sync/`). It has not yet been run in AviUtl2.
+
+### Changed
+
+- Documentation: the precise mode is described in `tools/aup2_fps_upconvert.md`, `docs/KNOWN_LIMITATIONS.md`,
+  `experiments/free_fps_export/README.md` and `README.zh-CN.md`. Earlier notes that it was "in progress" are removed.
+
+### Validation status
+
+- Precise mode is verified by host-free tests and the C++/Python cross-check only. Not yet run in AviUtl2 v2.1.12:
+  rebuild the plugin first. Test plan: `experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md`.
+- Not yet verified in AviUtl2: whether values with extra decimals are accepted and kept on load, and the 30-minute
+  audio-video sync.
+- Known limit: the last output frame of a linear move may end 1.74 px past the original endpoint (30 → 60000/1001),
+  or short of it (66 → 24 ends at 197.87).
+
 ## [1.1.0] — 2026-10-17
 
 Free render FPS on AviUtl2 through a single plugin file, plus installer and

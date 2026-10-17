@@ -13,6 +13,7 @@ Background and the field table: `docs/aup2_fps_upconvert_feasibility.md`.
 ```
 python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --factor K [--force] [--allow-frame-scripts]
 python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --target-fps RATE [--force] [--allow-frame-scripts]
+python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 (--factor K | --target-fps RATE) [--precise [--precise-extra-decimals N]]
 ```
 
 - Exactly one of `--factor` and `--target-fps` is required (argparse exits with code 2 if both or neither are given).
@@ -30,9 +31,13 @@ python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --target-fps R
   - every changed line (`line`, `old`, `new`; an inserted line has `old: null` and `inserted: true`);
   - `timing`: the largest start and end error in seconds (exact `n/d` strings) and, per object, the start and end
     error and whether the object was shortened;
-  - `notes`, a list that is empty when there is nothing to note.
+  - `notes`, a list that is empty when there is nothing to note;
+  - `precise`, present only with `--precise` (see "Precise mode").
 - `--allow-frame-scripts` converts despite frame-dependent script (see below). Each occurrence is printed to
   stderr as `WARNING: line N: ...` and also written to `notes`.
+- `--precise` re-samples the trackbar values of linear moves so that their speed matches the original project. See
+  "Precise mode". `--precise-extra-decimals N` (integer 0 to 4, default 0) writes re-sampled values with N more
+  decimals and requires `--precise`.
 
 ## Rate arithmetic
 
@@ -54,6 +59,7 @@ All of it is exact (`fractions.Fraction`); no floats are used in the conversion.
 | `[scene.N] cursor.frame`, `preview.frame`, `display.frame` | `round_half_up(v × k)` |
 | `[N] frame=s,e` (object) | start `s' = round_half_up(s × k)`, end `e' = round_half_up((e+1) × k) − 1` (see Object rules). |
 | `[N] frame=p0,p1,…,pn` (intermediate points) | `p0` uses the start rule, `pn` the end rule, each middle point `round_half_up(p × k)`. The result must be strictly increasing; otherwise the tool refuses. |
+| `[N] effect` trackbar values (only with `--precise`) | Re-sampled at the new keyframes for eligible objects. Other objects are unchanged. See "Precise mode". |
 
 Everything else is copied byte-for-byte: encoding, BOM (kept if present), CRLF or LF per line, seconds-based values
 (`audio.rate`, `再生位置`, tempo, `display.grid.*`), trackbar values, and unknown lines.
@@ -132,12 +138,68 @@ An earlier run modelled the motion on the original project timeline. It reported
 
 Every output frame is rendered at its own output time; none is a copy.
 
-Not yet verified: cumulative drift over long durations, and audio-video sync. Both are being checked with host-free
-tests and a 30-minute real-footage run.
+Long-duration timing is covered by host-free tests (see Tests). Audio-video sync over 30 minutes has not been run in
+AviUtl2 yet; the kit is in `experiments/long_av_sync/`.
 
-In progress, not in the 1.1.0 build: a `--precise` mode (the plugin dialog will check it by default). For linear
-moves it re-samples the keyframe values from the original curve at the new times. The speed error is then zero
-apart from quantization. The end of the motion is extrapolated by at most about one output frame.
+`--precise` is not in the 1.1.0 build. See the next section.
+
+## Precise mode (`--precise`)
+
+Without `--precise` no trackbar value is changed. Without it, the keyframe frames move but the values stay the same,
+so a linear move changes speed by the ratio of the old and new durations. With `--precise`, the values of eligible
+trackbars are re-sampled from the original curve at the new keyframe times, so a linear move keeps its original
+speed, apart from rounding.
+
+```
+python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --target-fps 66 --precise
+python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --target-fps 66 --precise --precise-extra-decimals 2
+```
+
+Rules (`precise_track_problem`, `precise_resample` in `tools/aup2_fps_upconvert.py`):
+
+- Keyframe frames (`frame=`) are not changed. Only trackbar values are.
+- A trackbar is eligible when its move mode is `直線移動` with parameter `0` (`直線移動,0`), or when all of its values
+  are equal (a constant track). `再生範囲` trackbars are left unchanged and do not block their object.
+- For an eligible trackbar, the value at each new keyframe frame `f'` is the exact value of the original
+  piecewise-linear curve at original frame `f'/k` (`k` as in "Rate arithmetic"). After the original last keyframe the
+  last segment is extended linearly. The arithmetic is exact (`fractions.Fraction`).
+- Each value is rounded half away from zero to the decimal count of its own original line, plus
+  `--precise-extra-decimals`. A track whose rounding error is above 0.01 % of its value range adds a note. This is
+  not a refusal.
+- An object is skipped, with all its values unchanged, if any other trackbar is not eligible (for example a
+  trackbar with changing values in `加減速`, `補間移動`, `時間制御` or `イージング`, or any trackbar whose value has a
+  `|` payload), or if its `frame=` is one frame (`frame=s,s`). Each skipped object is listed in `precise.skipped`
+  with its `frame=` line and a reason.
+- `--precise-extra-decimals N` must be an integer from 0 to 4 and needs `--precise`. Otherwise the tool refuses.
+
+Endpoints. The value at the new last keyframe is the original curve at that time, so the motion does not always end
+at the original endpoint. For 66 → 24 it stops at 197.87 (the output ends at 4.958 s, before the original 4.985 s).
+For 30 → 60000/1001 it ends at 201.74, which is 1.74 px past the original 200 because the output's last frame is
+after the original end and the last segment is extended.
+
+`.convert.json` gets a `precise` object only with `--precise`:
+
+- `enabled` (true), `extra_decimals` (only when N > 0), `applied` (number of re-sampled objects);
+- `skipped`: a list of `{line, reason}` where `line` is the object's `frame=` line;
+- `tracks`: one entry per re-sampled trackbar with `object_line`, `line`, `max_quant_error`,
+  `max_quant_error_pct`, `end_extrapolation`.
+
+Accuracy. The speed error comes only from rounding to the decimal count. The worst reported cases from the
+2026-10-17 checks are about 0.025 % for a short, low-amplitude segment at 2 decimals, and about 0.000076 % with
+`--precise-extra-decimals 2`.
+
+Limits:
+
+- Verified only by the host-free tests (`tests/aup2_upconvert/test_upconvert.py`) and by the C++/Python cross-check
+  (160 of 160 outputs byte-identical). Not yet run in AviUtl2 v2.1.12. The plan is in
+  `experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md`.
+- Not verified in AviUtl2: whether it accepts values with more decimals than its GUI shows, and whether it rounds
+  them again when the project is read.
+- Only linear moves and constant tracks become exact. Other effects keep their old values, so their speed changes as
+  it did without `--precise`.
+- The plugin's dialog has no extra-decimals option; it uses 0. The C++ port refuses with `arithmetic overflow` when
+  64-bit exact arithmetic would overflow. The Python tool uses unbounded integers and does not. Only extreme inputs
+  can differ.
 
 ## Scene requirements
 
@@ -227,10 +289,15 @@ For the 30 FPS fixture (`frame=0,149`, so 150 frames), `--factor 2` gives `--pro
 
 ```
 powershell -File tests/aup2_upconvert/run.ps1
+powershell -File tests/aup2_upconvert/run_long.ps1
 ```
 
 `tests/aup2_upconvert/test_upconvert.py` runs with plain `python -I`, prints PASS or FAIL per test, and exits
 non-zero on failure. Its temporary files go to `$AUP2_TEST_TMP` when set, or to a fresh system temp directory otherwise.
+It includes the `--precise` property checks and the worked-example end values.
+`run_long.ps1` runs `tests/aup2_upconvert/test_long_duration.py` (30 and 60 minute synthetic projects, 108 cases of
+30/60 minutes × 6 source rates × 9 targets). It checks boundary error, drift, total duration and audio/picture start
+frames.
 The timing-property test uses the 30, 66 and 120 FPS fixtures and synthetic projects, and checks the bounds above for
 the targets 66, 60, 60000/1001, 24, 120 and 59. The real-world check reads `D:\ARZv2.0.1\ARZv2.0.1\sources\試験用動画.aup2`
 in place (factor 2 and 3, and targets 66 and 50) and only ever writes to a temp directory.

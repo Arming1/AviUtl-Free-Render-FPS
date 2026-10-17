@@ -4,6 +4,9 @@ Inputs: every experiments/66_to_60_validation/*.aup2, experiments/free_fps_matri
 fixture_72fps.aup2, experiments/host_matrix/scene_rate_test.aup2, and the read-only real project
 D:\\ARZv2.0.1\\ARZv2.0.1\\sources\\試験用動画.aup2 (copied into the work directory first).
 Targets: --target-fps 66, 60, 50, 59, 24, 120, 60000/1001, 30000/1001 and --factor 2, 3.
+Precise: --precise with --target-fps 66, 24, 60000/1001, 50, 59, 120 on every fixture, and 66 on the real project;
+--precise-extra-decimals 2 with 66 on every input, and two refusals for it (when the Python tool has the option).
+Skipped (with a message) while tools/aup2_fps_upconvert.py does not accept --precise or the option.
 Refusal cases: synthetic inputs written to the work directory, one per refusal, each with its own arguments.
 
 Each case runs both tools one after the other with the same absolute --out path. Exit codes, stderr (the
@@ -36,6 +39,9 @@ JSON_SUFFIX = ".convert.json"
 
 TARGETS = [["--target-fps", rate] for rate in ("66", "60", "50", "59", "24", "120", "60000/1001", "30000/1001")]
 TARGETS += [["--factor", "2"], ["--factor", "3"]]
+
+PRECISE_TARGETS = [["--target-fps", rate] for rate in ("66", "24", "60000/1001", "50", "59", "120")]
+PRECISE_REAL_TARGET = ["--target-fps", "66"]
 
 BASE_BODY = ["[0]", "layer=0", "frame=0,299"]
 
@@ -110,6 +116,15 @@ def python_tool_supports_target_fps():
     return proc.returncode == 0 and b"--target-fps" in proc.stdout
 
 
+def python_tool_has_option(option):
+    proc = subprocess.run([sys.executable, "-I", PY_TOOL, "--help"], capture_output=True)
+    return proc.returncode == 0 and option.encode("ascii") in proc.stdout
+
+
+def python_tool_supports_precise():
+    return python_tool_has_option("--precise")
+
+
 def show_line(data):
     if data is None:
         return "<no line>"
@@ -182,7 +197,27 @@ def main(argv=None):
         for label, path in convert_inputs() + [("real ARZv2.0.1 project", real_copy)]:
             for target in TARGETS:
                 cases.append((label, path, target))
-        for name, text, extra in REFUSAL_CASES:
+        refusal_cases_extra = []
+        if python_tool_supports_precise():
+            for label, path in convert_inputs():
+                for target in PRECISE_TARGETS:
+                    cases.append((label, path, target + ["--precise"]))
+            cases.append(("real ARZv2.0.1 project", real_copy, PRECISE_REAL_TARGET + ["--precise"]))
+            if python_tool_has_option("--precise-extra-decimals"):
+                for label, path in convert_inputs():
+                    cases.append((label, path, ["--target-fps", "66", "--precise", "--precise-extra-decimals", "2"]))
+                cases.append(("real ARZv2.0.1 project", real_copy,
+                              ["--target-fps", "66", "--precise", "--precise-extra-decimals", "2"]))
+                extra_refusals = [
+                    ("extra_decimals_without_precise", ["--target-fps", "66", "--precise-extra-decimals", "2"]),
+                    ("extra_decimals_above_4", ["--target-fps", "66", "--precise", "--precise-extra-decimals", "5"]),
+                ]
+                refusal_cases_extra.extend((name, synthetic_text(BASE_BODY), args) for name, args in extra_refusals)
+            else:
+                print("SKIP precise --precise-extra-decimals cases: tools/aup2_fps_upconvert.py has no such option yet")
+        else:
+            print("SKIP precise cases: tools/aup2_fps_upconvert.py has no --precise yet; rerun this check later")
+        for name, text, extra in REFUSAL_CASES + refusal_cases_extra:
             path = os.path.join(synthetic_dir, name + ".aup2")
             with open(path, "wb") as fh:
                 fh.write(text.encode("utf-8"))

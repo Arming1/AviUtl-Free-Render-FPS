@@ -12,7 +12,9 @@ then exports the current project at that rate. It uses only the public SDK (`sdk
    on init) and `register_project_save_handler` (line 1048). A project with no path is refused: save it first.
    `EDIT_SECTION::get_project_file` (line 256) is not used, because the edit menu gives no edit section.
 2. Dialog: target FPS as an exact rational (`66`, `60000/1001`; decimals such as `59.94` are refused), output file
-   (Browse), output plugin name (default `x264guiEx FreeRenderFPS`).
+   (Browse), output plugin name (default `x264guiEx FreeRenderFPS`), and the checkbox
+   "Precise motion (exact speed for linear motion)" (default on; it passes `precise` to `retime()`, with no extra
+   decimals).
 3. Confirm. The SDK has no unsaved-changes flag, so the user is always asked whether to save the project to its own
    path first. No, or closing the prompt, aborts with no side effects.
 4. `save_project_file(original)` once confirmed. Then the saved original is copied to
@@ -36,6 +38,12 @@ messages. The rules are in `tools/aup2_fps_upconvert.md`. Arithmetic is exact 64
 An overflow is a refusal. Objects are grouped by (scene, layer), where the scene is the object's `scene=` line or
 the nearest `[scene.N]` above it.
 
+Precise mode: `retime(..., precise, precise_extra_decimals)` in `retime.h` and `retime_cli.exe --precise
+[--precise-extra-decimals N]` (N from 0 to 4, needs `--precise`). It re-samples the trackbars of linear moves and
+constant tracks at the new keyframes, and writes a `precise` object to the sidecar only in this mode. The plugin
+passes `precise` from the dialog checkbox and always uses 0 extra decimals. Rules and limits are in
+`tools/aup2_fps_upconvert.md`, "Precise mode".
+
 Limits of the port:
 - Digits are ASCII only. The Python tool accepts Unicode decimal digits in frame values.
 - Frame-marker detection uses Unicode `\w` and `\s` through Windows character classes for BMP code points.
@@ -55,7 +63,8 @@ Outputs go to `experiments/free_fps_export/build/x64/` (git-ignored). The script
   by recorders. The tests cover the no-path refusal, the save and cancel prompt, the original path reopened on
   success and on each failure, temp cleanup, and the keep-temp variable.
 - `tests/crosscheck.py`: runs `retime_cli.exe` and `tools/aup2_fps_upconvert.py` on the same inputs and compares
-  `.aup2` and `.convert.json` bytes.
+  `.aup2` and `.convert.json` bytes. It covers the precise mode too; 160 of 160 pairs were byte-identical on
+  2026-10-17.
 
 Copy `build/x64/free_fps_export.aux2` into the AviUtl2 plugin folder yourself. The build never does this.
 
@@ -77,9 +86,9 @@ The 1.1.0 build was run from **Edit > Free FPS Export...** in AviUtl2 v2.1.12 fo
 - Every output frame is rendered at its own time; none is a copy.
 - Not yet reported: long-duration cumulative drift and audio-video sync (host-free tests and a 30-minute
   real-footage run are in progress).
-- A speed-error target of ≤ 0.01% needs the `--precise` mode, which is being implemented and is not in the 1.1.0
-  build. It re-samples linear-move keyframe values from the original curve at the new times (plugin dialog
-  default: on). Its end is extrapolated by at most about one output frame.
+- The `--precise` mode (dialog checkbox, default on) is implemented in the re-timer and is not in the 1.1.0 build.
+  It re-samples linear-move keyframe values from the original curve at the new times. Its speed matches the original
+  apart from rounding. Not yet run in AviUtl2; the plan is `experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md`.
 
 ## Not verified without AviUtl2
 

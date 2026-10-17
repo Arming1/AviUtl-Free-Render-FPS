@@ -633,6 +633,8 @@ struct Mode {
     bool factor = false;
     i64 factor_k = 0;
     Rational target;
+    bool precise = false;
+    std::size_t precise_extra_decimals = 0;
 };
 
 // Python check_layers(): objects are grouped by (scene, layer=). Within a group, sorted by start, a pair that
@@ -684,6 +686,257 @@ void check_layers(const std::vector<std::pair<i64, std::size_t>>& frame_lines,
                 refuse(line, "object overlaps the object at line " + std::to_string(other) +
                                  " on the same scene and layer after rescaling; refused");
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Precise mode: exact re-sampling of trackbars (exact rationals, no floating point)
+// Port of precise_resample() in tools/aup2_fps_upconvert.py. One deliberate difference: a 2-point object with
+// frame= start == end is skipped (the Python tool divides by zero there).
+// ---------------------------------------------------------------------------
+
+Rational rat_add(const Rational& a, const Rational& b) {
+    return make_rational(checked_add(checked_mul(a.num, b.den), checked_mul(b.num, a.den)),
+                         checked_mul(a.den, b.den));
+}
+
+bool rat_equal(const Rational& a, const Rational& b) {
+    return a.num == b.num && a.den == b.den;  // both reduced
+}
+
+i64 pow10_checked(std::size_t d) {
+    i64 p = 1;
+    for (std::size_t i = 0; i < d; ++i) {
+        p = checked_mul(p, 10);
+    }
+    return p;
+}
+
+// RE_NUMBER text (validated by is_number) to an exact rational. fraction_digits gets the digits after the point.
+Rational parse_decimal(const std::string& text, std::size_t& fraction_digits) {
+    const bool negative = !text.empty() && text.front() == '-';
+    const std::string body = negative ? text.substr(1) : text;
+    const std::size_t dot = body.find('.');
+    std::string digits = body;
+    fraction_digits = 0;
+    if (dot != std::string::npos) {
+        digits = body.substr(0, dot) + body.substr(dot + 1);
+        fraction_digits = body.size() - dot - 1;
+    }
+    i64 value = 0;
+    for (char c : digits) {
+        value = checked_add(checked_mul(value, 10), c - '0');
+    }
+    return make_rational(negative ? -value : value, pow10_checked(fraction_digits));
+}
+
+// x * 10^d rounded half away from zero, as an integer. Throws Overflow when it does not fit.
+i64 quantize_scaled(const Rational& x, std::size_t d) {
+    const i64 scale = pow10_checked(d);
+    const i64 magnitude = checked_mul(x.num < 0 ? -x.num : x.num, scale);
+    i64 q = magnitude / x.den;
+    const i64 rest = magnitude % x.den;
+    if (rest >= x.den - rest) {  // rest * 2 >= den, without overflow
+        q = checked_add(q, 1);
+    }
+    return x.num < 0 ? -q : q;
+}
+
+// A scaled integer (value * 10^d) as text with exactly d fraction digits: -20000 with d = 2 gives "-200.00".
+// Zero is never negative.
+std::string format_fixed(i64 scaled, std::size_t d) {
+    const bool negative = scaled < 0;
+    const i64 magnitude = negative ? -scaled : scaled;
+    const i64 scale = pow10_checked(d);
+    std::string text = (negative ? "-" : "") + std::to_string(magnitude / scale);
+    if (d > 0) {
+        const std::string fraction = std::to_string(magnitude % scale);
+        text += "." + std::string(d - fraction.size(), '0') + fraction;
+    }
+    return text;
+}
+
+// Value of the piecewise-linear curve through (pts[i], vals[i]) at t, exact. t <= pts.front() uses the first
+// segment and t >= pts.back() the last one (straight-line extrapolation). pts is strictly increasing, size >= 2.
+Rational track_value(const std::vector<i64>& pts, const std::vector<Rational>& vals, const Rational& t) {
+    const std::size_t last = pts.size() - 2;  // index of the last segment
+    std::size_t seg = last;
+    if (!rat_less(Rational{pts.front(), 1}, t)) {
+        seg = 0;
+    } else if (rat_less(t, Rational{pts.back(), 1})) {
+        for (std::size_t i = 0; i <= last; ++i) {
+            if (rat_less(t, Rational{pts[i + 1], 1})) {
+                seg = i;
+                break;
+            }
+        }
+    }
+    const Rational span{checked_sub(pts[seg + 1], pts[seg]), 1};
+    const Rational ratio = rat_div(rat_sub(t, Rational{pts[seg], 1}), span);
+    return rat_add(vals[seg], rat_mul(rat_sub(vals[seg + 1], vals[seg]), ratio));
+}
+
+// One trackbar row of an object: 'name=v0,...,vn,mode,param'.
+struct TrackLine {
+    std::size_t idx = 0;
+    std::string name;
+    std::string mode;
+    std::string param;
+    std::vector<std::string> values;
+};
+
+// Python precise_track_problem(), in the same order, plus the zero-length rule. Empty when the row can be
+// resampled. The reason names the row's own line, as the Python tool does.
+std::string precise_problem(const TrackLine& track, const std::vector<Rational>& vals, const std::vector<i64>& pts) {
+    const std::string line = std::to_string(track.idx + 1);
+    if (track.param.find('|') != std::string::npos) {
+        return "trackbar at line " + line + " has a '|' payload";
+    }
+    bool constant = true;
+    for (const Rational& v : vals) {
+        constant = constant && rat_equal(v, vals.front());
+    }
+    const bool linear = track.mode == "直線移動" && track.param == "0";
+    if (!linear && !constant) {
+        return "trackbar at line " + line + " uses mode " + track.mode + " with parameter " + track.param +
+               " and changing values; only 直線移動,0 or constant values can be resampled exactly";
+    }
+    if (pts.size() == 2 && pts[0] == pts[1]) {
+        return "frame= start equals end; there is no segment to resample";
+    }
+    return std::string();
+}
+
+// Precise mode. Objects are visited in frame= order and tracks in file order. An object with no trackbar rows
+// (other than '再生範囲') is neither applied nor skipped. An object is skipped when one of its rows has a problem
+// (its frame= line is recorded); otherwise each row is re-sampled at the new keyframes: t = f'/k, value from the
+// exact curve through the old keyframes. Values are rounded to the largest decimal count of the row plus
+// extra_decimals. The report figures are 6-decimal strings, the range is max - min of the old values.
+void apply_precise(const std::vector<std::string>& lines, const std::vector<std::size_t>& effect_lines,
+                   const std::vector<Section>& section_of, const std::vector<std::pair<i64, std::size_t>>& frame_lines,
+                   const std::map<i64, std::vector<i64>>& frame_values,
+                   const std::map<i64, std::vector<i64>>& new_frames, const Rational& k,
+                   std::size_t extra_decimals, std::vector<std::string>& new_bodies, RetimeResult& res) {
+    res.precise.emplace();
+    PreciseReport& report = *res.precise;
+    report.extra_decimals = extra_decimals;
+
+    std::map<i64, std::vector<TrackLine>> tracks_of;  // object -> its trackbar rows, file order
+    for (std::size_t idx : effect_lines) {
+        const std::string value = value_of(lines[idx]);
+        if (!is_trackbar(value)) {
+            continue;
+        }
+        const auto parts = split_on(value, ',');
+        if (kTrackCountExempt.count(parts[parts.size() - 2]) != 0) {
+            continue;
+        }
+        TrackLine track;
+        track.idx = idx;
+        track.name = key_of(lines[idx]);
+        track.mode = parts[parts.size() - 2];
+        track.param = parts.back();
+        track.values.assign(parts.begin(), parts.end() - 2);
+        tracks_of[section_of[idx].a].push_back(std::move(track));
+    }
+
+    std::map<std::size_t, std::string> bodies;  // rewritten rows by line index
+    for (const auto& [obj, frame_idx] : frame_lines) {
+        const auto found = tracks_of.find(obj);
+        if (found == tracks_of.end()) {
+            continue;
+        }
+        const std::vector<i64>& pts = frame_values.at(obj);
+        const std::vector<i64>& nf = new_frames.at(obj);
+
+        std::vector<std::vector<Rational>> parsed;
+        std::vector<std::size_t> decimals;
+        std::string problem;
+        for (const TrackLine& track : found->second) {
+            std::vector<Rational> vals;
+            std::size_t most = 0;
+            for (const std::string& text : track.values) {
+                std::size_t fraction_digits = 0;
+                vals.push_back(parse_decimal(text, fraction_digits));
+                most = (std::max)(most, fraction_digits);
+            }
+            problem = precise_problem(track, vals, pts);
+            if (!problem.empty()) {
+                break;
+            }
+            parsed.push_back(std::move(vals));
+            decimals.push_back(most);
+        }
+        if (!problem.empty()) {
+            report.skipped.push_back(PreciseSkip{frame_idx + 1, problem});
+            continue;
+        }
+        report.applied += 1;
+
+        for (std::size_t t = 0; t < found->second.size(); ++t) {
+            const TrackLine& track = found->second[t];
+            const std::vector<Rational>& vals = parsed[t];
+            const std::size_t places = decimals[t] + extra_decimals;
+            bool constant = true;
+            for (const Rational& v : vals) {
+                constant = constant && rat_equal(v, vals.front());
+            }
+
+            Rational max_error{0, 1};
+            std::vector<std::string> texts;
+            i64 last_units = 0;
+            for (i64 f : nf) {
+                const Rational x = constant ? vals.front() : track_value(pts, vals, rat_div(Rational{f, 1}, k));
+                last_units = quantize_scaled(x, places);
+                const Rational error = rat_abs(rat_sub(make_rational(last_units, pow10_checked(places)), x));
+                if (rat_less(max_error, error)) {
+                    max_error = error;
+                }
+                texts.push_back(format_fixed(last_units, places));
+            }
+
+            Rational low = vals.front();
+            Rational high = vals.front();
+            for (const Rational& v : vals) {
+                if (rat_less(v, low)) {
+                    low = v;
+                }
+                if (rat_less(high, v)) {
+                    high = v;
+                }
+            }
+            const Rational range = rat_sub(high, low);
+            Rational ratio{0, 1};
+            if (range.num != 0) {
+                ratio = rat_div(max_error, range);
+            }
+            const Rational percent = rat_mul(ratio, Rational{100, 1});
+            const std::string pct_text = format_fixed(quantize_scaled(percent, 6), 6);
+            const Rational end_shift = rat_sub(make_rational(last_units, pow10_checked(places)), vals.back());
+
+            std::string joined;
+            for (std::size_t i = 0; i < texts.size(); ++i) {
+                joined += (i > 0 ? "," : "") + texts[i];
+            }
+            bodies[track.idx] = track.name + "=" + joined + "," + track.mode + "," + track.param;
+
+            const std::string error_text = format_fixed(quantize_scaled(max_error, 6), 6);
+            const std::string end_text = format_fixed(quantize_scaled(end_shift, 6), 6);
+            report.tracks.push_back(PreciseTrack{frame_idx + 1, track.idx + 1, error_text, pct_text, end_text});
+            if (rat_less(Rational{1, 10000}, ratio)) {  // above 0.01 % of the range
+                res.notes.push_back("precise: trackbar at line " + std::to_string(track.idx + 1) +
+                                    " (object at line " + std::to_string(frame_idx + 1) +
+                                    ") quantization error is " + pct_text +
+                                    "% of its range, above 0.01%");
+            }
+        }
+    }
+
+    for (const auto& [idx, body] : bodies) {
+        if (body != lines[idx]) {
+            res.changes.push_back(RetimeChange{idx + 1, lines[idx], body, false});
+            new_bodies[idx] = body;
         }
     }
 }
@@ -1052,6 +1305,11 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
     res.max_start_error_s = fraction_str(max_start);
     res.max_end_error_s = fraction_str(max_end);
 
+    if (mode.precise) {
+        apply_precise(lines, effect_lines, section_of, frame_lines, frame_values, new_frames, k,
+                      mode.precise_extra_decimals, new_bodies, res);
+    }
+
     res.source_rate = fraction_text(rate_src);
     res.target_rate = fraction_text(rate_dst);
     res.k = fraction_text(k);
@@ -1227,16 +1485,22 @@ RetimeResult run(std::string_view in_utf8, const Mode& mode, std::wstring out_pa
 
 }  // namespace
 
-RetimeResult retime(std::string_view in_utf8, Rational target, std::wstring out_path) {
+RetimeResult retime(std::string_view in_utf8, Rational target, std::wstring out_path, bool precise,
+                    std::size_t precise_extra_decimals) {
     Mode mode;
     mode.target = target;
+    mode.precise = precise;
+    mode.precise_extra_decimals = precise_extra_decimals;
     return run(in_utf8, mode, std::move(out_path));
 }
 
-RetimeResult retime_factor(std::string_view in_utf8, std::int64_t factor, std::wstring out_path) {
+RetimeResult retime_factor(std::string_view in_utf8, std::int64_t factor, std::wstring out_path, bool precise,
+                           std::size_t precise_extra_decimals) {
     Mode mode;
     mode.factor = true;
     mode.factor_k = factor;
+    mode.precise = precise;
+    mode.precise_extra_decimals = precise_extra_decimals;
     return run(in_utf8, mode, std::move(out_path));
 }
 
@@ -1295,14 +1559,54 @@ std::string sidecar_json(const RetimeResult& r, const std::wstring& in_path, con
         lines.push_back("    ]");
     }
     lines.push_back("  },");
+    // Python json.dump order: notes, then "precise" (only in precise mode) as the last key.
+    const bool precise_follows = r.precise.has_value();
     if (r.notes.empty()) {
-        lines.push_back("  \"notes\": []");
+        lines.push_back(precise_follows ? "  \"notes\": []," : "  \"notes\": []");
     } else {
         lines.push_back("  \"notes\": [");
         for (std::size_t i = 0; i < r.notes.size(); ++i) {
             lines.push_back("    " + json_str(r.notes[i]) + (i + 1 < r.notes.size() ? "," : ""));
         }
-        lines.push_back("  ]");
+        lines.push_back(precise_follows ? "  ]," : "  ]");
+    }
+    if (r.precise) {
+        const PreciseReport& p = *r.precise;
+        lines.push_back("  \"precise\": {");
+        lines.push_back("    \"enabled\": true,");
+        if (p.extra_decimals > 0) {
+            lines.push_back("    \"extra_decimals\": " + std::to_string(p.extra_decimals) + ",");
+        }
+        lines.push_back("    \"applied\": " + std::to_string(p.applied) + ",");
+        if (p.skipped.empty()) {
+            lines.push_back("    \"skipped\": [],");
+        } else {
+            lines.push_back("    \"skipped\": [");
+            for (std::size_t i = 0; i < p.skipped.size(); ++i) {
+                lines.push_back("      {");
+                lines.push_back("        \"line\": " + std::to_string(p.skipped[i].line) + ",");
+                lines.push_back("        \"reason\": " + json_str(p.skipped[i].reason));
+                lines.push_back(i + 1 < p.skipped.size() ? "      }," : "      }");
+            }
+            lines.push_back("    ],");
+        }
+        if (p.tracks.empty()) {
+            lines.push_back("    \"tracks\": []");
+        } else {
+            lines.push_back("    \"tracks\": [");
+            for (std::size_t i = 0; i < p.tracks.size(); ++i) {
+                const PreciseTrack& t = p.tracks[i];
+                lines.push_back("      {");
+                lines.push_back("        \"object_line\": " + std::to_string(t.object_line) + ",");
+                lines.push_back("        \"line\": " + std::to_string(t.line) + ",");
+                lines.push_back("        \"max_quant_error\": " + json_str(t.max_quant_error) + ",");
+                lines.push_back("        \"max_quant_error_pct\": " + json_str(t.max_quant_error_pct) + ",");
+                lines.push_back("        \"end_extrapolation\": " + json_str(t.end_extrapolation));
+                lines.push_back(i + 1 < p.tracks.size() ? "      }," : "      }");
+            }
+            lines.push_back("    ]");
+        }
+        lines.push_back("  }");
     }
     lines.push_back("}");
 
