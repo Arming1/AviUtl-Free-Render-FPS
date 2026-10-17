@@ -1,0 +1,30 @@
+{
+  "tool": "aup2_fps_upconvert",
+  "factor": 2,
+  "input": {
+    "path": "D:\\AviUtl Free Render FPS\\experiments\\66_to_60_validation\\freerenderfps_30fps.aup2",
+    "sha256": "87edae6589e4c03fe4c4660ae4abbf5a1c8a973e5fb47afeb38007d6f98859cb"
+  },
+  "output": {
+    "path": "D:\\AviUtl Free Render FPS\\experiments\\host_matrix\\upconvert_30fps_x2.aup2",
+    "sha256": "16f9e4add51703bdc521db9663cce1aab76c0d9d272a405c1fdc4952f630465a"
+  },
+  "changed_line_count": 3,
+  "changes": [
+    {
+      "line": 3,
+      "old": "file=D:\\AviUtl Free Render FPS\\experiments\\66_to_60_validation\\freerenderfps_30fps.aup2",
+      "new": "file=D:\\AviUtl Free Render FPS\\experiments\\host_matrix\\upconvert_30fps_x2.aup2"
+    },
+    {
+      "line": 11,
+      "old": "video.rate=30",
+      "new": "video.rate=60"
+    },
+    {
+      "line": 36,
+      "old": "frame=0,149",
+      "new": "frame=0,299"
+    }
+  ]
+}
