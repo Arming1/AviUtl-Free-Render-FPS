@@ -1,0 +1,24 @@
+Validation: D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\out\66_60.mp4
+ffmpeg:     ffmpeg version 2025-11-27-git-61b034a47c-full_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers
+Project:    66/1 fps, 330 frames; target 60/1 fps (ratio 10/11)
+Expected:   300 frames, 5.000000 s
+Video:      h264 640x360 yuv420p, r_frame_rate=60/1 avg_frame_rate=60/1 duration=5.000000 s
+Audio:      aac 44100 Hz 2 ch, duration=5.000000 s
+Decode:     gray 640x360, fps_mode=passthrough
+
+Measured
+  decoded frames                300   (ffprobe -count_frames 300)
+  unique frame hashes           300
+  adjacent exact duplicates     0   at none
+  adjacent near-duplicates      0   (MAD < 0.014193576388888891) at none
+  MAD over boundaries           min 0.1326  median 0.1419  mean 0.1425  max 0.1578
+  pairing score                 N/A (target/project ratio 10/11 is not an integer >= 2)
+
+Checks
+  PASS  frame_count     decoded 300, expected 300, ffprobe -count_frames 300
+  PASS  stream_rate     r_frame_rate 60/1 vs target 60/1
+  PASS  av_duration     video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.016667 s
+  N/A   no_pairing      target/project ratio 10/11 is not an integer >= 2
+  PASS  near_duplicates 0 boundaries with MAD < 0.014193576388888891; 0 at the final boundary ignored (end clamp); 0 counted, limit 1
+
+Overall: PASS
