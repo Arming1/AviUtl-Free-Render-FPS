@@ -5,7 +5,11 @@
 #include <limits>
 #include <numeric>
 
+#if AVIUTL_TARGET_VER == 2
 #include "freefps_aviutl_hook.h"
+#else
+#include "freefps_aviutl1_hook.h"
+#endif
 
 namespace {
 
@@ -132,9 +136,11 @@ bool FreeFpsSession::initialize(const OUTPUT_INFO* project,
     effective_.rate = target_rate_;
     effective_.scale = target_scale_;
     effective_.n = output_frames_;
+#if AVIUTL_TARGET_VER == 2
     if (effective_.func_set_buffer_size != nullptr) {
         effective_.func_set_buffer_size(1, 0);
     }
+#endif
 
     AcquireSRWLockExclusive(&g_session_lock);
     if (g_session != nullptr) {

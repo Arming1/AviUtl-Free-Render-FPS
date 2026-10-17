@@ -279,7 +279,10 @@ copy /y x264guiEx.zh.ini "$(OutDir)x264guiEx-FreeRenderFPS.zh.ini"</Command>
     </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="encode\freefps_aviutl_hook.cpp">
+    <ClCompile Include="encode\freefps_aviutl_hook.cpp" Condition="'$(Platform)'=='x64'">
+      <CompileAsManaged>false</CompileAsManaged>
+    </ClCompile>
+    <ClCompile Include="encode\freefps_aviutl1_hook.cpp" Condition="'$(Platform)'=='Win32'">
       <CompileAsManaged>false</CompileAsManaged>
     </ClCompile>
     <ClCompile Include="encode\freefps_cache_workaround.cpp">
@@ -311,6 +314,8 @@ copy /y x264guiEx.zh.ini "$(OutDir)x264guiEx-FreeRenderFPS.zh.ini"</Command>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="encode\freefps_aviutl_hook.h" />
+    <ClInclude Include="encode\freefps_aviutl1_hook.h" />
+    <ClInclude Include="encode\freefps_host_hook.h" />
     <ClInclude Include="encode\freefps_cache_workaround.h" />
     <ClInclude Include="encode\freefps_scheduler.h" />
     <ClCompile Include="encode\convert_avx2.cpp">

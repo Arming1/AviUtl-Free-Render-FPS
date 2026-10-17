@@ -1,18 +1,22 @@
-# AviUtl2 FreeRenderFPS
+# AviUtl2 / AviUtl 1.x 向け FreeRenderFPS
 
 [简体中文](README.zh-CN.md) | **日本語** | [English](README.en.md)
 
-FreeRenderFPS は x264guiEx をベースにした AviUtl2 出力プラグインです。
-プロジェクト FPS と独立したレートでシーンを評価します。30 FPS の
-プロジェクトを 60 FPS で出力する場合、0.0、0.5、1.0、1.5…という
-プロジェクトフレーム座標を実際に評価します。フレーム複製やメタデータ変更
-だけではありません。
+FreeRenderFPS は x264guiEx をベースに、AviUtl2 と旧 AviUtl 1.x の
+ホストアダプターを提供します。プロジェクト FPS と独立したレートでシーンを
+評価し、30 FPS のプロジェクトを 60 FPS で出力する場合は 0.0、0.5、1.0、
+1.5…というプロジェクトフレーム座標を実際に評価します。フレーム複製や
+メタデータ変更だけではありません。
 
 ## Download
 
-**v1.0.0 のリリースゲートに合格しました。** ソース対応とハッシュを監査した
+**AviUtl2 v1.0.0 のリリースゲートに合格しました。** ソース対応とハッシュを監査した
 x264、LGPL FFmpeg、ISC L-SMASH を同梱し、全 FPS マトリクスと
 setup/portable 最終パッケージのみを使った実エンコードに合格しました。
+
+旧 AviUtl 1.x 版は AviUtl 1.10 + ExEdit 0.92 用の独立した Win32 ビルドです。
+`dist\AviUtl1-FreeRenderFPS-v1.0.0` にあり、手動インストール用 portable ZIP
+として配布しています。AviUtl ホスト本体は含みません。
 
 ## One-click installation
 
@@ -33,6 +37,16 @@ v1.0.0 portable ZIP を AviUtl2 ルートへ直接展開します。ZIP には
 `data\Plugin\x264guiEx-FreeRenderFPS` が含まれます。正式 AUO2 と 3 個の INI を保ち、
 Debug、PDB、Probe、watcher、ブレークポイント用ツールをコピーしないでください。
 
+### 旧 AviUtl 1.x（Win32）
+
+`AviUtl1-FreeRenderFPS-v1.0.0-portable.zip` を AviUtl 1.10 のルートへ展開し、
+`Plugins` の構成を保ちます。`Plugins\x264guiEx-FreeRenderFPS.auo` と同名の
+3 個の INI を同じ場所に置き、runtime は `Plugins\exe_files`、プリセットは
+`Plugins\x264guiEx-FreeRenderFPS_stg` に置かれます。AUO を古い
+`x264guiEx-FreeFPS.auo` に変更したり、古いコピーを同時に読み込ませたりしないで
+ください。詳細は [docs/LEGACY_AVIUTL1_SETUP.md](docs/LEGACY_AVIUTL1_SETUP.md) を
+参照してください。
+
 ## Usage
 
 1. `x264guiEx FreeRenderFPS` の設定を開きます。
@@ -49,7 +63,7 @@ Free Render FPS を無効にすると元の整数フレーム経路を使用し�
 23.976、24、25、29.97、30、48、50、59.94、60、66、72、90、120、Custom。
 内部は有理数 rate/scale を使い、59.94 は 60000/1001 です。
 
-## Tested conversions
+## AviUtl2 Tested conversions
 
 | Project → target | Frames | Video/audio duration | Adjacent duplicates | Status |
 |---|---:|---:|---:|---|
@@ -62,10 +76,29 @@ Free Render FPS を無効にすると元の整数フレーム経路を使用し�
 
 詳細は [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md) を参照してください。
 
+### 旧 AviUtl 1.x の実出力検証
+
+| ホスト/プロジェクト → 目標 | フレーム | 映像/音声期間 | デコード済みハッシュ | 結果 |
+|---|---:|---:|---|---|
+| AviUtl 1.10 + ExEdit 0.92、30 → 60 | 300 | 5.000000 / 5.000000 s | 299 固有、末端に 1 組の重複 | 連続動作部分 PASS |
+
+末端の重複は 5 秒のテストプロジェクトで最後のプロジェクトフレームに
+クランプされた境界です。連続動作部分は 30 FPS のフレーム対として出力されて
+いません。51.2 → 60、51.2 → 60000/1001、66 → 60 は旧ホストで新しい実出力を
+生成してから、AviUtl2 と同じ全マトリクスを主張します。詳細は
+[docs/LEGACY_AVIUTL1_VALIDATION.md](docs/LEGACY_AVIUTL1_VALIDATION.md) を参照してください。
+
 ## Supported AviUtl2
 
 現在は **AviUtl2 v2.1.4 x64 のみ**です。有効化前に image size、entry RVA、
 timeline builder のバイト列と呼び出し関係を検査し、未知のビルドでは拒否します。
+
+## 対応する旧 AviUtl 1.x
+
+旧アダプターは **AviUtl 1.10 + ExEdit 0.92** のみをサポートします。バージョンを
+固定した保護付き ExEdit detour を使用する x86 `.auo` 出力プラグインです。
+x264/FFmpeg/L-SMASH は子プロセスとして動作するため、64 bit Windows では同梱の
+x64 runtime を使用できます。その他の AviUtl / ExEdit バイナリは拒否されます。
 
 ## Known limitations
 
@@ -76,6 +109,10 @@ timeline builder のバイト列と呼び出し関係を検査し、未知のビ
   誤って主張しません。
 - テスト済み portable ZIP は `data\Plugin` への手動配置が必要です。
 - インストーラーは最小のコンソール EXE です。
+- 旧アダプターの ExEdit サブフレーム余りは 0.01 プロジェクトフレーム単位に量子化
+  され、整数フレームキャッシュの eviction workaround を使用します。最後の出力
+  サンプルが最終プロジェクトフレームにクランプされる場合があります。
+- 旧版パッケージは現在 30 → 60 の実出力を直接検証済みで、拡張マトリクスは未検証です。
 
 [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) も参照してください。
 
@@ -91,6 +128,14 @@ Visual Studio Desktop C++ ワークロードと .NET Framework 4.7.2 参照を�
 Release x64 ビルド、許可リスト方式のパッケージング、インストーラーの隔離自動テスト、
 setup/portable ZIP と SHA-256 の生成を行います。詳細は
 [docs/BUILD.md](docs/BUILD.md) にあります。
+
+旧 Win32 プラグインは同じプロジェクトを `Release|Win32` でビルドします。
+
+```powershell
+msbuild .\src\x264guiEx-FreeFPS\x264guiEx\x264guiEx.vcxproj /t:Rebuild /p:Configuration=Release /p:Platform=Win32
+```
+
+パッケージ済みの旧版は `dist\AviUtl1-FreeRenderFPS-v1.0.0` にあります。
 
 ## Credits
 

@@ -142,6 +142,17 @@ EXTERN_C OUTPUT_PLUGIN_TABLE __declspec(dllexport) * __stdcall GetOutputPluginTa
     return &output_plugin_table;
 }
 
+// AviUtl 1.x asks for the serialized output-plugin configuration before it
+// necessarily calls the optional initialization callback. Keep the default
+// configuration guard available to both host ABI branches so func_config_get()
+// never serializes the zero-initialized global configuration.
+static void ensure_default_config_initialized() {
+    if (g_conf.header.size_all != CONF_INITIALIZED) {
+        init_SYSTEM_DATA(&g_sys_dat);
+        init_CONF_GUIEX(&g_conf, FALSE);
+    }
+}
+
 #if AVIUTL_TARGET_VER == 2
 EXTERN_C void __declspec(dllexport) InitializeLogger(LOG_HANDLE *logger) {
     set_aviutl2_logger(logger);
@@ -149,13 +160,6 @@ EXTERN_C void __declspec(dllexport) InitializeLogger(LOG_HANDLE *logger) {
 
 static const char *const PROJECT_CONFIG_KEY = "freerenderfps_config";
 static const char *const LEGACY_PROJECT_CONFIG_KEY = "config";
-
-static void ensure_default_config_initialized() {
-    if (g_conf.header.size_all != CONF_INITIALIZED) {
-        init_SYSTEM_DATA(&g_sys_dat);
-        init_CONF_GUIEX(&g_conf, FALSE);
-    }
-}
 
 bool func_load_project_config(PROJECT_FILE *project) {
     if (project == nullptr || project->get_param_string == nullptr) {

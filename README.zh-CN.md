@@ -1,16 +1,20 @@
-# AviUtl2 FreeRenderFPS
+# 面向 AviUtl2 和 AviUtl 1.x 的 FreeRenderFPS
 
 **简体中文** | [日本語](README.ja.md) | [English](README.en.md)
 
-FreeRenderFPS 是基于 x264guiEx 的 AviUtl2 输出插件，可让场景求值采样率
-独立于工程 FPS。例如 30 FPS 工程输出 60 FPS 时，会真实求值 0.0、0.5、
-1.0、1.5……工程帧坐标，而不是复制帧或只修改容器 FPS 元数据。
+FreeRenderFPS 基于 x264guiEx，同时提供 AviUtl2 和旧版 AviUtl 1.x 的宿主适配器，
+可让场景求值采样率独立于工程 FPS。例如 30 FPS 工程输出 60 FPS 时，会真实求值
+0.0、0.5、1.0、1.5……工程帧坐标，而不是复制帧或只修改容器 FPS 元数据。
 
 ## 下载
 
-**v1.0.0 发布门禁已通过。** 包内包含源码可对应、固定哈希并完成许可证审计的
+**AviUtl2 v1.0.0 发布门禁已通过。** 包内包含源码可对应、固定哈希并完成许可证审计的
 x264、LGPL FFmpeg 和 ISC L-SMASH runtime。完整 FPS 矩阵、setup 与 portable
 仅依赖最终包的干净环境真实编码均已通过。
+
+AviUtl 1.x 版本是面向 AviUtl 1.10 + ExEdit 0.92 的独立 Win32 构建，位于
+`dist\AviUtl1-FreeRenderFPS-v1.0.0`，提供手动安装 portable ZIP；包内不包含
+AviUtl 宿主本体。
 
 ## 一键安装
 
@@ -32,6 +36,15 @@ x264、LGPL FFmpeg 和 ISC L-SMASH runtime。完整 FPS 矩阵、setup 与 porta
 同名同目录，
 不要复制 Debug、PDB、Probe、watcher 或断点工具，也不要重命名正式文件。
 
+### 旧版 AviUtl 1.x（Win32）
+
+将 `AviUtl1-FreeRenderFPS-v1.0.0-portable.zip` 解压到 AviUtl 1.10 根目录，
+并保持 `Plugins` 结构。`Plugins\x264guiEx-FreeRenderFPS.auo` 必须与三个同名
+INI 放在一起；runtime 位于 `Plugins\exe_files`，预设位于
+`Plugins\x264guiEx-FreeRenderFPS_stg`。不要把 AUO 重命名为旧的
+`x264guiEx-FreeFPS.auo`，也不要同时加载旧副本。详见
+[docs/LEGACY_AVIUTL1_SETUP.md](docs/LEGACY_AVIUTL1_SETUP.md)。
+
 ## 使用方法
 
 1. 打开 `x264guiEx FreeRenderFPS` 设置。
@@ -48,7 +61,7 @@ x264、LGPL FFmpeg 和 ISC L-SMASH runtime。完整 FPS 矩阵、setup 与 porta
 23.976、24、25、29.97、30、48、50、59.94、60、66、72、90、120 和
 Custom。内部使用有理数 rate/scale；59.94 对应 60000/1001。
 
-## 已测试转换
+## AviUtl2 已测试转换
 
 | 工程 → 目标 | 帧数 | 视频/音频时长 | 相邻重复帧 | 状态 |
 |---|---:|---:|---:|---|
@@ -62,11 +75,28 @@ Custom。内部使用有理数 rate/scale；59.94 对应 60000/1001。
 60 秒 66→59.94 长测输出 3597 帧，端点差仅 8.333 ms，无累计有理数漂移。
 详见 [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md)。
 
+### AviUtl 1.x 实际验证
+
+| 宿主/工程 → 目标 | 帧数 | 视频/音频时长 | 解码帧哈希 | 状态 |
+|---|---:|---:|---|---|
+| AviUtl 1.10 + ExEdit 0.92，30 → 60 | 300 | 5.000000 / 5.000000 秒 | 299 个唯一帧；末端一组重复 | 连续运动区间 PASS |
+
+末端重复是五秒测试工程在最后项目帧处的边界钳制；连续运动区间没有按 30 FPS
+成对输出。51.2 → 60、51.2 → 60000/1001 和 66 → 60 仍需在旧版宿主上重新生成
+实际媒体后，才能宣称覆盖 AviUtl2 的完整矩阵。详见
+[docs/LEGACY_AVIUTL1_VALIDATION.md](docs/LEGACY_AVIUTL1_VALIDATION.md)。
+
 ## 支持的 AviUtl2
 
 目前仅支持 **AviUtl2 v2.1.4 x64**。启用前会校验宿主 image size、入口
 RVA、时间轴构造器指令和调用关系；未知版本会被拒绝。关闭 FreeFPS 时普通
 输出仍可使用。
+
+## 支持的旧版 AviUtl 1.x
+
+旧版适配器仅支持 **AviUtl 1.10 + ExEdit 0.92**，使用版本固定且受保护的
+ExEdit detour，是 x86 `.auo` 输出插件。x264/FFmpeg/L-SMASH 作为独立子进程运行，
+64 位 Windows 可以使用包内 x64 runtime。其他 AviUtl 或 ExEdit 二进制会被拒绝。
 
 ## 已知限制
 
@@ -76,6 +106,9 @@ RVA、时间轴构造器指令和调用关系；未知版本会被拒绝。关�
 - FFmpeg/L-SMASH 有完整来源可追溯性，但不会虚假宣称跨路径字节完全可复现。
 - 已测试的 portable ZIP 需手动放到 `data\Plugin`；打包脚本已经修正。
 - 安装器是最小控制台 EXE，不是图形向导。
+- 旧版适配器的 ExEdit 子帧余数精度为 0.01 个工程帧，并使用受保护的整数帧缓存
+  eviction；最后输出样本可能被钳制到项目末帧。
+- 旧版包目前直接验证了 30 → 60，扩展矩阵仍待重新生成实际媒体。
 
 详见 [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)。
 
@@ -91,6 +124,14 @@ RVA、时间轴构造器指令和调用关系；未知版本会被拒绝。关�
 脚本会执行 Release x64 构建、白名单许可证安全打包、安装器编译与隔离生命周期
 自测，最后生成 setup/portable ZIP 和 SHA-256 清单。详见
 [docs/BUILD.md](docs/BUILD.md)。
+
+旧版 Win32 插件可使用同一项目构建：
+
+```powershell
+msbuild .\src\x264guiEx-FreeFPS\x264guiEx\x264guiEx.vcxproj /t:Rebuild /p:Configuration=Release /p:Platform=Win32
+```
+
+已打包的旧版输出位于 `dist\AviUtl1-FreeRenderFPS-v1.0.0`。
 
 ## 致谢
 

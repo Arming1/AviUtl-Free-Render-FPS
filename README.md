@@ -1,11 +1,12 @@
-# AviUtl2 FreeRenderFPS
+# FreeRenderFPS for AviUtl2 and AviUtl 1.x
 
 [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [English](README.en.md)
 
-FreeRenderFPS is an x264guiEx-based AviUtl2 output plugin that evaluates the
-real scene timeline at an output FPS independent from the project FPS. A 30 FPS
-project can therefore render genuine 60 FPS states at coordinates 0.0, 0.5,
-1.0, 1.5… It does not copy frames or merely change FPS metadata.
+FreeRenderFPS is an x264guiEx-based output plugin with AviUtl2 and legacy
+AviUtl 1.x host adapters. It evaluates the real scene timeline at an output FPS
+independent from the project FPS. A 30 FPS project can therefore render genuine
+60 FPS states at coordinates 0.0, 0.5, 1.0, 1.5… It does not copy frames or
+merely change FPS metadata.
 
 ## v1.0.0
 
@@ -21,6 +22,12 @@ See [the final report](FINAL_REPORT.md), [validation matrix](docs/VALIDATION_MAT
 and [installation guide](docs/INSTALL.md).
 
 Only AviUtl2 v2.1.4 x64 is supported. Unknown host signatures fail closed.
+
+The AviUtl 1.x adapter supports official AviUtl 1.10 + ExEdit 0.92 only and is
+distributed as an x86 `.auo` manual-install package at
+`dist\AviUtl1-FreeRenderFPS-v1.0.0`. Its current direct media validation covers
+30 → 60 with real continuous-motion sub-frame evaluation and preserved audio
+duration; the remaining legacy FPS matrix cases are explicitly pending.
 
 Project code is under [LICENSE](LICENSE). Third-party notices and redistribution
 details are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and

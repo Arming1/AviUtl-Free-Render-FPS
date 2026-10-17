@@ -1,17 +1,23 @@
-# AviUtl2 FreeRenderFPS
+# FreeRenderFPS for AviUtl2 and AviUtl 1.x
 
 [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | **English**
 
-FreeRenderFPS is an AviUtl2 output plugin based on x264guiEx. It separates the
-scene-evaluation sampling rate from the project FPS. For example, a 30 FPS
-project rendered at 60 FPS is evaluated at 0.0, 0.5, 1.0, 1.5... project-frame
-coordinates. It is not frame duplication and not an FPS-metadata trick.
+FreeRenderFPS provides host adapters for AviUtl2 and legacy AviUtl 1.x, based
+on x264guiEx. It separates the scene-evaluation sampling rate from the project
+FPS. For example, a 30 FPS project rendered at 60 FPS is evaluated at 0.0,
+0.5, 1.0, 1.5... project-frame coordinates. It is not frame duplication and
+not an FPS-metadata trick.
 
 ## Download
 
-**v1.0.0 release gates pass.** It bundles source-corresponding, exact-hash
+**AviUtl2 v1.0.0 release gates pass.** It bundles source-corresponding, exact-hash
 audited x264, LGPL FFmpeg and ISC L-SMASH runtime. The full FPS matrix and clean
 setup/portable package-only encodes pass.
+
+The legacy AviUtl 1.x package is a separate Win32 build for AviUtl 1.10 and
+ExEdit 0.92. It is available at
+`dist\AviUtl1-FreeRenderFPS-v1.0.0` and is distributed as a manual-install
+portable ZIP; the AviUtl host itself is not included.
 
 ## One-click installation
 
@@ -32,6 +38,15 @@ Extract the v1.0.0 portable ZIP directly over the AviUtl2 root. It already
 contains `data\Plugin\x264guiEx-FreeRenderFPS`. Keep the four formal adjacent
 files together. Do not copy Debug, PDB, probe, watcher, or breakpoint artifacts.
 
+### Legacy AviUtl 1.x (Win32)
+
+Extract `AviUtl1-FreeRenderFPS-v1.0.0-portable.zip` over an AviUtl 1.10 root
+with ExEdit 0.92. Keep `Plugins\x264guiEx-FreeRenderFPS.auo` and its three
+same-basename INIs together. The package places the external runtime under
+`Plugins\exe_files` and presets under `Plugins\x264guiEx-FreeRenderFPS_stg`.
+Do not rename the AUO to the old `x264guiEx-FreeFPS.auo`, and do not load a
+stale copy alongside it. See [docs/LEGACY_AVIUTL1_SETUP.md](docs/LEGACY_AVIUTL1_SETUP.md).
+
 ## Usage
 
 1. Open `x264guiEx FreeRenderFPS` settings.
@@ -49,7 +64,7 @@ project duration and original audio sample count.
 23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 66, 72, 90, 120, and Custom.
 The scheduler stores rational rate/scale values; 59.94 is 60000/1001.
 
-## Tested conversions
+## AviUtl2 tested conversions
 
 | Project → target | Frames | Video/audio duration | Adjacent duplicates | Status |
 |---|---:|---:|---:|---|
@@ -64,11 +79,30 @@ The 60-second 66→59.94 test produced 3597 frames and only 8.333 ms endpoint
 delta, with no accumulated rational drift. See
 [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md).
 
+### Legacy AviUtl 1.x validation
+
+| Host/project → target | Frames | Video/audio duration | Decoded frame hashes | Status |
+|---|---:|---:|---|---|
+| AviUtl 1.10 + ExEdit 0.92, 30 → 60 | 300 | 5.000000 / 5.000000 s | 299 unique; one endpoint pair | PASS for continuous motion |
+
+The endpoint pair is the final project-frame clamp in the five-second fixture;
+the continuously moving portion is not emitted as 30 FPS pairs. The remaining
+51.2 → 60, 51.2 → 60000/1001, and 66 → 60 cases still need fresh legacy-host
+media before claiming the full AviUtl2 matrix for AviUtl 1.x. See
+[docs/LEGACY_AVIUTL1_VALIDATION.md](docs/LEGACY_AVIUTL1_VALIDATION.md).
+
 ## Supported AviUtl2
 
 Only **AviUtl2 v2.1.4 x64**. FreeFPS validates the host image size, entry RVA,
 timeline-builder bytes, and caller relationship before enabling. Unknown builds
 are rejected; ordinary output remains available with FreeFPS disabled.
+
+## Supported legacy AviUtl 1.x
+
+The legacy adapter supports **AviUtl 1.10 + ExEdit 0.92** only. It is an x86
+`.auo` output plugin with version-pinned, guarded ExEdit detours. The external
+x264/FFmpeg/L-SMASH programs are separate child processes and may be x64 on a
+64-bit Windows system. Other AviUtl or ExEdit binaries are rejected.
 
 ## Known limitations
 
@@ -78,6 +112,11 @@ are rejected; ordinary output remains available with FreeFPS disabled.
 - FFmpeg and L-SMASH are provenance reproducible but are not falsely claimed
   byte-for-byte reproducible across different build roots.
 - The installer is a minimal console EXE, not a graphical wizard.
+- The legacy adapter quantizes ExEdit's sub-frame remainder to 0.01 source
+  frame, uses the guarded integer-cache eviction workaround, and can clamp the
+  final output sample to the final project frame.
+- The legacy package is manually installed and currently has direct media
+  validation for 30 → 60; the extended legacy matrix is still pending.
 
 See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
 
@@ -94,6 +133,15 @@ The script performs a Release x64 build, stages an allowlisted license-safe
 payload, compiles the installer, runs its isolated lifecycle test, produces the
 setup/portable ZIPs, and writes SHA-256 manifests. See
 [docs/BUILD.md](docs/BUILD.md).
+
+The legacy plugin can be rebuilt with the same project using `Release|Win32`:
+
+```powershell
+msbuild .\src\x264guiEx-FreeFPS\x264guiEx\x264guiEx.vcxproj /t:Rebuild /p:Configuration=Release /p:Platform=Win32
+```
+
+The packaged legacy output is kept under
+`dist\AviUtl1-FreeRenderFPS-v1.0.0`.
 
 ## Credits
 
