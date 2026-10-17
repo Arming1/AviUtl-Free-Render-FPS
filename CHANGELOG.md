@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-17
+
 ### Added
 
 - Precise motion for Free FPS Export. The **Precise motion (exact speed for linear motion)** checkbox is on by

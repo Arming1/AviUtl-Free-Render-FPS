@@ -1,4 +1,7 @@
-# Installing FreeRenderFPS v1.1.0
+# Installing FreeRenderFPS v1.2.0
+
+The v1.2.0 setup and portable packages have not been rebuilt yet. The v1.2.0 plugin
+is the 1.1.0 build plus Precise motion; see [CHANGELOG.md](../CHANGELOG.md).
 
 Close AviUtl2 before installation.
 

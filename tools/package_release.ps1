@@ -2,7 +2,7 @@
 param(
     [string]$Configuration = 'Release',
     [string]$Platform = 'x64',
-    [string]$ReleaseLabel = 'v1.1.0',
+    [string]$ReleaseLabel = 'v1.2.0',
     # Path defaults are resolved below: Windows PowerShell 5.1 leaves
     # $PSScriptRoot empty while evaluating param() defaults under -File.
     [string]$OutputRoot = '',

@@ -8,11 +8,13 @@ FPS. For example, a 30 FPS project rendered at 60 FPS is evaluated at 0.0,
 0.5, 1.0, 1.5... project-frame coordinates. It is not frame duplication and
 not an FPS-metadata trick.
 
-## v1.1.0
+## v1.2.0
 
-v1.1.0 puts Free FPS Export into the single AviUtl2 plugin file; see
+v1.2.0 keeps the v1.1.0 single-plugin layout and adds Precise motion; see
 [CHANGELOG.md](CHANGELOG.md).
 
+- Adds **Precise motion** (exact speed for linear motion) to Free FPS Export. The
+  checkbox is on by default.
 - `x264guiEx-FreeRenderFPS.aux2` contains the output plugin and Edit >
   **Free FPS Export...**, which re-times the scene through the public AviUtl2
   SDK. Any rational output FPS works on AviUtl2 v2.1.12.
@@ -31,7 +33,9 @@ at 66, 50 and 60000/1001 fps (all PASS; maximum offset 0.00 ms at 66 and 50 fps,
 ±8.33 ms, half a frame, at 60000/1001). The tested binary was
 `x264guiEx-FreeRenderFPS.aux2` (version resource 1.1.0, SHA256 114C3070…6076B,
 repacked 2026-10-17 17:52, contains Precise motion); the first 1.1.0 build did
-not contain precise mode. The built-in hook on AviUtl2 v2.1.4 still needs in-host validation. The AviUtl 1.x package is still v1.0.1 and needs
+not contain precise mode. That build's contents are the 1.2.0 feature set; only the
+version number was not bumped. The v1.2.0 installer packages have not been rebuilt
+yet. The built-in hook on AviUtl2 v2.1.4 still needs in-host validation. The AviUtl 1.x package is still v1.0.1 and needs
 re-validation on AviUtl 1.10 + ExEdit 0.92.
 
 ## Download
@@ -47,7 +51,7 @@ portable ZIP; the AviUtl host itself is not included.
 
 ## One-click installation
 
-1. Extract the complete v1.1.0 setup ZIP.
+1. Extract the complete v1.2.0 setup ZIP (the v1.2.0 packages have not been rebuilt yet).
 2. Run its adjacent setup EXE.
 3. Restart AviUtl2.
 4. Select `x264guiEx FreeRenderFPS`.
@@ -60,7 +64,7 @@ advanced options. The extracted `payload` directory must stay beside the EXE.
 
 ## Manual installation
 
-Extract the v1.1.0 portable ZIP directly over the AviUtl2 root. It already
+Extract the v1.2.0 portable ZIP (not yet rebuilt) directly over the AviUtl2 root. It already
 contains `data\Plugin\x264guiEx-FreeRenderFPS`. Keep
 `x264guiEx-FreeRenderFPS.aux2` and its three adjacent INI files together. Do not
 copy Debug, PDB, probe, watcher, or breakpoint artifacts.

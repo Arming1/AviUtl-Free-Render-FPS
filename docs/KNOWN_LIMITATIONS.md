@@ -1,4 +1,4 @@
-# Known limitations — v1.1.0 and Unreleased (precise motion)
+# Known limitations — v1.2.0 (1.1.0 plus precise motion)
 
 - The built-in FreeFPS hook supports AviUtl2 v2.1.4 x64 only. Its guarded private hook rejects
   unknown host image/signature combinations.
@@ -37,10 +37,12 @@
   source rates × 9 targets). Boundary error is at most half an output frame, drift is
   not cumulative (maximum 0.008 frame), total duration relative error is at most
   0.000463 %, and objects that start on the same frame keep the same start frame.
-  Audio-video sync over 30 minutes has not been run in AviUtl2. The kit is in
+  Audio-video sync over 30 minutes was run in AviUtl2 v2.1.12 on 2026-10-17 at 66, 50 and
+  60000/1001 fps (all PASS; see `experiments/long_av_sync/run_20261017/`). The kit is in
   `experiments/long_av_sync/`.
-- Precise motion (`--precise`, plugin checkbox on by default) is implemented in the
-  Python tool and the C++ port, and is not in the 1.1.0 build. It re-samples the
+- Precise motion (`--precise`, plugin checkbox on by default) is in 1.2.0 and was run in
+  AviUtl2 v2.1.12 on 2026-10-17 (8 conversions, `experiments/free_fps_matrix/run_20261017_precise/`).
+  The first 1.1.0 build did not contain it. It re-samples the
   trackbar values of linear moves and constant tracks from the original curve, so
   the speed matches the original. Limits: other effects are unchanged and their
   objects are listed in `precise.skipped`; the last frame may end past the original

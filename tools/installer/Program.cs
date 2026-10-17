@@ -7,9 +7,9 @@ using System.Reflection;
 [assembly: AssemblyTitle("AviUtl2 FreeRenderFPS Installer")]
 [assembly: AssemblyDescription("Audited offline release-candidate installer for x264guiEx FreeRenderFPS")]
 [assembly: AssemblyProduct("AviUtl2 FreeRenderFPS")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
-[assembly: AssemblyInformationalVersion("1.1.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyInformationalVersion("1.2.0")]
 
 namespace FreeRenderFPS.Installer;
 
@@ -202,7 +202,7 @@ internal sealed class Options
 
     public static void PrintHelp()
     {
-        Console.WriteLine("FreeRenderFPS Installer 1.1.0 (audited offline runtime)");
+        Console.WriteLine("FreeRenderFPS Installer 1.2.0 (audited offline runtime)");
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  FreeRenderFPS.Installer.exe [install|upgrade] [options]");
