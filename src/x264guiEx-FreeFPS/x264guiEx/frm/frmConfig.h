@@ -117,6 +117,9 @@ private: System::Windows::Forms::Label^  fcgLBAMPAutoBitrate;
     private: System::Windows::Forms::NumericUpDown^ fcgNUFreeFpsRate;
     private: System::Windows::Forms::NumericUpDown^ fcgNUFreeFpsScale;
     private: System::Windows::Forms::Label^ fcgLBFreeFpsNotice;
+#if AVIUTL_TARGET_VER == 2
+    private: System::Windows::Forms::Label^ fcgLBFreeFpsHostHint;
+#endif
     private: bool freeFpsUpdating;
 
     private: void InitializeFreeFpsControls() {
@@ -132,6 +135,9 @@ private: System::Windows::Forms::Label^  fcgLBAMPAutoBitrate;
         fcgNUFreeFpsRate = gcnew System::Windows::Forms::NumericUpDown();
         fcgNUFreeFpsScale = gcnew System::Windows::Forms::NumericUpDown();
         fcgLBFreeFpsNotice = gcnew System::Windows::Forms::Label();
+#if AVIUTL_TARGET_VER == 2
+        fcgLBFreeFpsHostHint = gcnew System::Windows::Forms::Label();
+#endif
         fcgTabFreeFps->Text = L"Free Render FPS";
         fcgTabFreeFps->UseVisualStyleBackColor = true;
         fcgGroupFreeFps->Text = L"Free Render FPS";
@@ -183,6 +189,11 @@ private: System::Windows::Forms::Label^  fcgLBAMPAutoBitrate;
         fcgLBFreeFpsNotice->Text = L"Supported host: AviUtl2 v2.1.4 x64. FreeRenderFPS changes actual scene evaluation time; it does not duplicate frames.";
         fcgLBFreeFpsNotice->Location = System::Drawing::Point(20, 175);
         fcgLBFreeFpsNotice->Size = System::Drawing::Size(515, 55);
+#if AVIUTL_TARGET_VER == 2
+        fcgLBFreeFpsHostHint->Text = L"Other AviUtl2 versions: use Edit > Free FPS Export... instead.";
+        fcgLBFreeFpsHostHint->AutoSize = true;
+        fcgLBFreeFpsHostHint->Location = System::Drawing::Point(20, 232);
+#endif
         fcgPNFreeFpsCustom->Controls->Add(fcgLBFreeFpsRate);
         fcgPNFreeFpsCustom->Controls->Add(fcgLBFreeFpsScale);
         fcgPNFreeFpsCustom->Controls->Add(fcgNUFreeFpsRate);
@@ -192,6 +203,9 @@ private: System::Windows::Forms::Label^  fcgLBAMPAutoBitrate;
         fcgGroupFreeFps->Controls->Add(fcgCXFreeFpsPreset);
         fcgGroupFreeFps->Controls->Add(fcgPNFreeFpsCustom);
         fcgGroupFreeFps->Controls->Add(fcgLBFreeFpsNotice);
+#if AVIUTL_TARGET_VER == 2
+        fcgGroupFreeFps->Controls->Add(fcgLBFreeFpsHostHint);
+#endif
         fcgTabFreeFps->Controls->Add(fcgGroupFreeFps);
         fcgtabControlVideo->TabPages->Add(fcgTabFreeFps);
         fcgCXFreeFpsPreset->SelectedIndex = 8;

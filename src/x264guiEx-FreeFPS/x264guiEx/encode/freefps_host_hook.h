@@ -11,6 +11,9 @@ struct FreeFpsRequestContext {
     bool active;
 };
 
+// Read-only check that the running host is one this hook build can patch.
+// Does not install or modify anything; safe to call before a session starts.
+bool freefps_host_supported();
 bool freefps_hook_install(std::wstring& error);
 void freefps_hook_uninstall();
 bool freefps_hook_begin_request(const FreeFpsRequestContext& request,

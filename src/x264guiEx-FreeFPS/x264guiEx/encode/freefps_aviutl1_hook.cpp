@@ -465,6 +465,27 @@ void __cdecl render_prep_detour(
 
 } // namespace
 
+bool freefps_host_supported() {
+    // Same checks as freefps_hook_install, minus the patching.
+    std::wstring error;
+    if (!validate_module(GetModuleHandleW(nullptr), kAviUtlImageSize,
+                         kAviUtlEntryRva, kAviUtlTimestamp, kAviUtlFileSize,
+                         kAviUtlSha256, L"AviUtl 1.10", error)) {
+        return false;
+    }
+    const HMODULE exedit = find_exedit_module();
+    if (!validate_module(exedit, kExEditImageSize, kExEditEntryRva,
+                         kExEditTimestamp, kExEditFileSize, kExEditSha256,
+                         L"ExEdit 0.92", error)) {
+        return false;
+    }
+    const auto* exedit_base = reinterpret_cast<const std::uint8_t*>(exedit);
+    return std::memcmp(exedit_base + kRenderPrepRva, kRenderPrepPrologue.data(),
+                       kPatchSize) == 0 &&
+           std::memcmp(exedit_base + kSubframeApplyRva,
+                       kSubframeApplyPrologue.data(), kSubframePatchSize) == 0;
+}
+
 bool freefps_hook_install(std::wstring& error) {
     if (g_installed) {
         return true;

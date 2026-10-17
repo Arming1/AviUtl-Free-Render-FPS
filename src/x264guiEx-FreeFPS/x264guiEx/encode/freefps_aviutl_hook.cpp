@@ -124,6 +124,16 @@ std::uintptr_t __fastcall timeline_builder_detour(
 
 } // namespace
 
+bool freefps_host_supported() {
+#if !defined(_M_X64)
+    return false;
+#else
+    std::uint8_t* module = nullptr;
+    std::wstring error;
+    return validate_host(module, error);
+#endif
+}
+
 bool freefps_hook_install(std::wstring& error) {
 #if !defined(_M_X64)
     error = L"FreeFPS: the FreeRenderFPS hook is x64-only.";

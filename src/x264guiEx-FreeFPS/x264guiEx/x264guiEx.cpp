@@ -50,6 +50,7 @@
 #include "auo_runbat.h"
 #include "auo_mes.h"
 #include "freefps_scheduler.h"
+#include "freefps_host_hook.h"
 
 #if AVIUTL_TARGET_VER == 2
 #include "logger2.h"
@@ -330,6 +331,18 @@ BOOL func_output( OUTPUT_INFO *oip ) {
     };
     std::wstring freefps_error;
     if (!freefps.initialize(oip, freefps_settings, freefps_error)) {
+#if AVIUTL_TARGET_VER == 2
+        if (!freefps_host_supported()) {
+            // Unsupported host: the hook never patched anything, so the
+            // session is unusable here. Do not fall back to project FPS silently.
+            freefps_error =
+                L"此 AviUtl2 版本不支持内置 Free Render FPS（Hook 仅支持 v2.1.4）。"
+                L"请取消勾选 Enable Free Render FPS 后正常导出，或使用 编辑 > Free FPS Export... 以任意帧率导出。\n\n"
+                L"This AviUtl2 version does not support the built-in Free Render FPS "
+                L"(the hook only supports v2.1.4). Untick Enable Free Render FPS and export normally, "
+                L"or use Edit > Free FPS Export... to export at any frame rate.";
+        }
+#endif
         MessageBoxW(nullptr, freefps_error.c_str(),
                     L"x264guiEx FreeRenderFPS", MB_OK | MB_ICONERROR);
         return FALSE;
