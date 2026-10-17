@@ -80,6 +80,11 @@ encapsulates a neighbor-frame eviction fallback in
 `freefps_cache_workaround.*`. It is replaceable by a future task-aware cache
 identity or isolated render context.
 
+The eviction render is copied and reused once when the next matching sample
+asks for that exact integer coordinate, so integer-ratio cases such as 30 -> 60
+no longer render that frame twice; other ratios (e.g. 30 -> 120) still pay part
+of the extra render. Reuse is disabled for unknown formats or odd-width YUY2.
+
 ## Configuration isolation
 
 The formal plugin uses:

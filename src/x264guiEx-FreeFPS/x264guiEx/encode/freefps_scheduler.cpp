@@ -227,16 +227,28 @@ void* FreeFpsSession::request_video(std::int64_t output_index, DWORD format,
     }
     const double coordinate = coordinate_for(output_index);
     const int public_frame = public_frame_for(output_index);
+    // An earlier eviction already rendered this exact coordinate. The host
+    // cache is untouched on this path, so cache_.record_target is not called.
+    if (const void* stashed = stash_.take(public_frame, coordinate)) {
+        return const_cast<void*>(stashed);
+    }
     if (cache_.needs_eviction(public_frame, coordinate)) {
         const int neighbor = cache_.eviction_frame(public_frame);
         if (neighbor < 0) {
             error = L"FreeFPS: no neighbor frame is available for cache eviction.";
             return nullptr;
         }
-        void* ignored = nullptr;
+        void* evicted = nullptr;
         if (!request_at(neighbor, static_cast<double>(neighbor), -1, format,
-                        ignored, error)) {
+                        evicted, error)) {
             return nullptr;
+        }
+        if (neighbor > public_frame) {
+            const size_t bytes = freefps_host_frame_bytes(
+                static_cast<std::uint32_t>(format), effective_.w, effective_.h);
+            if (bytes != 0) {
+                stash_.store(neighbor, static_cast<double>(neighbor), evicted, bytes);
+            }
         }
     }
     void* frame = nullptr;

@@ -54,4 +54,5 @@ private:
     std::uint64_t coordinate_denominator_;
     std::uint64_t generation_;
     FreeFpsCacheWorkaround cache_;
+    FreeFpsFrameStash stash_;
 };
