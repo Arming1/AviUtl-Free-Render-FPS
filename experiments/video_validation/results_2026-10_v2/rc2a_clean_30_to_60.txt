@@ -1,0 +1,26 @@
+Validation: D:\AviUtl Free Render FPS\experiments\66_to_60_validation\rc2a_clean_30_to_60.mp4
+ffmpeg:     ffmpeg version 2025-11-27-git-61b034a47c-full_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers
+Project:    30/1 fps, 150 frames; target 60/1 fps (ratio 2/1)
+Expected:   300 frames, 5.000000 s
+Video:      h264 640x360 yuv420p, r_frame_rate=60/1 avg_frame_rate=60/1 duration=5.000000 s
+Audio:      aac 44100 Hz 2 ch, duration=5.000000 s
+Decode:     gray 640x360, fps_mode=passthrough
+
+Measured
+  decoded frames                300   (ffprobe -count_frames 300)
+  unique frame hashes           300
+  adjacent exact duplicates     0   at none
+  adjacent near-duplicates      1   (MAD < 0.014302083333333335) at 299 (frames 298-299)
+  MAD over boundaries           min 0.0000  median 0.1430  mean 0.1427  max 0.1575
+  pairing score (r=2)  in-group median MAD 0.1426 (150 boundaries, i%r!=0)
+                                out-of-group median MAD 0.1436 (149 boundaries, i%r==0)
+                                in/out ratio 0.9932
+
+Checks
+  PASS  frame_count     decoded 300, expected 300, ffprobe -count_frames 300
+  PASS  stream_rate     r_frame_rate 60/1 vs target 60/1
+  PASS  av_duration     video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.016667 s
+  PASS  no_pairing      r=2 in-group median MAD 0.1426 vs out-of-group 0.1436, ratio 0.9932, need >= 0.25
+  PASS  near_duplicates 1 boundaries with MAD < 0.014302083333333335; 1 at the final boundary ignored (end clamp); 0 counted, limit 1
+
+Overall: PASS

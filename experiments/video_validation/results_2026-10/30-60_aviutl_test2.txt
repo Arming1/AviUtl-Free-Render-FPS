@@ -1,0 +1,31 @@
+Validation: D:\AviUtl Free Render FPS\30-60 aviutl test2.mp4
+ffmpeg:     ffmpeg version 2025-11-27-git-61b034a47c-full_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers
+Project:    30/1 fps, 150 frames; target 60/1 fps (ratio 2/1)
+Expected:   300 frames, 5.000000 s
+Video:      h264 640x480 yuv420p, r_frame_rate=60/1 avg_frame_rate=60/1 duration=5.000000 s
+Audio:      aac 44100 Hz 2 ch, duration=5.000000 s
+Decode:     gray 640x480, fps_mode=passthrough
+
+Measured
+  decoded frames                300   (ffprobe -count_frames 300)
+  unique frame hashes           293
+  adjacent exact duplicates     7   at 27 (frames 26-27), 87 (frames 86-87), 119 (frames 118-119), 143 (frames 142-143), 195 (frames 194-195), 249 (frames 248-249), 299 (frames 298-299)
+  adjacent near-duplicates      299   (MAD < 0.5) at 1 (frames 0-1), 2 (frames 1-2), 3 (frames 2-3), 4 (frames 3-4), 5 (frames 4-5), 6 (frames 5-6), 7 (frames 6-7), 8 (frames 7-8), 9 (frames 8-9), 10 (frames 9-10), 11 (frames 10-11), 12 (frames 11-12), 13 (frames 12-13), 14 (frames 13-14), 15 (frames 14-15), 16 (frames 15-16), 17 (frames 16-17), 18 (frames 17-18), 19 (frames 18-19), 20 (frames 19-20), ... (+279 more)
+  MAD over boundaries           min 0.0000  median 0.0069  mean 0.2196  max 0.4503
+  pairing score (r=2)  in-group median MAD 0.0002 (150 boundaries, i%r!=0)
+                                out-of-group median MAD 0.4418 (149 boundaries, i%r==0)
+                                in/out ratio 0.0005
+
+Checks
+  PASS  frame_count     decoded 300, expected 300, ffprobe -count_frames 300
+  PASS  stream_rate     r_frame_rate 60/1 vs target 60/1
+  PASS  av_duration     video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.016667 s
+  FAIL  no_pairing      r=2 in-group median MAD 0.0002 vs out-of-group 0.4418, ratio 0.0005, need >= 0.25
+  FAIL  near_duplicates 299 boundaries with MAD < 0.5; 1 at the final boundary ignored (end clamp); 298 counted, limit 1
+
+Reference (informational, not a check)
+                frames   unique   r_frame_rate       size
+  target           300      293           60/1    640x480
+  reference        150      150           30/1    640x480
+
+Overall: FAIL
