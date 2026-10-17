@@ -1,4 +1,4 @@
-# Known limitations — v1.2.0 (1.1.0 plus precise motion)
+# Known limitations — v1.2.1
 
 - The built-in FreeFPS hook supports AviUtl2 v2.1.4 x64 only. Its guarded private hook rejects
   unknown host image/signature combinations.
@@ -53,3 +53,5 @@
 - The built-in FreeFPS hook (v2.1.4) has not been validated with the 1.1.0 binary.
   The AviUtl 1.x package is still 1.0.1 and has not been re-validated. The
   measured AviUtl 1.x matrices are from 1.0.0.
+- Free FPS Export error messages are still English, even though the dialog and the
+  Free Render FPS tab are localized to Chinese, Japanese and English.

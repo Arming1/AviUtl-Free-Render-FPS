@@ -1,7 +1,7 @@
 # FreeRenderFPS RC installer
 
 This directory contains the source for the managed Windows installer used by
-the v1.2.0 package. It accepts only the formal adjacent plugin files
+the v1.2.1 package. It accepts only the formal adjacent plugin files
 (`x264guiEx-FreeRenderFPS.aux2` plus the three `.ini` files), the exact-hash
 audited x264/FFmpeg/L-SMASH runtime, `.stg` presets, manifests and
 documentation. It rejects unknown executables, DLLs, debug artifacts, `.auo2`

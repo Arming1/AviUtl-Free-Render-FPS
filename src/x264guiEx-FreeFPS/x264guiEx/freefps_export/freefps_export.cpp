@@ -10,7 +10,8 @@
 //   1. Project path: taken from the project load and save callbacks (PROJECT_FILE::get_project_file_path,
 //      plugin2.h). A project with no path is refused: save it first.
 //   2. Dialog: target FPS (exact rational: 66, 60000/1001; decimals refused), output file, and the precise motion
-//      option (on by default: linear trackbars are re-sampled exactly; see retime.h).
+//      option (on by default: linear trackbars are re-sampled exactly; see retime.h). The encoder settings button
+//      opens the x264guiEx settings window (the output settings, edited in place); a read-only summary shows them.
 //   3. Confirm: the SDK has no unsaved-changes flag, so the user is always asked whether to save the project to its
 //      own path first. No (or closing the prompt) aborts with no side effects.
 //   4. save_project_file(original) once confirmed, then copy the saved original to
@@ -33,13 +34,16 @@
 #include <commdlg.h>
 #include <wchar.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
+#include "auo_mes.h"
 #include "auo_version.h"
 #include "logger2.h"
 #include "output2.h"
@@ -48,6 +52,7 @@
 #include "freefps_export.h"
 
 #pragma comment(lib, "user32.lib")     // SetTimer, MessageBoxW, dialogs
+#pragma comment(lib, "gdi32.lib")      // text measurement for the dialog layout (SelectObject, GetStockObject)
 #pragma comment(lib, "comdlg32.lib")   // GetSaveFileNameW
 
 std::atomic<bool> g_freefps_menu_export_active{false};  // see freefps_export.h
@@ -87,6 +92,17 @@ constexpr int kIdRate = 101;
 constexpr int kIdOutput = 102;
 constexpr int kIdBrowse = 103;
 constexpr int kIdPrecise = 104;
+constexpr int kIdRateLabel = 105;
+constexpr int kIdOutputLabel = 106;
+constexpr int kIdSummary = 107;
+constexpr int kIdEncSettings = 108;
+
+// Dialog metrics in dialog units. The content width is kBaseContentWidth, or wider when a text needs it (layout_dialog).
+constexpr int kMargin = 7;
+constexpr int kBaseContentWidth = 248;
+constexpr int kDialogHeight = 140;
+constexpr int kButtonPadding = 12;  // added to a button's text width
+constexpr int kCheckPadding = 14;   // check box square and spacing
 
 LOG_HANDLE* g_logger = nullptr;
 EDIT_HANDLE* g_edit = nullptr;
@@ -636,12 +652,124 @@ void dialog_error(HWND dlg, const std::wstring& text) {
     MessageBoxW(dlg, text.c_str(), kTitle, MB_OK | MB_ICONERROR);
 }
 
+// Localized dialog text from the x264guiEx language file, or the English fallback when the key has no text.
+const wchar_t* mes(AuoMes id, const wchar_t* fallback) {
+    const wchar_t* text = g_auo_mes.get(id);
+    return (text != nullptr && text[0] != L'\0') ? text : fallback;
+}
+
+// The default output container without the dot, e.g. "mp4" (x264guiEx default_output_ext).
+std::wstring container_name() {
+    wchar_t name[32] = {};
+    freefps_get_container_name(name, sizeof(name) / sizeof(name[0]));
+    return name;
+}
+
+// Width of a control's text in dialog units, measured with the control's own font, plus extra units.
+int text_width_dlu(HWND dlg, int id, int extra) {
+    HWND ctl = GetDlgItem(dlg, id);
+    const std::wstring text = get_text(dlg, id);
+    HDC dc = GetDC(ctl);
+    HFONT font = reinterpret_cast<HFONT>(SendMessageW(ctl, WM_GETFONT, 0, 0));
+    HGDIOBJ old_font = SelectObject(dc, font != nullptr ? font : GetStockObject(DEFAULT_GUI_FONT));
+    RECT measured{};
+    DrawTextW(dc, text.c_str(), -1, &measured, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+    SelectObject(dc, old_font);
+    ReleaseDC(ctl, dc);
+    RECT unit{0, 0, 4, 8};  // 4 x 8 dialog units in pixels
+    MapDialogRect(dlg, &unit);
+    const double pixels_per_unit = unit.right / 4.0;
+    return static_cast<int>(std::ceil((measured.right - measured.left) / pixels_per_unit)) + extra;
+}
+
+void place_item(HWND dlg, int id, int x, int y, int w, int h) {
+    RECT rc{x, y, x + w, y + h};
+    MapDialogRect(dlg, &rc);
+    SetWindowPos(GetDlgItem(dlg, id), nullptr, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+                 SWP_NOZORDER);
+}
+
+// Places every control in dialog units, in pixels of the dialog's own font, and sizes the dialog. The content width is
+// kBaseContentWidth, or wider when a label, check box or the summary needs more, so no text is cut off in any language.
+void layout_dialog(HWND dlg) {
+    int content = kBaseContentWidth;
+    for (const int need : {text_width_dlu(dlg, kIdRateLabel, 0), text_width_dlu(dlg, kIdOutputLabel, 0),
+                           text_width_dlu(dlg, kIdPrecise, kCheckPadding), text_width_dlu(dlg, kIdSummary, 0)}) {
+        content = (std::max)(content, need);
+    }
+    const int browse_w = (std::max)(44, text_width_dlu(dlg, kIdBrowse, kButtonPadding));
+    const int enc_w = (std::max)(90, text_width_dlu(dlg, kIdEncSettings, kButtonPadding));
+    const int ok_w = (std::max)(50, text_width_dlu(dlg, IDOK, kButtonPadding));
+    const int cancel_w = (std::max)(50, text_width_dlu(dlg, IDCANCEL, kButtonPadding));
+
+    const int right = kMargin + content;
+    place_item(dlg, kIdRateLabel, kMargin, 7, content, 10);
+    place_item(dlg, kIdRate, kMargin, 18, content, 14);
+    place_item(dlg, kIdOutputLabel, kMargin, 38, content, 10);
+    place_item(dlg, kIdOutput, kMargin, 48, content - browse_w - 4, 14);
+    place_item(dlg, kIdBrowse, right - browse_w, 48, browse_w, 14);
+    place_item(dlg, kIdPrecise, kMargin, 66, content, 12);
+    place_item(dlg, kIdSummary, kMargin, 84, content, 10);
+    place_item(dlg, kIdEncSettings, kMargin, 100, enc_w, 14);
+    place_item(dlg, IDCANCEL, right - cancel_w, 120, cancel_w, 14);
+    place_item(dlg, IDOK, right - cancel_w - 4 - ok_w, 120, ok_w, 14);
+
+    RECT frame{0, 0, 2 * kMargin + content, kDialogHeight};
+    MapDialogRect(dlg, &frame);  // client size in pixels
+    AdjustWindowRectEx(&frame, static_cast<DWORD>(GetWindowLongPtrW(dlg, GWL_STYLE)), FALSE,
+                       static_cast<DWORD>(GetWindowLongPtrW(dlg, GWL_EXSTYLE)));
+    const int width = frame.right - frame.left;
+    const int height = frame.bottom - frame.top;
+    RECT current{};
+    GetWindowRect(dlg, &current);
+    if (width != current.right - current.left || height != current.bottom - current.top) {
+        // Keep the dialog centred on its owner, as DS_CENTER did for the first size.
+        RECT anchor{};
+        HWND owner = GetWindow(dlg, GW_OWNER);
+        if (owner == nullptr || !GetWindowRect(owner, &anchor)) {
+            MONITORINFO info{sizeof(info)};
+            GetMonitorInfoW(MonitorFromWindow(dlg, MONITOR_DEFAULTTONEAREST), &info);
+            anchor = info.rcWork;
+        }
+        const int x = anchor.left + ((anchor.right - anchor.left) - width) / 2;
+        const int y = anchor.top + ((anchor.bottom - anchor.top) - height) / 2;
+        SetWindowPos(dlg, nullptr, x, y, width, height, SWP_NOZORDER);
+    }
+}
+
+// Shows the encoder summary (the output settings, with the container of the current output file name) and re-fits
+// the dialog to it.
+void refresh_summary(HWND dlg) {
+    const std::wstring output = trim(get_text(dlg, kIdOutput));
+    wchar_t summary[512] = {};
+    freefps_get_encoder_summary(summary, sizeof(summary) / sizeof(summary[0]),
+                                output.empty() ? nullptr : output.c_str());
+    std::wstring prefix = mes(AuoFreeFpsExportEncSummary, L"Encoder: ");
+    if (!prefix.empty() && prefix.back() != L' ') {
+        prefix += L' ';  // the language file value may have no trailing space
+    }
+    const std::wstring text = prefix + summary;
+    SetDlgItemTextW(dlg, kIdSummary, text.c_str());
+    layout_dialog(dlg);
+}
+
 INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_INITDIALOG:
         SetWindowLongPtrW(dlg, DWLP_USER, lparam);
+        SetWindowTextW(dlg, mes(AuoFreeFpsExportTitle, kTitle));
+        SetDlgItemTextW(dlg, kIdRateLabel,
+                        mes(AuoFreeFpsExportTargetFps, L"Target FPS (exact: 66, 60000/1001; decimals are refused)"));
+        SetDlgItemTextW(dlg, kIdOutputLabel, mes(AuoFreeFpsExportOutputFile, L"Output file"));
+        SetDlgItemTextW(dlg, kIdBrowse, mes(AuoFreeFpsExportBrowse, L"Browse..."));
+        SetDlgItemTextW(dlg, kIdPrecise,
+                        mes(AuoFreeFpsExportPrecise, L"Precise motion (exact speed for linear motion)"));
+        SetDlgItemTextW(dlg, kIdEncSettings, mes(AuoFreeFpsExportEncSettings, L"Encoder settings..."));
+        SetDlgItemTextW(dlg, IDOK, mes(AuoFreeFpsExportOK, L"OK"));
+        SetDlgItemTextW(dlg, IDCANCEL, mes(AuoFreeFpsExportCancel, L"Cancel"));
         CheckDlgButton(dlg, kIdPrecise,
                        reinterpret_cast<DialogValues*>(lparam)->precise ? BST_CHECKED : BST_UNCHECKED);
+        refresh_summary(dlg);
         return TRUE;
 
     case WM_COMMAND:
@@ -649,18 +777,41 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
             std::vector<wchar_t> file(4096, L'\0');
             const std::wstring current = get_text(dlg, kIdOutput);
             wcsncpy_s(file.data(), file.size(), current.c_str(), _TRUNCATE);
-            static const wchar_t kFilter[] = L"MP4 video (*.mp4)\0*.mp4\0All files (*.*)\0*.*\0\0";
+            // The filter and the default extension follow the default output container.
+            const std::wstring name = container_name();
+            const std::wstring pattern = L"*." + name;
+            std::wstring filter = name + L" file (" + pattern + L")";
+            filter.push_back(L'\0');
+            filter += pattern;
+            filter.push_back(L'\0');
+            filter += L"All files (*.*)";
+            filter.push_back(L'\0');
+            filter += L"*.*";
+            filter.push_back(L'\0');
+            filter.push_back(L'\0');
             OPENFILENAMEW ofn{};
             ofn.lStructSize = sizeof(ofn);
             ofn.hwndOwner = dlg;
-            ofn.lpstrFilter = kFilter;
+            ofn.lpstrFilter = filter.c_str();
             ofn.lpstrFile = file.data();
             ofn.nMaxFile = static_cast<DWORD>(file.size());
             ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-            ofn.lpstrDefExt = L"mp4";
+            ofn.lpstrDefExt = name.c_str();
             if (GetSaveFileNameW(&ofn)) {
                 SetDlgItemTextW(dlg, kIdOutput, file.data());
+                refresh_summary(dlg);
             }
+            return TRUE;
+        }
+        if (LOWORD(wparam) == kIdOutput && HIWORD(wparam) == EN_CHANGE) {
+            refresh_summary(dlg);  // the container shown follows the output file name
+            return TRUE;
+        }
+        if (LOWORD(wparam) == kIdEncSettings) {
+            if (!freefps_open_encoder_settings()) {
+                MessageBoxW(dlg, L"The encoder settings are not available.", kTitle, MB_OK | MB_ICONERROR);
+            }
+            refresh_summary(dlg);
             return TRUE;
         }
         if (LOWORD(wparam) == IDCANCEL) {
@@ -670,7 +821,7 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
         if (LOWORD(wparam) == IDOK) {
             DialogValues* values = reinterpret_cast<DialogValues*>(GetWindowLongPtrW(dlg, DWLP_USER));
             const std::wstring rate = trim(get_text(dlg, kIdRate));
-            const std::wstring output = trim(get_text(dlg, kIdOutput));
+            std::wstring output = trim(get_text(dlg, kIdOutput));
             Rational parsed;
             std::string error;
             if (!free_fps::parse_target_rate(free_fps::wide_to_utf8(rate), parsed, error)) {
@@ -691,6 +842,18 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
                 SetFocus(GetDlgItem(dlg, kIdOutput));
                 return TRUE;
             }
+            if (!freefps_has_known_container_ext(output.c_str())) {
+                // The encoder appends its default container extension to a name it does not recognise. Do the same
+                // here, so the name in the box is the file that is written and the output check matches it.
+                if (output.back() == L'\\') {
+                    dialog_error(dlg, L"Choose an output file.");
+                    SetFocus(GetDlgItem(dlg, kIdOutput));
+                    return TRUE;
+                }
+                output += L"." + container_name();
+                SetDlgItemTextW(dlg, kIdOutput, output.c_str());
+                refresh_summary(dlg);
+            }
             values->rate = rate;
             values->output = output;
             values->precise = IsDlgButtonChecked(dlg, kIdPrecise) == BST_CHECKED;
@@ -709,28 +872,31 @@ bool ask_for_request(HWND owner, DialogValues& values) {
     const DWORD style = DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU;
     t.dword(style);
     t.dword(0);
-    t.word(8);  // item count
+    t.word(10);  // item count
     t.word(0);
     t.word(0);
-    t.word(262);
-    t.word(104);
+    t.word(static_cast<WORD>(2 * kMargin + kBaseContentWidth));
+    t.word(static_cast<WORD>(kDialogHeight));
     t.word(0);  // no menu
     t.word(0);  // default class
     t.text(kTitle);
     t.word(9);  // font point size
     t.text(L"MS Shell Dlg");
 
+    // Texts are empty here and set in WM_INITDIALOG; the positions are placed again by layout_dialog.
     const DWORD static_style = WS_CHILD | WS_VISIBLE | SS_LEFT;
     const DWORD edit_style = WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL;
-    add_item(t, static_style, 7, 7, 248, 10, 0xFFFF, 0x0082, L"Target FPS (exact: 66, 60000/1001; decimals are refused)");
+    const DWORD button_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP;
+    add_item(t, static_style, 7, 7, 248, 10, kIdRateLabel, 0x0082, L"");
     add_item(t, edit_style, 7, 18, 248, 14, kIdRate, 0x0081, L"");
-    add_item(t, static_style, 7, 38, 248, 10, 0xFFFF, 0x0082, L"Output file");
+    add_item(t, static_style, 7, 38, 248, 10, kIdOutputLabel, 0x0082, L"");
     add_item(t, edit_style, 7, 48, 200, 14, kIdOutput, 0x0081, L"");
-    add_item(t, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 211, 48, 44, 14, kIdBrowse, 0x0080, L"Browse...");
-    add_item(t, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, 7, 66, 248, 12, kIdPrecise, 0x0080,
-             L"Precise motion (exact speed for linear motion)");
-    add_item(t, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 146, 84, 50, 14, IDOK, 0x0080, L"OK");
-    add_item(t, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 200, 84, 50, 14, IDCANCEL, 0x0080, L"Cancel");
+    add_item(t, button_style, 211, 48, 44, 14, kIdBrowse, 0x0080, L"");
+    add_item(t, button_style | BS_AUTOCHECKBOX, 7, 66, 248, 12, kIdPrecise, 0x0080, L"");
+    add_item(t, static_style, 7, 84, 248, 10, kIdSummary, 0x0082, L"");
+    add_item(t, button_style, 7, 100, 90, 14, kIdEncSettings, 0x0080, L"");
+    add_item(t, button_style | BS_DEFPUSHBUTTON, 146, 120, 50, 14, IDOK, 0x0080, L"");
+    add_item(t, button_style, 200, 120, 50, 14, IDCANCEL, 0x0080, L"");
 
     const INT_PTR result = DialogBoxIndirectParamW(g_instance, reinterpret_cast<LPCDLGTEMPLATEW>(t.data()), owner,
                                                    dialog_proc, reinterpret_cast<LPARAM>(&values));

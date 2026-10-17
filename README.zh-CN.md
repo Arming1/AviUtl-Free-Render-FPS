@@ -2,13 +2,24 @@
 
 **简体中文** | [日本語](README.ja.md) | [English](README.en.md)
 
+> **AI 辅助开发声明：** 本项目在 AI 辅助下开发。代码、文档和测试工具主要由 AI 编写（早期使用 OpenAI Codex，后续使用 Anthropic Claude / Claude Code）。作者负责策划、审查，并在 AviUtl2 实机上测试验证。
+
 FreeRenderFPS 基于 x264guiEx，同时提供 AviUtl2 和旧版 AviUtl 1.x 的宿主适配器，
 可让场景求值采样率独立于工程 FPS。例如 30 FPS 工程输出 60 FPS 时，会真实求值
 0.0、0.5、1.0、1.5……工程帧坐标，而不是复制帧或只修改容器 FPS 元数据。
 
-## v1.2.0 更新
+## v1.2.1 更新
 
-v1.2.0 在 v1.1.0 的单一 AviUtl2 插件文件基础上新增精确运动模式，详见 [CHANGELOG.md](CHANGELOG.md)：
+v1.2.1 是 v1.2.0 的修正版，详见 [CHANGELOG.md](CHANGELOG.md)：
+
+- Free FPS Export 对话框新增“编码设置...”按钮（打开与输出设置相同的 x264guiEx 设置窗口，修改即时生效）和编码摘要行，容器跟随输出文件扩展名。输出文件没有可识别的扩展名时，点击确定会自动补上默认扩展名。
+- Free FPS Export 使用 x264guiEx 设置窗口中的码率、预设、音频和封装设置导出。导出时只关闭内置的 Free Render FPS 开关，不修改已保存的设置。
+- Free FPS Export 对话框和 Free Render FPS 标签页支持中文、日文、英文（错误提示仍为英文）。
+- Free Render FPS 标签页布局已修复：“目标帧率”下拉框不再被标签遮挡。
+
+### v1.2.0 更新
+
+v1.2.0 在 v1.1.0 的单一 AviUtl2 插件文件基础上新增精确运动模式：
 
 - 新增 Precise motion（精确运动模式）：Free FPS Export 对话框中的复选框默认勾选，直线运动速度与原工程一致。详见下文“精确模式”一节。
 - `x264guiEx-FreeRenderFPS.aux2` 同时包含输出插件和“编辑 > **Free FPS Export...**”菜单项。后者通过 AviUtl2 公开 SDK 重新求值场景，在 AviUtl2 v2.1.12 上可使用任意有理输出帧率。
@@ -17,7 +28,7 @@ v1.2.0 在 v1.1.0 的单一 AviUtl2 插件文件基础上新增精确运动模�
 - 新增 `.aup2` 帧率转换工具、宿主无关测试和验证工具。
 
 下方的发布门禁和旧版 Hook 实测表格是 v1.0.0 的结果。Free FPS Export 已于 2026-10-17 在
-AviUtl2 v2.1.12 上实机测试：精确运动模式 8 组转换和 30 分钟音画同步 3 段，全部通过（见“Free FPS Export 实测”）。测试二进制为 `x264guiEx-FreeRenderFPS.aux2`（版本资源 1.1.0，SHA256 114C3070…6076B，2026-10-17 17:52 重新打包，含 Precise motion）。该构建内容即 1.2.0 的功能，仅版本号未升；首版 1.1.0 构建不含精确模式。1.2.0 安装包尚需重新打包（还没打）。
+AviUtl2 v2.1.12 上实机测试：精确运动模式 8 组转换和 30 分钟音画同步 3 段，全部通过（见“Free FPS Export 实测”）。测试二进制为 `x264guiEx-FreeRenderFPS.aux2`（版本资源 1.1.0，SHA256 114C3070…6076B，2026-10-17 17:52 重新打包，含 Precise motion）。该构建内容即 1.2.0 的功能，仅版本号未升；首版 1.1.0 构建不含精确模式。
 1.1.0 的内置 Hook 尚待在 AviUtl2 v2.1.4 上实测。AviUtl 1.x 包仍为 v1.0.1，尚待在 AviUtl 1.10 + ExEdit 0.92 上重新实测。
 
 ## 下载
@@ -32,7 +43,7 @@ AviUtl 宿主本体。
 
 ## 一键安装
 
-1. 完整解压 v1.2.0 setup ZIP（1.2.0 安装包尚需重新打包，还没打）。
+1. 完整解压 `AviUtl2-FreeRenderFPS-v1.2.1-setup.zip`。
 2. 双击其中与 `payload` 相邻的 setup EXE。
 3. 重启 AviUtl2。
 4. 选择 `x264guiEx FreeRenderFPS`。
@@ -45,7 +56,7 @@ AviUtl 宿主本体。
 
 ## 手动安装
 
-将 v1.2.0 portable ZIP（尚需重新打包，还没打）直接解压到 AviUtl2 根目录；包内已包含
+将 `AviUtl2-FreeRenderFPS-v1.2.1-portable.zip` 直接解压到 AviUtl2 根目录；包内已包含
 `data\Plugin\x264guiEx-FreeRenderFPS`。必须保持正式 `x264guiEx-FreeRenderFPS.aux2`
 与三个相邻 INI 同名同目录，不要复制 Debug、PDB、Probe、watcher 或断点工具，
 也不要重命名正式文件。

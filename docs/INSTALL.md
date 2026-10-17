@@ -1,7 +1,8 @@
-# Installing FreeRenderFPS v1.2.0
+# Installing FreeRenderFPS v1.2.1
 
-The v1.2.0 setup and portable packages have not been rebuilt yet. The v1.2.0 plugin
-is the 1.1.0 build plus Precise motion; see [CHANGELOG.md](../CHANGELOG.md).
+The v1.2.1 packages are `AviUtl2-FreeRenderFPS-v1.2.1-setup.zip` and
+`AviUtl2-FreeRenderFPS-v1.2.1-portable.zip`. See [CHANGELOG.md](../CHANGELOG.md)
+for what changed in 1.2.1.
 
 Close AviUtl2 before installation.
 
@@ -25,9 +26,10 @@ INI files together under the same name.
 
 ## Setup package
 
-Extract the complete setup ZIP and keep the setup EXE beside its `payload`
-directory. Run the EXE, then start AviUtl2. On first discovery, review the host
-warning, trust `x264guiEx-FreeRenderFPS.aux2`, and restart AviUtl2 if requested.
+Extract the complete `AviUtl2-FreeRenderFPS-v1.2.1-setup.zip` and keep the setup
+EXE beside its `payload` directory. Run the EXE, then start AviUtl2. On first
+discovery, review the host warning, trust `x264guiEx-FreeRenderFPS.aux2`, and
+restart AviUtl2 if requested.
 
 The default destination is
 `%ProgramData%\aviutl2\Plugin\x264guiEx-FreeRenderFPS`. Advanced isolated
@@ -36,7 +38,8 @@ uninstall, rollback, preservation, logging, dry-run and non-interactive options.
 
 ## Portable package
 
-Extract the portable ZIP directly over the AviUtl2 root. It already contains:
+Extract `AviUtl2-FreeRenderFPS-v1.2.1-portable.zip` directly over the AviUtl2 root.
+It already contains:
 
 `data\Plugin\x264guiEx-FreeRenderFPS`
 
@@ -48,6 +51,11 @@ Do not create a second root-level `Plugin` copy. Exactly one
 After installing the plugin, open **Edit → Free FPS Export...** in AviUtl2
 v2.1.12. It re-times the project with public SDK APIs and exports at any
 rational FPS. The project must be saved to a file first.
+
+The dialog's **Encoder settings...** button opens the same x264guiEx settings window
+as the output settings. Export uses the bitrate, preset, audio and container from
+that window. It only turns off the built-in Enable Free Render FPS switch and does
+not change the saved settings.
 
 This item replaces the separate experimental `free_fps_export.aux2`. Do not
 install that file (see below).

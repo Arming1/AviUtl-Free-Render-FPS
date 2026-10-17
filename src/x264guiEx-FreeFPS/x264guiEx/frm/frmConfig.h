@@ -145,13 +145,10 @@ private: System::Windows::Forms::Label^  fcgLBAMPAutoBitrate;
         fcgGroupFreeFps->Size = System::Drawing::Size(560, 255);
         fcgCBFreeFpsEnable->Text = L"Enable Free Render FPS";
         fcgCBFreeFpsEnable->AutoSize = true;
-        fcgCBFreeFpsEnable->Location = System::Drawing::Point(20, 30);
         fcgCBFreeFpsEnable->CheckedChanged += gcnew System::EventHandler(this, &frmConfig::FreeFpsEnableChanged);
         fcgLBFreeFpsTarget->Text = L"Target FPS:";
         fcgLBFreeFpsTarget->AutoSize = true;
-        fcgLBFreeFpsTarget->Location = System::Drawing::Point(20, 70);
         fcgCXFreeFpsPreset->DropDownStyle = System::Windows::Forms::ComboBoxStyle::DropDownList;
-        fcgCXFreeFpsPreset->Location = System::Drawing::Point(110, 66);
         fcgCXFreeFpsPreset->Size = System::Drawing::Size(170, 24);
         fcgCXFreeFpsPreset->Items->Add(L"23.976 FPS");
         fcgCXFreeFpsPreset->Items->Add(L"24 FPS");
@@ -168,7 +165,6 @@ private: System::Windows::Forms::Label^  fcgLBAMPAutoBitrate;
         fcgCXFreeFpsPreset->Items->Add(L"120 FPS");
         fcgCXFreeFpsPreset->Items->Add(L"Custom");
         fcgCXFreeFpsPreset->SelectedIndexChanged += gcnew System::EventHandler(this, &frmConfig::FreeFpsPresetChanged);
-        fcgPNFreeFpsCustom->Location = System::Drawing::Point(16, 105);
         fcgPNFreeFpsCustom->Size = System::Drawing::Size(360, 55);
         fcgLBFreeFpsRate->Text = L"Rate";
         fcgLBFreeFpsRate->AutoSize = true;
@@ -186,13 +182,13 @@ private: System::Windows::Forms::Label^  fcgLBAMPAutoBitrate;
         fcgNUFreeFpsScale->Value = System::Decimal(1);
         fcgNUFreeFpsScale->Location = System::Drawing::Point(145, 25);
         fcgNUFreeFpsScale->Size = System::Drawing::Size(115, 24);
-        fcgLBFreeFpsNotice->Text = L"Supported host: AviUtl2 v2.1.4 x64. FreeRenderFPS changes actual scene evaluation time; it does not duplicate frames.";
-        fcgLBFreeFpsNotice->Location = System::Drawing::Point(20, 175);
-        fcgLBFreeFpsNotice->Size = System::Drawing::Size(515, 55);
+        fcgLBFreeFpsNotice->Text = L"Supported host: AviUtl2 v2.1.4 x64. FreeRenderFPS changes actual scene evaluation time. It does not duplicate frames.";
+        fcgLBFreeFpsNotice->AutoSize = false;
 #if AVIUTL_TARGET_VER == 2
         fcgLBFreeFpsHostHint->Text = L"Other AviUtl2 versions: use Edit > Free FPS Export... instead.";
-        fcgLBFreeFpsHostHint->AutoSize = true;
-        fcgLBFreeFpsHostHint->Location = System::Drawing::Point(20, 232);
+        fcgLBFreeFpsHostHint->AutoSize = false;
+        // 太字で目立たせる。色は指定せずテーマに任せる
+        fcgLBFreeFpsHostHint->Font = gcnew System::Drawing::Font(this->Font, System::Drawing::FontStyle::Bold);
 #endif
         fcgPNFreeFpsCustom->Controls->Add(fcgLBFreeFpsRate);
         fcgPNFreeFpsCustom->Controls->Add(fcgLBFreeFpsScale);
@@ -217,6 +213,66 @@ private: System::Windows::Forms::Label^  fcgLBAMPAutoBitrate;
         fcgCXFreeFpsPreset->Enabled = fcgCBFreeFpsEnable->Checked;
         fcgPNFreeFpsCustom->Visible = fcgCXFreeFpsPreset->SelectedIndex == 13;
         fcgPNFreeFpsCustom->Enabled = fcgCBFreeFpsEnable->Checked;
+        LayoutFreeFpsControls();
+    }
+
+    // Free Render FPS ページの配置を組み直す。
+    // 実測した文字幅・折り返し高さで上から順に詰め、分組框の高さも内容に合わせる。
+    // 文言 (LoadLangText) やフォント (SetFontFamilyToForm) を変えた後にも呼ぶこと。
+    private: void LayoutFreeFpsControls() {
+        const int inner_left = 20;
+        const int gap = 10;
+        const int inner_width = fcgGroupFreeFps->ClientSize.Width - inner_left * 2;
+        const int chrome_height = fcgGroupFreeFps->Height - fcgGroupFreeFps->ClientSize.Height;
+        int y = 30;
+
+        fcgCBFreeFpsEnable->Location = System::Drawing::Point(inner_left, y);
+        y = fcgCBFreeFpsEnable->Bottom + gap;
+
+        // 下拉框の幅: 現在幅と、全項目の実測文字幅 + 矢印ボタン分のうち大きい方
+        int combo_width = fcgCXFreeFpsPreset->Width;
+        for (int i = 0; i < fcgCXFreeFpsPreset->Items->Count; i++) {
+            const int text_width = System::Windows::Forms::TextRenderer::MeasureText(
+                fcgCXFreeFpsPreset->Items[i]->ToString(), fcgCXFreeFpsPreset->Font).Width;
+            combo_width = System::Math::Max(combo_width,
+                text_width + System::Windows::Forms::SystemInformation::VerticalScrollBarWidth + 12);
+        }
+        fcgCXFreeFpsPreset->Width = combo_width;
+
+        // 目標FPS行: ラベル (AutoSize) の実幅の直後に 8px 空けて下拉框を置く
+        const int row_height = System::Math::Max(fcgCXFreeFpsPreset->Height, fcgLBFreeFpsTarget->Height);
+        fcgLBFreeFpsTarget->Location = System::Drawing::Point(inner_left,
+            y + (row_height - fcgLBFreeFpsTarget->Height) / 2);
+        fcgCXFreeFpsPreset->Location = System::Drawing::Point(fcgLBFreeFpsTarget->Right + 8,
+            y + (row_height - fcgCXFreeFpsPreset->Height) / 2);
+        y += row_height + gap;
+
+        // カスタム欄は表示中だけ行を占有する
+        fcgPNFreeFpsCustom->Location = System::Drawing::Point(inner_left - 4, y);
+        if (fcgPNFreeFpsCustom->Visible) {
+            y = fcgPNFreeFpsCustom->Bottom + gap;
+        }
+
+        // 注記・ホスト注意: 分組框の内幅で折り返し、高さは実測値
+        fcgLBFreeFpsNotice->Location = System::Drawing::Point(inner_left, y);
+        fcgLBFreeFpsNotice->Size = System::Drawing::Size(inner_width,
+            WrappedLabelHeight(fcgLBFreeFpsNotice, inner_width));
+        y = fcgLBFreeFpsNotice->Bottom + gap;
+#if AVIUTL_TARGET_VER == 2
+        fcgLBFreeFpsHostHint->Location = System::Drawing::Point(inner_left, y);
+        fcgLBFreeFpsHostHint->Size = System::Drawing::Size(inner_width,
+            WrappedLabelHeight(fcgLBFreeFpsHostHint, inner_width));
+        y = fcgLBFreeFpsHostHint->Bottom + gap;
+#endif
+        fcgGroupFreeFps->Height = chrome_height + y;
+    }
+
+    // 幅 width で折り返したときの文字列の高さ (余白込み)
+    private: static int WrappedLabelHeight(System::Windows::Forms::Label^ label, int width) {
+        System::Drawing::Size text_size = System::Windows::Forms::TextRenderer::MeasureText(
+            label->Text, label->Font, System::Drawing::Size(width - 8, 0),
+            System::Windows::Forms::TextFormatFlags::WordBreak);
+        return text_size.Height + 8;
     }
 
     private: System::Void FreeFpsEnableChanged(System::Object^ sender, System::EventArgs^ e) {

@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-10-17
+
+Patch release on 1.2.0: Free FPS Export encoding settings, localization and
+Free Render FPS tab layout fixes.
+
+### Added
+
+- **Encoder settings...** button in the Free FPS Export dialog. It opens the same
+  x264guiEx settings window as the output settings, and changes apply immediately.
+- Encoder summary line in the dialog, for example
+  `Encoder: CRF 20 / medium / AAC (ffmpeg) 192kbps / mp4`. The container follows
+  the output file extension.
+- Chinese, Japanese and English localization for the Free Render FPS tab in the
+  output settings window and for the Free FPS Export dialog. Error messages are
+  still English.
+
+### Changed
+
+- If the Free FPS Export output file name has no recognized extension, the default
+  extension is appended when you press OK.
+- Free FPS Export encodes with the bitrate, preset, audio and container settings in
+  the x264guiEx settings window. Export only turns off the built-in Enable Free
+  Render FPS switch and does not change the saved settings.
+- The host notice on the Free Render FPS tab is now bold.
+
+### Fixed
+
+- Free Render FPS tab layout is sized from measured text widths. The target FPS
+  dropdown is no longer covered by its label (60 FPS was shown as 0 FPS), the
+  description text no longer overflows, and the large empty area below the
+  controls is removed.
+
+### Tools
+
+- The `test_kit` install and rollback scripts request administrator rights
+  automatically. These are test tools only.
+
+### Validation status
+
+- The interface was confirmed on AviUtl2 v2.1.12 (2026-10-17).
+- No new conversion or A/V sync runs are recorded for 1.2.1.
+
 ## [1.2.0] — 2026-10-17
 
 ### Added

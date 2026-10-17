@@ -2,13 +2,27 @@
 
 [简体中文](README.zh-CN.md) | **日本語** | [English](README.en.md)
 
+> **AI 支援開発についての表明：** 本プロジェクトは AI の支援を受けて開発されています。
+> コード、ドキュメント、テストツールは主に AI が作成しました（初期は OpenAI Codex、
+> その後は Anthropic Claude / Claude Code を使用）。作者が企画・レビューを行い、
+> 実際の AviUtl2 環境で検証しています。
+
 FreeRenderFPS は x264guiEx をベースに、AviUtl2 と旧 AviUtl 1.x の
 ホストアダプターを提供します。プロジェクト FPS と独立したレートでシーンを
 評価し、30 FPS のプロジェクトを 60 FPS で出力する場合は 0.0、0.5、1.0、
 1.5…というプロジェクトフレーム座標を実際に評価します。フレーム複製や
 メタデータ変更だけではありません。
 
-## v1.2.0 の変更点
+## v1.2.1 の変更点
+
+v1.2.1 は v1.2.0 の修正版です。詳細は [CHANGELOG.md](CHANGELOG.md) を参照してください。
+
+- Free FPS Export に **エンコード設定...** ボタンと、エンコード内容の概要行（「エンコード：」）を追加しました。コンテナは出力ファイルの拡張子に従います。
+- Free FPS Export は x264guiEx 設定ウィンドウの設定でエンコードします。書き出し時に変更するのは内蔵の Enable Free Render FPS スイッチのみで、保存済みの設定は変わりません。
+- Free FPS Export ダイアログと Free Render FPS タブを中国語・日本語・英語に対応させました。エラーメッセージは英語のままです。
+- Free Render FPS タブのレイアウトを修正し、目標 FPS のドロップダウンがラベルに隠れないようにしました。
+
+### v1.2.0 の変更点
 
 v1.2.0 は、v1.1.0 の単一 AviUtl2 プラグイン構成を維持し、Precise motion を追加したリリースです。詳細は [CHANGELOG.md](CHANGELOG.md) を参照してください。
 
@@ -22,7 +36,7 @@ v1.2.0 は、v1.1.0 の単一 AviUtl2 プラグイン構成を維持し、Precis
 AviUtl2 v2.1.12 で実機検証しました。Precise motion を有効にした 8 変換（フレーム数は
 期待値どおり、重複・逆行フレームなし、運動残差 0.12–0.23 px、上限 1.0 px）と、
 66・50・60000/1001 fps の 30 分間の音声・映像同期（すべて PASS。最大ずれは 66・50 fps で
-0.00 ms、60000/1001 で ±8.33 ms＝半フレーム）です。測定に使用したバイナリは `x264guiEx-FreeRenderFPS.aux2`（バージョンリソース 1.1.0、SHA256 114C3070…6076B、2026-10-17 17:52 に再パッケージ、Precise motion を含む）です。最初の 1.1.0 ビルドには精密モードは含まれていません。そのビルドの内容は 1.2.0 の機能と同じで、バージョン番号のみ未更新です。1.2.0 のインストーラーパッケージはまだ再パッケージしていません。内蔵フックは AviUtl2 v2.1.4 での
+0.00 ms、60000/1001 で ±8.33 ms＝半フレーム）です。測定に使用したバイナリは `x264guiEx-FreeRenderFPS.aux2`（バージョンリソース 1.1.0、SHA256 114C3070…6076B、2026-10-17 17:52 に再パッケージ、Precise motion を含む）です。最初の 1.1.0 ビルドには精密モードは含まれていません。そのビルドの内容は 1.2.0 の機能と同じで、バージョン番号のみ未更新です。内蔵フックは AviUtl2 v2.1.4 での
 実機検証が未実施です。AviUtl 1.x パッケージは引き続き v1.0.1 で、AviUtl 1.10 + ExEdit 0.92
 での再検証が未実施です。
 
@@ -38,8 +52,8 @@ setup/portable 最終パッケージのみを使った実エンコードに合�
 
 ## One-click installation
 
-1. v1.2.0 setup ZIP を完全に展開します（v1.2.0 パッケージは未再パッケージです）。
-2. `payload` の隣にある setup EXE を実行します。
+1. `AviUtl2-FreeRenderFPS-v1.2.1-setup.zip` を完全に展開します。
+2. `payload` の隣にある `AviUtl2-FreeRenderFPS-v1.2.1-setup.exe` を実行します。
 3. AviUtl2 を再起動します。
 4. `x264guiEx FreeRenderFPS` を選びます。
 
@@ -51,7 +65,7 @@ setup/portable 最終パッケージのみを使った実エンコードに合�
 
 ## Manual installation
 
-v1.2.0 portable ZIP（未再パッケージ）を AviUtl2 ルートへ直接展開します。ZIP には
+`AviUtl2-FreeRenderFPS-v1.2.1-portable.zip` を AviUtl2 ルートへ直接展開します。ZIP には
 `data\Plugin\x264guiEx-FreeRenderFPS` が含まれます。正式な
 `x264guiEx-FreeRenderFPS.aux2` と 3 個の INI を保ち、
 Debug、PDB、Probe、watcher、ブレークポイント用ツールをコピーしないでください。

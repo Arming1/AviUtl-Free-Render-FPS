@@ -165,6 +165,30 @@ static void ensure_default_config_initialized() {
     }
 }
 
+// First-use setup of g_conf, shared by func_output and the Free FPS Export dialog (freefps_export.cpp). While g_conf is
+// still all zero, the last output settings file is loaded, or the defaults if there is none. Returns true if g_conf was
+// all zero. default_stg_file must be zeroed by the caller; it receives the file that was loaded, or stays empty.
+static bool load_conf_if_zero(TCHAR (&default_stg_file)[MAX_PATH_LEN]) {
+    const CONF_GUIEX conf_zero = { 0 };
+    const bool conf_not_initialized = memcmp(&conf_zero, &g_conf, sizeof(g_conf)) == 0;
+    if (conf_not_initialized) {
+        PathCombine(default_stg_file, g_sys_dat.exstg->s_local.stg_dir, g_sys_dat.exstg->get_last_out_stg());
+        if (!PathFileExists(default_stg_file)) {
+            PathCombine(default_stg_file, g_sys_dat.exstg->s_local.stg_dir, get_last_out_stg_appendix().c_str());
+        }
+        if (!PathFileExists(default_stg_file)) {
+            PathCombine(default_stg_file, g_sys_dat.exstg->s_local.stg_dir, CONF_LAST_OUT);
+        }
+        if (!PathFileExists(default_stg_file)
+            || guiEx_config::load_guiEx_conf(&g_conf, default_stg_file) != CONF_ERROR_NONE) {
+            //前回出力した設定ファイルがない場合は、デフォルト設定をロード
+            init_CONF_GUIEX(&g_conf, FALSE);
+            memset(default_stg_file, 0, sizeof(default_stg_file));
+        }
+    }
+    return conf_not_initialized;
+}
+
 #if AVIUTL_TARGET_VER == 2
 EXTERN_C void __declspec(dllexport) InitializeLogger(LOG_HANDLE *logger) {
     set_aviutl2_logger(logger);
@@ -314,22 +338,7 @@ BOOL func_output( OUTPUT_INFO *oip ) {
     init_SYSTEM_DATA(&g_sys_dat);
     if (!g_sys_dat.exstg->get_init_success()) return FALSE;
 
-    const bool conf_not_initialized = memcmp(&conf_out, &g_conf, sizeof(g_conf)) == 0;
-    if (conf_not_initialized) {
-        PathCombine(default_stg_file, g_sys_dat.exstg->s_local.stg_dir, g_sys_dat.exstg->get_last_out_stg());
-        if (!PathFileExists(default_stg_file)) {
-            PathCombine(default_stg_file, g_sys_dat.exstg->s_local.stg_dir, get_last_out_stg_appendix().c_str());
-        }
-        if (!PathFileExists(default_stg_file)) {
-            PathCombine(default_stg_file, g_sys_dat.exstg->s_local.stg_dir, CONF_LAST_OUT);
-        }
-        if (!PathFileExists(default_stg_file)
-            || guiEx_config::load_guiEx_conf(&g_conf, default_stg_file) != CONF_ERROR_NONE) {
-            //前回出力した設定ファイルがない場合は、デフォルト設定をロード
-            init_CONF_GUIEX(&g_conf, FALSE);
-            memset(default_stg_file, 0, sizeof(default_stg_file));
-        }
-    }
+    const bool conf_not_initialized = load_conf_if_zero(default_stg_file);
     conf_out = g_conf;
     if (conf_out.oth.benchmark_mode) {
         return run_benchmark(oip);
@@ -666,6 +675,132 @@ int func_config_set(void *data,int size) {
     memset(data, 0, size);
     return NULL;
 }
+
+#if AVIUTL_TARGET_VER == 2
+// Free FPS Export (freefps_export.cpp) dialog support. All of it works on g_conf, the configuration func_output encodes
+// with, so the export and the settings window use the same settings.
+
+int check_video_ouput(const TCHAR *filename); // encode/auo_encode.cpp
+
+// Same first-use setup as func_config and func_output. Returns false if the settings are not usable.
+static bool prepare_conf_for_freefps() {
+    init_SYSTEM_DATA(&g_sys_dat);
+    if (!g_sys_dat.exstg->get_init_success()) {
+        return false;
+    }
+    TCHAR default_stg_file[MAX_PATH_LEN] = { 0 };
+    load_conf_if_zero(default_stg_file);
+    ensure_default_config_initialized();
+    return true;
+}
+
+// The default output container, the same extension the encoder appends when an output name has no known extension
+// (encode/auo_encode.cpp, default_output_ext). Without the dot, e.g. "mp4".
+static std::wstring default_container_name() {
+    int idx = g_sys_dat.exstg->s_local.default_output_ext;
+    if (idx < 0 || idx >= _countof(OUTPUT_FILE_EXT)) {
+        idx = 0;
+    }
+    return char_to_wstring(OUTPUT_FILE_EXT[idx] + 1);
+}
+
+// The container shown for an output file name: its own extension when the encoder recognises it, else the default.
+static std::wstring container_for_output(const wchar_t *output_path) {
+    if (output_path != nullptr && output_path[0] != L'\0' && check_video_ouput(output_path) != VIDEO_OUTPUT_UNKNOWN) {
+        const wchar_t *ext = PathFindExtensionW(output_path);
+        if (ext != nullptr && ext[0] == L'.' && ext[1] != L'\0') {
+            return ext + 1;
+        }
+    }
+    return default_container_name();
+}
+
+bool freefps_open_encoder_settings() {
+    if (!prepare_conf_for_freefps()) {
+        return false;
+    }
+    ShowfrmConfig(&g_conf, &g_sys_dat);
+    return true;
+}
+
+void freefps_get_container_name(wchar_t *buf, size_t count) {
+    if (buf == nullptr || count == 0) {
+        return;
+    }
+    buf[0] = L'\0';
+    if (prepare_conf_for_freefps()) {
+        wcsncpy_s(buf, count, default_container_name().c_str(), _TRUNCATE);
+    }
+}
+
+// Example: "CRF 23 / medium / AAC 256kbps / mp4". Each part is left out if its setting is out of range.
+void freefps_get_encoder_summary(wchar_t *buf, size_t count, const wchar_t *output_path) {
+    if (buf == nullptr || count == 0) {
+        return;
+    }
+    buf[0] = L'\0';
+    if (!prepare_conf_for_freefps()) {
+        return;
+    }
+    std::vector<std::wstring> parts;
+    wchar_t text[128] = { 0 };
+
+    const CONF_ENC &enc = g_conf.enc;
+    switch (enc.rc_mode) {
+    case ENC_RC_CRF:
+        swprintf_s(text, L"CRF %g", enc.crf / 100.0);
+        parts.push_back(text);
+        break;
+    case ENC_RC_BITRATE:
+        swprintf_s(text, L"ABR %d kbps", enc.bitrate);
+        parts.push_back(text);
+        break;
+    case ENC_RC_QP:
+        swprintf_s(text, L"QP %d", enc.qp);
+        parts.push_back(text);
+        break;
+    default:
+        break;
+    }
+
+    const ENC_SETTINGS &enc_stg = g_sys_dat.exstg->s_enc;
+    if (enc.preset >= 0 && enc.preset < enc_stg.preset_count && enc_stg.preset.name[enc.preset].name != nullptr) {
+        parts.push_back(enc_stg.preset.name[enc.preset].name);
+    }
+
+    // Same audio choice as func_output: the internal or the external encoder.
+    const bool aud_internal = g_conf.aud.use_internal != FALSE;
+    const CONF_AUDIO_BASE &aud = aud_internal ? g_conf.aud.in : g_conf.aud.ext;
+    const int aud_count = aud_internal ? g_sys_dat.exstg->s_aud_int_count : g_sys_dat.exstg->s_aud_ext_count;
+    const AUDIO_SETTINGS *aud_stg_list = aud_internal ? g_sys_dat.exstg->s_aud_int : g_sys_dat.exstg->s_aud_ext;
+    if (aud_stg_list != nullptr && aud.encoder >= 0 && aud.encoder < aud_count) {
+        const AUDIO_SETTINGS &aud_stg = aud_stg_list[aud.encoder];
+        std::wstring aud_text = aud_stg.dispname != nullptr ? aud_stg.dispname : L"";
+        if (aud.enc_mode >= 0 && aud.enc_mode < aud_stg.mode_count && aud_stg.mode[aud.enc_mode].bitrate) {
+            swprintf_s(text, L" %dkbps", aud.bitrate);
+            aud_text += text;
+        }
+        parts.push_back(aud_text);
+    }
+
+    parts.push_back(container_for_output(output_path));
+
+    std::wstring summary;
+    for (const auto &part : parts) {
+        if (!summary.empty()) {
+            summary += L" / ";
+        }
+        summary += part;
+    }
+    wcsncpy_s(buf, count, summary.c_str(), _TRUNCATE);
+}
+
+// True if the encoder takes the extension of path as a container (.mp4, .mkv, or raw .264/.raw). For any other name the
+// encoder appends its default container extension when it writes the output.
+bool freefps_has_known_container_ext(const wchar_t *path) {
+    return path != nullptr && check_video_ouput(path) != VIDEO_OUTPUT_UNKNOWN;
+}
+#endif
 
 //---------------------------------------------------------------------
 //        x264guiExのその他の関数
