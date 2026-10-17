@@ -1,0 +1,86 @@
+{
+  "formula": "expected_frames = ceil(source_frames * target_fps / source_fps), exact Fraction arithmetic; expected_duration = expected_frames / target_fps. source_frames = last_frame - first_frame + 1 from the source fixture's frame= line.",
+  "motion_model": "x(t) = W/2 + X_start + (X_end - X_start) * min(t, T) / T, t = n / target_fps for output frame n, T = (last_frame - first_frame) / source_fps (the frame where the trackbar reaches X_end). Assumes AviUtl interpolates 直線移動 linearly over [first_frame, last_frame] and holds the end value afterwards; to be confirmed in the host.",
+  "cases": [
+    {
+      "id": "60_to_66",
+      "source_fixture": "experiments/free_fps_matrix/fixture_60fps.aup2",
+      "source_fps": "60",
+      "source_frames": 300,
+      "target_fps": "66",
+      "expected_frames": 330,
+      "expected_duration": "5",
+      "note": "300*66/60 = 330 exactly"
+    },
+    {
+      "id": "72_to_60",
+      "source_fixture": "experiments/free_fps_matrix/fixture_72fps.aup2",
+      "source_fps": "72",
+      "source_frames": 360,
+      "target_fps": "60",
+      "expected_frames": 300,
+      "expected_duration": "5",
+      "note": "360*60/72 = 300 exactly"
+    },
+    {
+      "id": "30_to_5994",
+      "source_fixture": "experiments/66_to_60_validation/freerenderfps_30fps.aup2",
+      "source_fps": "30",
+      "source_frames": 150,
+      "target_fps": "60000/1001",
+      "expected_frames": 300,
+      "expected_duration": "1001/200",
+      "note": "150*(60000/1001)/30 = 300000/1001 = 299.7003..., ceil -> 300; duration 300*1001/60000 = 5.005 s"
+    },
+    {
+      "id": "66_to_24",
+      "source_fixture": "experiments/66_to_60_validation/freerenderfps_66fps.aup2",
+      "source_fps": "66",
+      "source_frames": 330,
+      "target_fps": "24",
+      "expected_frames": 120,
+      "expected_duration": "5",
+      "note": "330*24/66 = 120 exactly"
+    },
+    {
+      "id": "66_to_120",
+      "source_fixture": "experiments/66_to_60_validation/freerenderfps_66fps.aup2",
+      "source_fps": "66",
+      "source_frames": 330,
+      "target_fps": "120",
+      "expected_frames": 600,
+      "expected_duration": "5",
+      "note": "330*120/66 = 600 exactly"
+    },
+    {
+      "id": "120_to_60",
+      "source_fixture": "experiments/66_to_60_validation/freerenderfps_120fps.aup2",
+      "source_fps": "120",
+      "source_frames": 600,
+      "target_fps": "60",
+      "expected_frames": 300,
+      "expected_duration": "5",
+      "note": "600*60/120 = 300 exactly"
+    },
+    {
+      "id": "60_to_50",
+      "source_fixture": "experiments/free_fps_matrix/fixture_60fps.aup2",
+      "source_fps": "60",
+      "source_frames": 300,
+      "target_fps": "50",
+      "expected_frames": 250,
+      "expected_duration": "5",
+      "note": "300*50/60 = 250 exactly"
+    },
+    {
+      "id": "72_to_59",
+      "source_fixture": "experiments/free_fps_matrix/fixture_72fps.aup2",
+      "source_fps": "72",
+      "source_frames": 360,
+      "target_fps": "59",
+      "expected_frames": 295,
+      "expected_duration": "5",
+      "note": "360*59/72 = 295 exactly (59 is prime, ratio 59/72 is not a simple step)"
+    }
+  ]
+}

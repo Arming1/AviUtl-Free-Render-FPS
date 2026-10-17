@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Convert an AviUtl2 .aup2 project to K-times the scene frame rate.
+"""Retime an AviUtl2 .aup2 project to a new scene frame rate.
+
+Give either an integer factor K (target rate = scene rate * K) or an exact target rate with --target-fps
+(for example 66 or 60000/1001). All rate and frame arithmetic is exact (fractions.Fraction).
 
 Writes a new file; never modifies the input. Rules and refusals are described in
 tools/aup2_fps_upconvert.md. Exit codes: 0 converted, 2 refused or usage error.
@@ -8,9 +11,11 @@ tools/aup2_fps_upconvert.md. Exit codes: 0 converted, 2 refused or usage error.
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import sys
+from fractions import Fraction
 
 # ---------------------------------------------------------------------------
 # Whitelists and deny-lists (see docs/aup2_fps_upconvert_feasibility.md, section 2 and 6)
@@ -29,7 +34,7 @@ SCENE_KNOWN_KEYS = frozenset({
     "display.tempo.bpm", "display.tempo.beat", "display.tempo.start", "display.tempo.offset",
 })
 
-# [scene.N] keys whose value is a frame number; multiplied by K.
+# [scene.N] keys whose value is a frame number; mapped with round_half_up(v * k).
 SCENE_FRAME_KEYS = frozenset({"cursor.frame", "preview.frame", "display.frame"})
 
 # Unknown scene keys containing one of these substrings cause a refusal.
@@ -63,6 +68,7 @@ SUFFIX_JSON = ".convert.json"
 
 RE_INT = re.compile(r"^\d+$")
 RE_NUMBER = re.compile(r"^-?\d+(\.\d+)?$")
+RE_TARGET_FPS = re.compile(r"^(\d+)(?:/(\d+))?$")
 RE_OBJECT_HDR = re.compile(r"^\[(\d+)\]$")
 RE_EFFECT_HDR = re.compile(r"^\[(\d+)\.(\d+)\]$")
 RE_SCENE_HDR = re.compile(r"^\[scene\.(\d+)\]$")
@@ -122,21 +128,103 @@ def parse_frames(value, line_no):
     return [int(x) for x in items]
 
 
-def new_frames(frames, factor, line_no):
-    """Apply the frame rewrite rule. Returns the new list of ints."""
+def parse_target_fps(text):
+    """Parse --target-fps. Returns (numerator, denominator) in lowest terms.
+
+    Raises ValueError with the reason (the caller adds the REFUSED prefix).
+    """
+    if "." in text:
+        raise ValueError("%r is a decimal rate and is refused; give the exact fraction, "
+                         "for example 60000/1001" % text)
+    match = RE_TARGET_FPS.match(text)
+    if not match:
+        raise ValueError("must be a positive integer or a fraction such as 66 or 60000/1001, got %r" % text)
+    num, den = int(match.group(1)), int(match.group(2) or 1)
+    if num == 0 or den == 0:
+        raise ValueError("must be a positive rate, got %r" % text)
+    exact = Fraction(num, den)
+    return exact.numerator, exact.denominator
+
+
+def round_half_up(value):
+    """Nearest integer to an exact value (int or Fraction); halves round up."""
+    return math.floor(value + Fraction(1, 2))
+
+
+def fraction_text(value):
+    """Exact fraction as 'n/d', always with a denominator (2 is '2/1')."""
+    return "%d/%d" % (value.numerator, value.denominator)
+
+
+def speed_text(k):
+    """Describe the frame-based speed change for rate ratio k (exact)."""
+    if k > 1:
+        return "%s times faster" % k
+    if k < 1:
+        return "%s times slower" % (1 / k)
+    return "at the same speed"
+
+
+def rescale_frames(frames, k, line_no):
+    """Map one frame= list to the target rate (k = target rate / scene rate, exact).
+
+    Two values (start, end inclusive): start' = round_half_up(s*k), end' = round_half_up((e+1)*k) - 1.
+    If end' < start' the object is shorter than one output frame: end' = start' and shortened is True.
+
+    More values: the first point uses the start rule, the last point the end rule, the middle points
+    round_half_up(p*k). The result must be strictly increasing, otherwise the rewrite is refused.
+
+    Returns (new_frames, shortened).
+    """
     if len(frames) == 2:
         start, end = frames
         if end < start:
             raise Refusal(line_no, "frame= end %d is before start %d" % (end, start))
-        return [start * factor, (end + 1) * factor - 1]
+        new_start = round_half_up(start * k)
+        new_end = round_half_up((end + 1) * k) - 1
+        if new_end < new_start:
+            return [new_start, new_start], True
+        return [new_start, new_end], False
     if any(b <= a for a, b in zip(frames, frames[1:])):
         raise Refusal(line_no, "frame= intermediate points are not strictly increasing: %s"
                       % ",".join(str(x) for x in frames))
-    start, middle, end = frames[0], frames[1:-1], frames[-1]
-    result = [start * factor] + [m * factor for m in middle] + [(end + 1) * factor - 1]
+    result = ([round_half_up(frames[0] * k)]
+              + [round_half_up(m * k) for m in frames[1:-1]]
+              + [round_half_up((frames[-1] + 1) * k) - 1])
     if any(b <= a for a, b in zip(result, result[1:])):
-        raise Refusal(line_no, "frame= list is not strictly increasing after conversion")
-    return result
+        raise Refusal(line_no, "frame= points collide or stop increasing after rescaling to the target rate "
+                      "(%s -> %s); refused rather than merging points"
+                      % (",".join(str(x) for x in frames), ",".join(str(x) for x in result)))
+    return result, False
+
+
+def check_layers(object_frame_lines, object_layer, object_scene, frame_values, new_frames):
+    """Objects on one layer of one scene keep their order and their touching, and never overlap after rescaling.
+
+    Each scene has its own timeline, so objects are grouped by (scene, layer). Only pairs that do not overlap
+    in the input are checked. Raises Refusal on the later object's frame= line.
+    """
+    groups = {}
+    for obj_no in object_frame_lines:
+        key = (object_scene.get(obj_no), object_layer.get(obj_no))
+        groups.setdefault(key, []).append(obj_no)
+    for objs in groups.values():
+        objs.sort(key=lambda n: frame_values[n][0])
+        for earlier, later in zip(objs, objs[1:]):
+            old_end, old_start = frame_values[earlier][-1], frame_values[later][0]
+            if old_end >= old_start:
+                continue
+            new_end, new_start = new_frames[earlier][-1], new_frames[later][0]
+            line = object_frame_lines[later] + 1
+            other = object_frame_lines[earlier] + 1
+            if old_end + 1 == old_start:
+                if new_end + 1 != new_start:
+                    raise Refusal(line, "object touches the object at line %d on the same scene and layer, but "
+                                  "after rescaling they no longer touch (one of them became 1 frame); refused"
+                                  % other)
+            elif new_end >= new_start:
+                raise Refusal(line, "object overlaps the object at line %d on the same scene and layer after "
+                              "rescaling; refused" % other)
 
 
 def unescape_newlines(text):
@@ -153,13 +241,19 @@ def script_text(effect_name, key, value):
     return value
 
 
-def convert(data, in_path, out_path, factor, allow_frame_scripts=False):
-    """Return (output_bytes, changes, notes, warnings).
+def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False):
+    """Return (output_bytes, changes, notes, warnings, summary).
+
+    Give exactly one of:
+      factor: integer K >= 2; the target rate is the scene rate times K (video.scale is kept);
+      target: (numerator, denominator) of the exact output rate, as returned by parse_target_fps.
 
     Raises Refusal on any unsupported content. Frame-dependent script is refused unless
     allow_frame_scripts is set; then each occurrence is returned in warnings and notes.
     """
-    if factor < 2:
+    if (factor is None) == (target is None):
+        raise ValueError("convert() needs exactly one of factor or target")
+    if factor is not None and factor < 2:
         raise Refusal(None, "factor must be an integer >= 2, got %d" % factor)
 
     has_bom = data.startswith(UTF8_BOM)
@@ -171,6 +265,8 @@ def convert(data, in_path, out_path, factor, allow_frame_scripts=False):
 
     records = split_records(text)
     lines = [body for body, _ in records]
+    notes = []
+    warnings = []
 
     # Pass 1: map each line to its section.
     section = None
@@ -178,6 +274,10 @@ def convert(data, in_path, out_path, factor, allow_frame_scripts=False):
     project_file_lines = []
     scene_lines = {}
     object_frame_lines = {}
+    object_layer = {}
+    object_scene_lines = {}  # obj_no -> (value, line_index) from its scene= line
+    obj_header_scene = {}  # obj_no -> number of the [scene.N] header above its [N] header (None if none)
+    header_scene = None
     effect_lines = []
     effect_props = {}  # (obj_no, effect_no) -> {key: (value, line_index)}
     project_seen = False
@@ -191,8 +291,10 @@ def convert(data, in_path, out_path, factor, allow_frame_scripts=False):
             if m_scene:
                 scene_lines.setdefault(int(m_scene.group(1)), [])
                 section = ("scene", int(m_scene.group(1)))
+                header_scene = int(m_scene.group(1))
             elif m_obj:
                 section = ("object", int(m_obj.group(1)))
+                obj_header_scene[int(m_obj.group(1))] = header_scene
             elif m_eff:
                 section = ("effect", int(m_eff.group(1)), int(m_eff.group(2)))
             elif body == "[project]":
@@ -214,6 +316,10 @@ def convert(data, in_path, out_path, factor, allow_frame_scripts=False):
             if section[1] in object_frame_lines:
                 raise Refusal(idx + 1, "duplicate frame= in object [%d]" % section[1])
             object_frame_lines[section[1]] = idx
+        elif kind == "object" and key == "layer":
+            object_layer[section[1]] = value
+        elif kind == "object" and key == "scene":
+            object_scene_lines[section[1]] = (value, idx)
         elif kind == "effect":
             effect_lines.append(idx)
             effect_props.setdefault((section[1], section[2]), {})[key] = (value, idx)
@@ -227,8 +333,20 @@ def convert(data, in_path, out_path, factor, allow_frame_scripts=False):
     if not scene_lines:
         raise Refusal(None, "no [scene.N] section found")
 
+    # Each object belongs to one scene: its scene= line if it has one, else the [scene.N] section above it.
+    object_scene = {}
+    for obj_no, header in obj_header_scene.items():
+        if obj_no in object_scene_lines:
+            value, idx = object_scene_lines[obj_no]
+            if not RE_INT.match(value):
+                raise Refusal(idx + 1, "object scene= must be an integer, got %r" % value)
+            object_scene[obj_no] = int(value)
+        else:
+            object_scene[obj_no] = 0 if header is None else header
+
     # Pass 2: scene checks. All scenes must share one rate/scale.
     rates = set()
+    scene_rate_lines = {}  # scene_no -> (video.rate line index, video.scale line index or None)
     for scene_no, idxs in sorted(scene_lines.items()):
         values = {}
         for idx in idxs:
@@ -242,19 +360,30 @@ def convert(data, in_path, out_path, factor, allow_frame_scripts=False):
                     raise Refusal(idx + 1, "%s must be an integer, got %r" % (key, value))
             elif any(marker in key for marker in SCENE_UNKNOWN_REFUSE_MARKERS):
                 raise Refusal(idx + 1, "unknown scene key %r may hold frame/mark/range data" % key)
-        if "video.rate" not in values or "video.scale" not in values:
-            raise Refusal(None, "[scene.%d] has no video.rate/video.scale" % scene_no)
-        rates.add((values["video.rate"][0], values["video.scale"][0]))
+        if "video.rate" not in values:
+            raise Refusal(None, "[scene.%d] has no video.rate" % scene_no)
+        scale_value, scale_idx = values.get("video.scale", (1, None))
+        if scale_idx is None:
+            notes.append("[scene.%d] has no video.scale; read as 1 and written after video.rate" % scene_no)
+        scene_rate_lines[scene_no] = (values["video.rate"][1], scale_idx)
+        rates.add((values["video.rate"][0], scale_value))
     if len(rates) != 1:
         raise Refusal(None, "scenes do not share one video.rate/video.scale: %s"
                       % sorted(rates))
+    (src_rate, src_scale), = rates
+
+    if factor is not None:
+        target_num, target_den = src_rate * factor, src_scale
+    else:
+        target_num, target_den = target
+    rate_src = Fraction(src_rate, src_scale)
+    rate_dst = Fraction(target_num, target_den)
+    k = rate_dst / rate_src
 
     # Pass 3: object frame lists, and trackbars that depend on them.
     frame_values = {}
     for obj_no, idx in object_frame_lines.items():
         frame_values[obj_no] = parse_frames(lines[idx].partition("=")[2], idx + 1)
-    notes = []
-    warnings = []
     counter_lines = []
     for (obj_no, eff_no), props in sorted(effect_props.items()):
         if props.get("effect.name", (None, None))[0] != COUNTER_EFFECT_NAME:
@@ -284,8 +413,8 @@ def convert(data, in_path, out_path, factor, allow_frame_scripts=False):
                               "refused (pass --allow-frame-scripts to convert anyway)"
                               % (marker.group(0), where))
             text = ("WARNING: line %d: frame-dependent script marker %r in %s: frame-based animation "
-                    "will run %d times faster and per-frame random sequences change"
-                    % (idx + 1, marker.group(0), where, factor))
+                    "will run %s and per-frame random sequences change"
+                    % (idx + 1, marker.group(0), where, speed_text(k)))
             warnings.append(text)
             notes.append(text)
         if not is_trackbar(value):
@@ -305,38 +434,79 @@ def convert(data, in_path, out_path, factor, allow_frame_scripts=False):
                 raise Refusal(idx + 1, "trackbar has %d values but object [%d] has %d frame points"
                               % (count, obj_no, len(frame_values[obj_no])))
 
+    new_frames = {}
+    shortened = set()
+    for obj_no, idx in object_frame_lines.items():
+        new_frames[obj_no], was_short = rescale_frames(frame_values[obj_no], k, idx + 1)
+        if was_short:
+            shortened.add(idx + 1)
+            notes.append("object at line %d shortened to 1 frame" % (idx + 1))
+    check_layers(object_frame_lines, object_layer, object_scene, frame_values, new_frames)
+
     # Pass 4: build the rewritten lines.
     project_idx = project_file_lines[0]
     new_bodies = list(lines)
     changes = []
+    inserts = {}  # line index -> bodies to write right after that line
 
     def set_line(idx, new_body):
         if new_body != lines[idx]:
             changes.append({"line": idx + 1, "old": lines[idx], "new": new_body})
             new_bodies[idx] = new_body
 
-    out_abs = os.path.abspath(out_path)
-    set_line(project_idx, "file=" + out_abs)
+    set_line(project_idx, "file=" + os.path.abspath(out_path))
 
     for scene_no, idxs in scene_lines.items():
+        rate_idx, scale_idx = scene_rate_lines[scene_no]
         for idx in idxs:
             key, _, value = lines[idx].partition("=")
-            if key == "video.rate":
-                set_line(idx, "%s=%d" % (key, int(value) * factor))
+            if idx == rate_idx:
+                set_line(idx, "video.rate=%d" % target_num)
+                if scale_idx is None:
+                    inserted = "video.scale=%d" % target_den
+                    inserts.setdefault(idx, []).append(inserted)
+                    changes.append({"line": idx + 1, "old": None, "new": inserted, "inserted": True})
+            elif idx == scale_idx:
+                if int(value) != target_den:
+                    set_line(idx, "video.scale=%d" % target_den)
             elif key in SCENE_FRAME_KEYS:
-                set_line(idx, "%s=%d" % (key, int(value) * factor))
+                set_line(idx, "%s=%d" % (key, round_half_up(int(value) * k)))
 
+    timing_objects = []
     for obj_no, idx in object_frame_lines.items():
-        frames = frame_values[obj_no]
-        converted = new_frames(frames, factor, idx + 1)
-        set_line(idx, "frame=" + ",".join(str(x) for x in converted))
+        old, new = frame_values[obj_no], new_frames[obj_no]
+        set_line(idx, "frame=" + ",".join(str(x) for x in new))
+        timing_objects.append({
+            "line": idx + 1,
+            "start_error_s": str(abs(Fraction(new[0]) / rate_dst - Fraction(old[0]) / rate_src)),
+            "end_error_s": str(abs(Fraction(new[-1] + 1) / rate_dst - Fraction(old[-1] + 1) / rate_src)),
+            "shortened": idx + 1 in shortened,
+        })
+    start_errors = [Fraction(o["start_error_s"]) for o in timing_objects]
+    end_errors = [Fraction(o["end_error_s"]) for o in timing_objects]
 
     out_bytes = bytearray()
     if has_bom:
         out_bytes += UTF8_BOM
-    for (body, eol), new_body in zip(records, new_bodies):
+    for idx, ((body, eol), new_body) in enumerate(zip(records, new_bodies)):
+        extra = inserts.get(idx, [])
+        if extra and not eol:
+            eol = "\n"
         out_bytes += (new_body + eol).encode("utf-8")
-    return bytes(out_bytes), changes, notes, warnings
+        for text in extra:
+            out_bytes += (text + eol).encode("utf-8")
+
+    summary = {
+        "source_rate": fraction_text(rate_src),
+        "target_rate": fraction_text(rate_dst),
+        "k": fraction_text(k),
+        "timing": {
+            "max_start_error_s": str(max(start_errors, default=Fraction(0))),
+            "max_end_error_s": str(max(end_errors, default=Fraction(0))),
+            "objects": timing_objects,
+        },
+    }
+    return bytes(out_bytes), changes, notes, warnings, summary
 
 
 def same_path(a, b):
@@ -347,11 +517,15 @@ def same_path(a, b):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Convert an AviUtl2 .aup2 project to K-times the scene frame rate.")
+        description="Retime an AviUtl2 .aup2 project to a new scene frame rate (integer factor or exact target rate).")
     parser.add_argument("--in", dest="in_path", required=True, help="input .aup2 (never modified)")
     parser.add_argument("--out", dest="out_path", required=True, help="new .aup2 to write")
-    parser.add_argument("--factor", dest="factor", type=int, required=True,
-                        help="integer multiplier K >= 2")
+    rate = parser.add_mutually_exclusive_group(required=True)
+    rate.add_argument("--factor", dest="factor", type=int,
+                      help="integer multiplier K >= 2 (target rate = scene rate * K)")
+    rate.add_argument("--target-fps", dest="target_fps", metavar="RATE",
+                      help="exact target rate: an integer or a fraction such as 66 or 60000/1001 "
+                           "(decimals such as 59.94 are refused)")
     parser.add_argument("--force", action="store_true", help="overwrite existing outputs")
     parser.add_argument("--allow-frame-scripts", action="store_true",
                         help="convert despite frame-dependent script (obj.frame, rand(...)); prints a WARNING per occurrence")
@@ -366,8 +540,15 @@ def main(argv=None):
         say(message, err=True)
         return 2
 
-    if args.factor < 2:
-        return refuse("REFUSED: --factor must be an integer >= 2, got %d" % args.factor)
+    target = None
+    if args.factor is not None:
+        if args.factor < 2:
+            return refuse("REFUSED: --factor must be an integer >= 2, got %d" % args.factor)
+    else:
+        try:
+            target = parse_target_fps(args.target_fps)
+        except ValueError as exc:
+            return refuse("REFUSED: --target-fps %s" % exc)
     if not os.path.isfile(args.in_path):
         return refuse("REFUSED: input not found: %s" % args.in_path)
     if same_path(args.in_path, args.out_path):
@@ -385,8 +566,8 @@ def main(argv=None):
         in_data = fh.read()
 
     try:
-        out_data, changes, notes, warnings = convert(
-            in_data, args.in_path, args.out_path, args.factor,
+        out_data, changes, notes, warnings, summary = convert(
+            in_data, args.out_path, factor=args.factor, target=target,
             allow_frame_scripts=args.allow_frame_scripts)
     except Refusal as exc:
         return refuse(exc.message())
@@ -399,10 +580,14 @@ def main(argv=None):
     report = {
         "tool": "aup2_fps_upconvert",
         "factor": args.factor,
+        "source_rate": summary["source_rate"],
+        "target_rate": summary["target_rate"],
+        "k": summary["k"],
         "input": {"path": os.path.abspath(args.in_path), "sha256": sha256_hex(in_data)},
         "output": {"path": os.path.abspath(args.out_path), "sha256": sha256_hex(out_data)},
         "changed_line_count": len(changes),
         "changes": changes,
+        "timing": summary["timing"],
         "notes": notes,
     }
     with open(json_path, "w", encoding="utf-8", newline="\n") as fh:

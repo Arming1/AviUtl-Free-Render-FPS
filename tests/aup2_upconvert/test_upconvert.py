@@ -8,11 +8,13 @@ Exit code is non-zero if any test fails.
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import traceback
+from fractions import Fraction
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -51,6 +53,14 @@ def run_tool(*args):
 
 def convert(in_path, out_path, factor=2, force=False, extra=()):
     args = ["--in", in_path, "--out", out_path, "--factor", str(factor)]
+    if force:
+        args.append("--force")
+    args.extend(extra)
+    return run_tool(*args)
+
+
+def convert_target(in_path, out_path, target, force=False, extra=()):
+    args = ["--in", in_path, "--out", out_path, "--target-fps", target]
     if force:
         args.append("--force")
     args.extend(extra)
@@ -186,12 +196,12 @@ def test_66_and_120_fixtures_x2():
     assert changes[36] == ("frame=0,599", "frame=0,1199")  # end = (599+1)*2-1
 
 
-def make_intermediate_fixture(path, frame_line):
-    """30 FPS fixture with a 4-point object; every 2-value trackbar gets 4 values."""
-    lines = read_bytes(FIX_30).decode("utf-8").split("\n")
+def make_intermediate_fixture(path, frame_line, base=FIX_30):
+    """Fixture with a 4-point object; every 2-value trackbar gets 4 values."""
+    lines = read_bytes(base).decode("utf-8").split("\n")
     out = []
     for line in lines:
-        if line == "frame=0,149":
+        if line.startswith("frame=0,"):
             out.append(frame_line)
         elif line.endswith(",直線移動,0") and line.count(",") == 3:
             key, _, rest = line.partition("=")
@@ -472,6 +482,7 @@ def test_text_escaped_newline_inside_script_is_scanned():
 KIND_BY_SECTION_KEY = {
     ("project", "file"): "project file=",
     ("scene", "video.rate"): "scene video.rate=",
+    ("scene", "video.scale"): "scene video.scale=",
     ("scene", "cursor.frame"): "scene frame-unit key",
     ("scene", "preview.frame"): "scene frame-unit key",
     ("scene", "display.frame"): "scene frame-unit key",
@@ -527,7 +538,364 @@ def test_real_world_changed_lines_by_kind():
         print("  INFO factor %d: %d changed lines, by kind: %s" % (factor, len(changes), kinds))
 
 
+# ---------------------------------------------------------------------------
+# --target-fps: exact rational retiming
+# ---------------------------------------------------------------------------
+
+RE_OBJ_SECTION = re.compile(r"^\[(\d+)\]$")
+RE_SHORT_NOTE = re.compile(r"^object at line (\d+) shortened to 1 frame$")
+TARGETS = ("66", "60", "60000/1001", "24", "120", "59")
+
+
+def parse_rate(text):
+    """Exact scene rate (first video.rate / video.scale in the file) as a Fraction."""
+    rate = scale = None
+    for raw in text.split("\n"):
+        line = raw.rstrip("\r")
+        if rate is None and line.startswith("video.rate="):
+            rate = int(line.partition("=")[2])
+        elif scale is None and line.startswith("video.scale="):
+            scale = int(line.partition("=")[2])
+    return Fraction(rate, 1 if scale is None else scale)
+
+
+def parse_objects(text):
+    """{obj_no: {"layer", "frames", "line"}} for each object section that has a frame= line."""
+    objects = {}
+    section = None
+    for number, raw in enumerate(text.split("\n"), 1):
+        line = raw.rstrip("\r")
+        if line.startswith("[") and line.endswith("]"):
+            match = RE_OBJ_SECTION.match(line)
+            section = int(match.group(1)) if match else None
+            continue
+        if section is None or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key == "layer":
+            objects.setdefault(section, {})["layer"] = value
+        elif key == "frame":
+            entry = objects.setdefault(section, {})
+            entry["frames"] = [int(x) for x in value.split(",")]
+            entry["line"] = number
+    return {no: obj for no, obj in objects.items() if "frames" in obj}
+
+
+def shortened_lines(notes):
+    found = set()
+    for note in notes:
+        match = RE_SHORT_NOTE.match(note)
+        if match:
+            found.add(int(match.group(1)))
+    return found
+
+
+def synthetic_project(name, base, rate, objects):
+    """Write a project into a new case dir: the base fixture header with video.rate=rate, then one minimal
+    object section per (layer, start, end). Returns (dir, src_path)."""
+    text = read_bytes(base).decode("utf-8")
+    header, marker, _ = text.partition("[0]\n")
+    assert marker, "fixture layout changed"
+    header = re.sub(r"^video\.rate=\d+$", "video.rate=%d" % rate, header, flags=re.M)
+    body = "".join("[%d]\nlayer=%d\nfocus=0\nframe=%d,%d\n" % (no, layer, start, end)
+                   for no, (layer, start, end) in enumerate(objects))
+    d = case_dir(name)
+    src = os.path.join(d, "src.aup2")
+    write_bytes(src, (header + body).encode("utf-8"))
+    return d, src
+
+
+def timing_layout(rate):
+    """Objects (layer, start, end) for a synthetic project at `rate`.
+
+    Layer 0: four touching pieces of about 0.4 s, three 1-frame objects about 0.5 s apart, then one
+    long piece. Layer 1: one object spanning the whole timeline. Gaps and pieces scale with the rate.
+    """
+    piece = max(2, rate * 2 // 5)
+    gap = max(2, rate // 2)
+    objects = []
+    start = 0
+    for _ in range(4):
+        objects.append((0, start, start + piece - 1))
+        start += piece
+    for _ in range(3):
+        start += gap
+        objects.append((0, start, start))
+        start += 1
+    start += gap
+    objects.append((0, start, start + piece - 1))
+    objects.append((1, 0, start + piece - 1))
+    return objects
+
+
+def check_retime_properties(src_path, out_path, report, label):
+    """Check timing rules (a) to (d) using exact rates read from the two files.
+
+    Returns (max start error, max end error) in seconds as Fractions. A 1-frame object that was shortened
+    (listed in the notes) may have an end error up to 3/(2*Rt); every other boundary is within 1/(2*Rt).
+    """
+    src_text = read_bytes(src_path).decode("utf-8")
+    out_text = read_bytes(out_path).decode("utf-8")
+    rate_src, rate_dst = parse_rate(src_text), parse_rate(out_text)
+    half = Fraction(1, 2) / rate_dst
+    src_objs, out_objs = parse_objects(src_text), parse_objects(out_text)
+    short = shortened_lines(report["notes"])
+    assert set(src_objs) == set(out_objs), "%s: objects added or lost" % label
+    max_start = max_end = Fraction(0)
+    for no, src_obj in src_objs.items():
+        out_obj = out_objs[no]
+        line = src_obj["line"]
+        assert len(src_obj["frames"]) == 2 and len(out_obj["frames"]) == 2, "%s line %d: not 2-valued" % (label, line)
+        s, e = src_obj["frames"]
+        s2, e2 = out_obj["frames"]
+        assert e2 >= s2, "%s line %d: object vanished (%d,%d)" % (label, line, s2, e2)
+        start_err = abs(Fraction(s2) / rate_dst - Fraction(s) / rate_src)
+        end_err = abs(Fraction(e2 + 1) / rate_dst - Fraction(e + 1) / rate_src)
+        assert start_err <= half, "%s line %d: start error %s s > 1/(2Rt)" % (label, line, start_err)
+        end_limit = Fraction(3, 2) / rate_dst if line in short else half
+        assert end_err <= end_limit, "%s line %d: end error %s s > %s s" % (label, line, end_err, end_limit)
+        max_start = max(max_start, start_err)
+        max_end = max(max_end, end_err)
+    for a_no, a in src_objs.items():
+        for b_no, b in src_objs.items():
+            if a.get("layer") == b.get("layer") and a["frames"][1] + 1 == b["frames"][0]:
+                ae = out_objs[a_no]["frames"][1]
+                bs = out_objs[b_no]["frames"][0]
+                assert ae + 1 == bs, "%s: touching lines %d and %d no longer touch (%d, %d)" % (
+                    label, a["line"], b["line"], ae, bs)
+    timeline_src = max(Fraction(o["frames"][1] + 1) / rate_src for o in src_objs.values())
+    timeline_dst = max(Fraction(o["frames"][1] + 1) / rate_dst for o in out_objs.values())
+    assert abs(timeline_dst - timeline_src) <= 1 / rate_dst, "%s: timeline end moved by more than 1/Rt" % label
+    return max_start, max_end
+
+
+def test_target_fps_exact_values_30fps_fixture():
+    d = case_dir("tfps_30")
+    out66 = os.path.join(d, "t66.aup2")
+    code, _, err = convert_target(FIX_30, out66, "66")
+    assert code == 0, "66: exit %d: %s" % (code, err)
+    changes = line_changes(read_bytes(FIX_30), read_bytes(out66))
+    assert set(changes) == {3, 11, 36}, "66: unexpected changed lines: %r" % changes
+    assert changes[11] == ("video.rate=30", "video.rate=66")
+    assert changes[36] == ("frame=0,149", "frame=0,329"), changes[36]
+
+    out_ntsc = os.path.join(d, "t5994.aup2")
+    code, _, err = convert_target(FIX_30, out_ntsc, "60000/1001")
+    assert code == 0, "60000/1001: exit %d: %s" % (code, err)
+    changes = line_changes(read_bytes(FIX_30), read_bytes(out_ntsc))
+    assert set(changes) == {3, 11, 12, 36}, "60000/1001: unexpected changed lines: %r" % changes
+    assert changes[11] == ("video.rate=30", "video.rate=60000")
+    assert changes[12] == ("video.scale=1", "video.scale=1001")
+    assert changes[36] == ("frame=0,149", "frame=0,299"), changes[36]
+    report = read_report(out_ntsc)
+    assert report["k"] == "2000/1001" and report["source_rate"] == "30/1", report
+    assert report["target_rate"] == "60000/1001", report
+    # end: 300 / (60000/1001) - 150 / 30 = 1/200 s exactly
+    assert report["timing"]["max_end_error_s"] == "1/200", report["timing"]
+    assert report["timing"]["max_start_error_s"] == "0", report["timing"]
+
+
+def test_target_fps_synthetic_60_to_66_and_72_to_60():
+    d, src = synthetic_project("tfps_60_66", FIX_30, 60, [(0, 0, 59), (0, 60, 119)])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "66")
+    assert code == 0, "60->66: exit %d: %s" % (code, err)
+    text = read_bytes(out).decode("utf-8")
+    objs = parse_objects(text)
+    assert objs[0]["frames"] == [0, 65], objs
+    assert objs[1]["frames"] == [66, 131], objs
+    assert parse_rate(text) == Fraction(66)
+
+    d, src = synthetic_project("tfps_72_60", FIX_30, 72, [(0, 0, 71)])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0, "72->60: exit %d: %s" % (code, err)
+    objs = parse_objects(read_bytes(out).decode("utf-8"))
+    assert objs[0]["frames"] == [0, 59], objs
+
+
+def test_target_fps_shortens_one_frame_object_and_notes_it():
+    d = case_dir("tfps_short_120")
+    src = os.path.join(d, "src120.aup2")
+    write_bytes(src, read_bytes(FIX_120).decode("utf-8").replace("frame=0,599", "frame=3,3", 1).encode("utf-8"))
+    out = os.path.join(d, "out24.aup2")
+    code, _, err = convert_target(src, out, "24")
+    assert code == 0, "exit %d: %s" % (code, err)
+    line = line_number_of(src, "frame=3,3")
+    assert parse_objects(read_bytes(out).decode("utf-8"))[0]["frames"] == [1, 1]
+    notes = read_report(out)["notes"]
+    assert notes == ["object at line %d shortened to 1 frame" % line], notes
+    assert read_report(out)["timing"]["objects"][0]["shortened"] is True
+
+
+def test_target_fps_intermediate_collision_refused_with_line():
+    d = case_dir("tfps_collide")
+    src = os.path.join(d, "collide.aup2")
+    make_intermediate_fixture(src, "frame=0,1,2,599", base=FIX_120)
+    out = os.path.join(d, "collide_out.aup2")
+    code, _, err = convert_target(src, out, "24")
+    assert code == 2, "expected refusal, exit %d: %s" % (code, err)
+    assert "line 36" in err and "collide" in err, err
+    assert_no_output(out)
+
+
+def test_target_fps_touching_neighbour_refused_when_shortened():
+    d, src = synthetic_project("tfps_touch_refuse", FIX_120, 120, [(0, 0, 0), (0, 1, 1)])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "24")
+    line = line_number_of(src, "frame=1,1")
+    assert code == 2 and "line %d" % line in err and "touch" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_target_fps_rejections():
+    d = case_dir("tfps_reject")
+    out = os.path.join(d, "out.aup2")
+    code, _, err = run_tool("--in", FIX_30, "--out", out, "--target-fps", "59.94")
+    assert code == 2 and "59.94" in err and "decimal" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+    code, _, err = run_tool("--in", FIX_30, "--out", out, "--target-fps", "0")
+    assert code == 2 and "positive" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+    code, _, err = run_tool("--in", FIX_30, "--out", out, "--factor", "2", "--target-fps", "66")
+    assert code == 2 and "not allowed" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+    code, _, err = run_tool("--in", FIX_30, "--out", out)
+    assert code == 2 and "required" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_target_fps_inserts_missing_video_scale():
+    text = read_bytes(FIX_30).decode("utf-8").replace("video.scale=1\n", "", 1)
+    d = case_dir("tfps_noscale")
+    src = os.path.join(d, "noscale.aup2")
+    write_bytes(src, text.encode("utf-8"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60000/1001")
+    assert code == 0, "exit %d: %s" % (code, err)
+    out_text = read_bytes(out).decode("utf-8")
+    assert "video.rate=60000\nvideo.scale=1001\n" in out_text, out_text[:400]
+    assert parse_rate(out_text) == Fraction(60000, 1001)
+    assert any("has no video.scale" in n for n in read_report(out)["notes"]), read_report(out)["notes"]
+
+
+def test_retime_timing_properties():
+    sources = []
+    for label, base, rate in (("30", FIX_30, 30), ("66", FIX_66, 66), ("120", FIX_120, 120)):
+        sources.append(("fix%s" % label, base))
+        _, syn = synthetic_project("syn%s" % label, base, rate, timing_layout(rate))
+        sources.append(("syn%s" % label, syn))
+    for label, src in sources:
+        d_out = case_dir("out_" + label)
+        for target in TARGETS:
+            out = os.path.join(d_out, "out_%s.aup2" % target.replace("/", "_"))
+            code, _, err = convert_target(src, out, target)
+            assert code == 0, "%s -> %s: exit %d: %s" % (label, target, code, err)
+            max_start, max_end = check_retime_properties(src, out, read_report(out), "%s->%s" % (label, target))
+            print("  INFO %s -> %s: max start %.4f ms, max end %.4f ms, shortened %d" % (
+                label, target, float(max_start) * 1000, float(max_end) * 1000,
+                len(shortened_lines(read_report(out)["notes"]))))
+
+
+def scene_project(name, rate, objects):
+    """Write a project into a new case dir with one [scene.N] section per scene in `objects`.
+
+    `objects` is a list of (scene, layer, start, end). Each object section sits under its scene's header and
+    carries a scene= line, as in AviUtl2 files. Returns (dir, src_path).
+    """
+    d = case_dir(name)
+    src = os.path.join(d, "src.aup2")
+    parts = ["[project]\nversion=2010400\nfile=synthetic.aup2\ndisplay.scene=0\npreview.scene=0\n"]
+    for scene in sorted({obj[0] for obj in objects}):
+        parts.append("[scene.%d]\nscene=%d\nname=scene %d\nvideo.width=640\nvideo.height=360\nvideo.rate=%d\n"
+                     "video.scale=1\naudio.rate=44100\ncursor.frame=0\ncursor.layer=0\npreview.frame=0\n"
+                     "display.frame=0\ndisplay.layer=0\n" % (scene, scene, scene, rate))
+        for no, (obj_scene, layer, start, end) in enumerate(objects):
+            if obj_scene == scene:
+                parts.append("[%d]\nlayer=%d\nscene=%d\nfocus=0\nframe=%d,%d\n" % (no, layer, scene, start, end))
+    write_bytes(src, "".join(parts).encode("utf-8"))
+    return d, src
+
+
+def test_target_fps_same_layer_in_two_scenes_is_not_grouped():
+    d, src = scene_project("tfps_two_scenes", 60, [(0, 0, 0, 59), (1, 0, 0, 59)])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "66")
+    assert code == 0 and "REFUSED" not in err, "exit %d: %s" % (code, err)
+    text = read_bytes(out).decode("utf-8")
+    objs = parse_objects(text)
+    assert objs[0]["frames"] == [0, 65] and objs[1]["frames"] == [0, 65], objs
+    assert read_report(out)["notes"] == [], read_report(out)["notes"]
+
+
+def test_target_fps_touching_across_scenes_is_not_checked():
+    # Under one timeline these two 1-frame objects would touch and the first would be shortened (refused).
+    # In different scenes they are independent, so both convert and both shortened objects are noted.
+    d, src = scene_project("tfps_two_scenes_short", 120, [(0, 0, 0, 0), (1, 0, 1, 1)])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "24")
+    assert code == 0, "exit %d: %s" % (code, err)
+    objs = parse_objects(read_bytes(out).decode("utf-8"))
+    assert objs[0]["frames"] == [0, 0] and objs[1]["frames"] == [0, 0], objs
+    notes = read_report(out)["notes"]
+    assert sorted(notes) == sorted(["object at line %d shortened to 1 frame" % line
+                                    for line in (objs[0]["line"], objs[1]["line"])]), notes
+
+
+def test_target_fps_same_scene_overlap_after_rescaling_refused():
+    d, src = scene_project("tfps_same_scene", 120, [(0, 0, 0, 0), (0, 0, 2, 2)])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "24")
+    line = line_number_of(src, "frame=2,2")
+    assert code == 2 and "line %d" % line in err and "overlaps" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_real_world_target_fps_66_and_50():
+    if not os.path.isfile(REAL_WORLD):
+        print("  SKIP real-world file not present")
+        return
+    before_hash = sha256_of(REAL_WORLD)
+    input_dir = os.path.dirname(REAL_WORLD)
+    before_listing = sorted(os.listdir(input_dir))
+    old = read_bytes(REAL_WORLD)
+    d = case_dir("real_tfps")
+    for target in ("66", "50"):
+        out = os.path.join(d, "real_%s.aup2" % target.replace("/", "_"))
+        code, _, err = convert_target(REAL_WORLD, out, target)
+        assert sha256_of(REAL_WORLD) == before_hash, "real-world input was modified"
+        assert sorted(os.listdir(input_dir)) == before_listing, "output appeared next to real-world input"
+        assert code == 0, "target %s: exit %d: %s" % (target, code, err)
+        report = read_report(out)
+        changes = line_changes(old, read_bytes(out))
+        assert {c["line"] for c in report["changes"]} == set(changes), "json changes disagree with output"
+        kinds = classify_changed_lines(old, changes)
+        assert set(kinds) <= set(KIND_BY_SECTION_KEY.values()), kinds
+        assert kinds.get("project file=") == 1, kinds
+        assert parse_rate(read_bytes(out).decode("utf-8")) == Fraction(target)
+        max_start, max_end = check_retime_properties(REAL_WORLD, out, report, "real->%s" % target)
+        print("  INFO real-world -> %s: %d changed lines, kinds %s" % (target, len(changes), kinds))
+        print("  INFO real-world -> %s: max start %.4f ms, max end %.4f ms (report: %s / %s)" % (
+            target, float(max_start) * 1000, float(max_end) * 1000,
+            report["timing"]["max_start_error_s"], report["timing"]["max_end_error_s"]))
+
+
 TESTS = [
+    test_target_fps_exact_values_30fps_fixture,
+    test_target_fps_synthetic_60_to_66_and_72_to_60,
+    test_target_fps_shortens_one_frame_object_and_notes_it,
+    test_target_fps_intermediate_collision_refused_with_line,
+    test_target_fps_touching_neighbour_refused_when_shortened,
+    test_target_fps_rejections,
+    test_target_fps_inserts_missing_video_scale,
+    test_target_fps_same_layer_in_two_scenes_is_not_grouped,
+    test_target_fps_touching_across_scenes_is_not_checked,
+    test_target_fps_same_scene_overlap_after_rescaling_refused,
+    test_retime_timing_properties,
+    test_real_world_target_fps_66_and_50,
     test_30fps_x2_changes_only_expected_lines,
     test_2112_file_with_rate_reset_to_30_x2,
     test_66_and_120_fixtures_x2,
