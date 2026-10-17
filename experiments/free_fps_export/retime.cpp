@@ -934,7 +934,7 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         if (find_marker(decode_utf8(script_text(effect_name, key, value)), marker)) {
             refuse(idx + 1, "script text uses frame-dependent marker '" + marker + "' in " +
                                 effect_name.value_or(std::string("None")) + " effect (" + key +
-                                "); refused");
+                                "); refused (pass --allow-frame-scripts to convert anyway)");
         }
         if (!is_trackbar(value)) {
             continue;

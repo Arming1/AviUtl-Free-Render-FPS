@@ -41,8 +41,7 @@ Limits of the port:
 - Frame-marker detection uses Unicode `\w` and `\s` through Windows character classes for BMP code points.
   Supplementary code points count as non-word. This is an approximation.
 - Values beyond 64 bits are refused.
-- The script-refusal text omits the Python tool's `(pass --allow-frame-scripts ...)` suffix, because the plugin has no
-  such option.
+- The C++ and Python script-refusal texts are identical, including the `(pass --allow-frame-scripts ...)` hint. There is no known difference.
 
 ## Build and test
 

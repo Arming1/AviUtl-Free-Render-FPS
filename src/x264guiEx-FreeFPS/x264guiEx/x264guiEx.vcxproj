@@ -86,9 +86,9 @@
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</LinkIncremental>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">.auo</TargetExt>
-    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.auo2</TargetExt>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.aux2</TargetExt>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">.auo</TargetExt>
-    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.auo2</TargetExt>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.aux2</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <IntDir>$(SolutionDir)$(Configuration)\$(Platform)\$(ProjectName)\temp\</IntDir>
@@ -294,6 +294,14 @@ copy /y x264guiEx.zh.ini "$(OutDir)x264guiEx-FreeRenderFPS.zh.ini"</Command>
     <ClCompile Include="encode\freefps_scheduler.cpp">
       <CompileAsManaged>false</CompileAsManaged>
     </ClCompile>
+    <ClCompile Include="freefps_export\freefps_export.cpp" Condition="'$(Platform)'=='x64'">
+      <CompileAsManaged>false</CompileAsManaged>
+      <AdditionalOptions>%(AdditionalOptions) /source-charset:utf-8 /execution-charset:utf-8</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="freefps_export\retime.cpp" Condition="'$(Platform)'=='x64'">
+      <CompileAsManaged>false</CompileAsManaged>
+      <AdditionalOptions>%(AdditionalOptions) /source-charset:utf-8 /execution-charset:utf-8</AdditionalOptions>
+    </ClCompile>
     <Reference Include="System">
       <CopyLocalSatelliteAssemblies>true</CopyLocalSatelliteAssemblies>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
@@ -322,6 +330,9 @@ copy /y x264guiEx.zh.ini "$(OutDir)x264guiEx-FreeRenderFPS.zh.ini"</Command>
     <ClInclude Include="encode\freefps_cache_workaround.h" />
     <ClInclude Include="encode\freefps_code_patch.h" />
     <ClInclude Include="encode\freefps_scheduler.h" />
+    <ClInclude Include="freefps_export\freefps_export.h" />
+    <ClInclude Include="freefps_export\plugin2.h" />
+    <ClInclude Include="freefps_export\retime.h" />
     <ClCompile Include="encode\convert_avx2.cpp">
       <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</CompileAsManaged>
       <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</CompileAsManaged>

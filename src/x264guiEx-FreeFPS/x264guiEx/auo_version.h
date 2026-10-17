@@ -35,8 +35,8 @@
 #define AUO_NAME_WITHOUT_EXT "x264guiEx-FreeRenderFPS"
 #define AUO_NAME_WITHOUT_EXT_W L"x264guiEx-FreeRenderFPS"
 #if _M_X64
-#define AUO_NAME             "x264guiEx-FreeRenderFPS.auo2"
-#define AUO_NAME_W          L"x264guiEx-FreeRenderFPS.auo2"
+#define AUO_NAME             "x264guiEx-FreeRenderFPS.aux2"
+#define AUO_NAME_W          L"x264guiEx-FreeRenderFPS.aux2"
 #else
 #define AUO_NAME             "x264guiEx-FreeRenderFPS.auo"
 #define AUO_NAME_W          L"x264guiEx-FreeRenderFPS.auo"

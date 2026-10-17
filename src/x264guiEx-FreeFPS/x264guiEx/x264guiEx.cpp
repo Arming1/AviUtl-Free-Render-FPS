@@ -55,6 +55,7 @@
 #if AVIUTL_TARGET_VER == 2
 #include "logger2.h"
 #include "project2.h"
+#include "freefps_export/freefps_export.h"
 #endif
 
 //---------------------------------------------------------------------
@@ -131,7 +132,10 @@ OUTPUT_PLUGIN_TABLE output_plugin_table = {
 //---------------------------------------------------------------------
 //        出力プラグイン構造体のポインタを渡す関数
 //---------------------------------------------------------------------
-EXTERN_C OUTPUT_PLUGIN_TABLE __declspec(dllexport) * __stdcall GetOutputPluginTable( void ) {
+// Setup that runs before the host gets the table: settings, file filter, plugin name. AviUtl 1.x calls it through
+// GetOutputPluginTable. The .aux2 calls it from RegisterPlugin (freefps_export/freefps_export.cpp), which then
+// registers the table.
+OUTPUT_PLUGIN_TABLE *prepare_output_plugin_table() {
     init_SYSTEM_DATA(&g_sys_dat);
     make_file_filter(NULL, 0, g_sys_dat.exstg->s_local.default_output_ext);
     overwrite_aviutl_ini_file_filter(g_sys_dat.exstg->s_local.default_output_ext);
@@ -142,6 +146,13 @@ EXTERN_C OUTPUT_PLUGIN_TABLE __declspec(dllexport) * __stdcall GetOutputPluginTa
 #endif
     return &output_plugin_table;
 }
+
+#if AVIUTL_TARGET_VER == 1
+// Not exported from the x64 .aux2: there RegisterPlugin registers the table instead.
+EXTERN_C OUTPUT_PLUGIN_TABLE __declspec(dllexport) * __stdcall GetOutputPluginTable( void ) {
+    return prepare_output_plugin_table();
+}
+#endif
 
 // AviUtl 1.x asks for the serialized output-plugin configuration before it
 // necessarily calls the optional initialization callback. Keep the default
@@ -157,6 +168,7 @@ static void ensure_default_config_initialized() {
 #if AVIUTL_TARGET_VER == 2
 EXTERN_C void __declspec(dllexport) InitializeLogger(LOG_HANDLE *logger) {
     set_aviutl2_logger(logger);
+    freefps_export_set_logger(logger);
 }
 
 static const char *const PROJECT_CONFIG_KEY = "freerenderfps_config";
@@ -322,6 +334,16 @@ BOOL func_output( OUTPUT_INFO *oip ) {
     if (conf_out.oth.benchmark_mode) {
         return run_benchmark(oip);
     }
+    // The user's value of this setting, put back into conf_out before the last-output config is saved below.
+    const BOOL user_freefps_enable = conf_out.vid.freefps_enable;
+#if AVIUTL_TARGET_VER == 2
+    // Free FPS Export has already re-timed the project for this export. The built-in FreeRenderFPS must not run on
+    // top of it. Only conf_out changes here, so g_conf and the saved configuration keep the user's value.
+    const bool freefps_menu_export = g_freefps_menu_export_active.load();
+    if (freefps_menu_export) {
+        conf_out.vid.freefps_enable = FALSE;
+    }
+#endif
 
     FreeFpsSession freefps;
     FreeFpsSettings freefps_settings{
@@ -360,6 +382,11 @@ BOOL func_output( OUTPUT_INFO *oip ) {
 
     //ログウィンドウを開く
     open_log_window(enc_oip, &g_sys_dat, 1, get_total_path(&conf_out));
+#if AVIUTL_TARGET_VER == 2
+    if (freefps_menu_export) {
+        write_log_auo_line(LOG_INFO, L"Free FPS Export: re-timed project, built-in FreeRenderFPS disabled for this export");
+    }
+#endif
     if (freefps.enabled()) {
         write_log_auo_line_fmt(
             LOG_INFO,
@@ -426,6 +453,7 @@ BOOL func_output( OUTPUT_INFO *oip ) {
     if (ret == AUO_RESULT_SUCCESS) {
         memset(default_stg_file, 0, sizeof(default_stg_file));
         PathCombine(default_stg_file, g_sys_dat.exstg->s_local.stg_dir, get_last_out_stg_appendix().c_str());
+        conf_out.vid.freefps_enable = user_freefps_enable;  // never persist the menu-export override
         guiEx_config::save_guiEx_conf(&conf_out, default_stg_file);
         g_sys_dat.exstg->set_last_out_stg(PathFindFileName(default_stg_file));
         g_sys_dat.exstg->save_last_out_stg();

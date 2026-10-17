@@ -7,8 +7,8 @@ Targets: --target-fps 66, 60, 50, 59, 24, 120, 60000/1001, 30000/1001 and --fact
 Refusal cases: synthetic inputs written to the work directory, one per refusal, each with its own arguments.
 
 Each case runs both tools one after the other with the same absolute --out path. Exit codes, stderr (the
-refusal text) and the .aup2 and .convert.json files must match exactly. Known difference: the C++ tool has no
---allow-frame-scripts, so its script refusal may lack the hint suffix; any difference is reported.
+refusal text) and the .aup2 and .convert.json files must match exactly. The C++ and Python refusal texts are now
+identical (no known difference); any difference is reported.
 
 Usage: python -I tests/crosscheck.py [--exe PATH] [--work DIR] [--keep]
 Exit code: 0 when all cases match, 1 on any mismatch, 2 when the setup is missing.
