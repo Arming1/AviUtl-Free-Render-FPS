@@ -1,4 +1,5 @@
 #include "freefps_aviutl1_hook.h"
+#include "freefps_code_patch.h"
 
 #include <windows.h>
 #include <wincrypt.h>
@@ -16,6 +17,14 @@
 #include <vector>
 
 #pragma comment(lib, "advapi32.lib")
+
+// Diagnostic trace from the ExEdit reverse-engineering work.  It appends to
+// freerenderfps_aviutl1_probe.log in the current directory on every request,
+// so it must stay out of release builds.  Define FREEFPS_AVIUTL1_PROBE_LOG=1
+// only for a local diagnostic build.
+#ifndef FREEFPS_AVIUTL1_PROBE_LOG
+#define FREEFPS_AVIUTL1_PROBE_LOG 0
+#endif
 
 #pragma managed(push, off)
 
@@ -50,7 +59,6 @@ constexpr std::array<std::uint8_t, 32> kExEditSha256{
 // bytes are copied into the trampoline and checked before patching.
 constexpr std::uintptr_t kRenderPrepRva = 0x47E30;
 constexpr size_t kPatchSize = 5;
-constexpr LONG kMaxProbeLines = 2000;
 constexpr std::array<std::uint8_t, kPatchSize> kRenderPrepPrologue{
     0x51, 0x8B, 0x4C, 0x24, 0x0C,
 };
@@ -72,6 +80,9 @@ using RenderPrep = void (__cdecl *)(
     std::uintptr_t, std::uintptr_t, std::uintptr_t, std::uintptr_t,
     std::uintptr_t, std::uintptr_t, std::uintptr_t);
 
+#if FREEFPS_AVIUTL1_PROBE_LOG
+constexpr LONG kMaxProbeLines = 2000;
+
 struct ProbeFields {
     bool readable;
     std::int32_t frame;
@@ -86,11 +97,13 @@ struct ProbeFields {
     std::int32_t obj_num;
 };
 
-SRWLOCK g_request_lock = SRWLOCK_INIT;
 SRWLOCK g_log_lock = SRWLOCK_INIT;
+LONG g_probe_lines = 0;
+#endif
+
+SRWLOCK g_request_lock = SRWLOCK_INIT;
 FreeFpsRequestContext g_request{};
 LONG g_builder_hits = 0;
-LONG g_probe_lines = 0;
 
 std::uint8_t* g_exedit_module = nullptr;
 std::uint8_t* g_target = nullptr;
@@ -128,58 +141,6 @@ std::array<std::uint8_t, kSubframePatchSize> make_subframe_detour(
     const auto jump = make_rel32_jump(target, destination, representable);
     std::memcpy(bytes.data(), jump.data(), jump.size());
     return bytes;
-}
-
-bool write_code(void* destination, const void* source, size_t size) {
-    DWORD old_protect = 0;
-    if (!VirtualProtect(destination, size, PAGE_EXECUTE_READWRITE,
-                        &old_protect)) {
-        return false;
-    }
-    std::memcpy(destination, source, size);
-    FlushInstructionCache(GetCurrentProcess(), destination, size);
-    DWORD ignored = 0;
-    VirtualProtect(destination, size, old_protect, &ignored);
-    return true;
-}
-
-std::vector<HANDLE> suspend_other_threads() {
-    std::vector<HANDLE> threads;
-    const DWORD process_id = GetCurrentProcessId();
-    const DWORD current_thread = GetCurrentThreadId();
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) {
-        return threads;
-    }
-    THREADENTRY32 entry{};
-    entry.dwSize = sizeof(entry);
-    if (Thread32First(snapshot, &entry)) {
-        do {
-            if (entry.th32OwnerProcessID != process_id ||
-                entry.th32ThreadID == current_thread) {
-                continue;
-            }
-            HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME, FALSE,
-                                       entry.th32ThreadID);
-            if (thread != nullptr) {
-                if (SuspendThread(thread) != static_cast<DWORD>(-1)) {
-                    threads.push_back(thread);
-                } else {
-                    CloseHandle(thread);
-                }
-            }
-        } while (Thread32Next(snapshot, &entry));
-    }
-    CloseHandle(snapshot);
-    return threads;
-}
-
-void resume_threads(std::vector<HANDLE>& threads) {
-    for (HANDLE thread : threads) {
-        ResumeThread(thread);
-        CloseHandle(thread);
-    }
-    threads.clear();
 }
 
 bool module_path(HMODULE module, std::wstring& path) {
@@ -327,6 +288,7 @@ HMODULE find_exedit_module() {
     return result;
 }
 
+#if FREEFPS_AVIUTL1_PROBE_LOG
 void write_probe_text(const char* text) {
     AcquireSRWLockExclusive(&g_log_lock);
     wchar_t directory[32768]{};
@@ -387,6 +349,7 @@ void format_fields(char* output, size_t output_size, const char* label,
                 fields.framerate_de, fields.subframe, fields.object_start_frame,
                 fields.v_func_idx, fields.obj_index, fields.obj_num);
 }
+#endif
 
 extern "C" void __cdecl freefps_subframe_inject(
     std::uintptr_t filter_info) {
@@ -439,10 +402,11 @@ extern "C" __declspec(naked) void freefps_subframe_detour() {
 }
 #endif
 
+#if FREEFPS_AVIUTL1_PROBE_LOG
 void log_render_prep(std::uintptr_t arg1, std::uintptr_t arg2,
                      std::uintptr_t arg3, std::uintptr_t arg4,
                      std::uintptr_t arg5, std::uintptr_t arg6,
-                     std::uintptr_t arg7) {
+                     std::uintptr_t arg7, double target_coordinate) {
     const LONG line = InterlockedIncrement(&g_probe_lines);
     if (line > kMaxProbeLines) {
         return;
@@ -465,9 +429,10 @@ void log_render_prep(std::uintptr_t arg1, std::uintptr_t arg2,
                 static_cast<unsigned int>(arg1), static_cast<unsigned int>(arg2),
                 static_cast<unsigned int>(arg3), static_cast<unsigned int>(arg4),
                 static_cast<unsigned int>(arg5), sixth_text, seventh_text,
-                g_request.target_coordinate);
+                target_coordinate);
     write_probe_text(text);
 }
+#endif
 
 void __cdecl render_prep_detour(
     std::uintptr_t arg1, std::uintptr_t arg2, std::uintptr_t arg3,
@@ -475,20 +440,27 @@ void __cdecl render_prep_detour(
     std::uintptr_t arg7) {
     g_original(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 
+    // This detour only counts render-prep hits so a cache-bypassed request
+    // can be rejected.  The actual sub-frame value is injected by
+    // freefps_subframe_detour at the ExEdit dispatch boundary, after this
+    // routine has calculated the ordinary integer-frame state.
     bool active = false;
+    double target_coordinate = 0.0;
     AcquireSRWLockShared(&g_request_lock);
     active = g_request.active;
+    target_coordinate = g_request.target_coordinate;
     if (active) {
         InterlockedIncrement(&g_builder_hits);
     }
     ReleaseSRWLockShared(&g_request_lock);
+#if FREEFPS_AVIUTL1_PROBE_LOG
     if (active) {
-        // Keep the diagnostic trace for legacy-host validation.  The actual
-        // sub-frame value is injected by freefps_subframe_detour at the
-        // ExEdit dispatch boundary below, after this routine has calculated
-        // the ordinary integer-frame state.
-        log_render_prep(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+        log_render_prep(arg1, arg2, arg3, arg4, arg5, arg6, arg7,
+                        target_coordinate);
     }
+#else
+    (void)target_coordinate;
+#endif
 }
 
 } // namespace
@@ -643,19 +615,30 @@ bool freefps_hook_install(std::wstring& error) {
 
     g_detour = detour;
     g_subframe_detour = subframe_detour;
-    auto threads = suspend_other_threads();
+    const FreeFpsPatchRange patches[] = {
+        {g_target, kPatchSize},
+        {g_subframe_target, kSubframePatchSize},
+    };
+    FreeFpsThreadFreeze freeze;
+    if (!freeze.freeze(patches, std::size(patches))) {
+        g_target = nullptr;
+        g_subframe_target = nullptr;
+        g_exedit_module = nullptr;
+        error = L"FreeFPS: cannot pause AviUtl 1.x threads safely for the detour.";
+        return false;
+    }
     const bool main_written =
-        write_code(g_target, g_detour.data(), g_detour.size());
+        freefps_write_code(g_target, g_detour.data(), g_detour.size());
     const bool subframe_written =
         main_written &&
-        write_code(g_subframe_target, g_subframe_detour.data(),
-                   g_subframe_detour.size());
+        freefps_write_code(g_subframe_target, g_subframe_detour.data(),
+                           g_subframe_detour.size());
     if (main_written && !subframe_written) {
-        write_code(g_target, kRenderPrepPrologue.data(),
-                   kRenderPrepPrologue.size());
+        freefps_write_code(g_target, kRenderPrepPrologue.data(),
+                           kRenderPrepPrologue.size());
     }
     const bool written = main_written && subframe_written;
-    resume_threads(threads);
+    freeze.thaw();
     if (!written) {
         g_target = nullptr;
         g_subframe_target = nullptr;
@@ -664,7 +647,9 @@ bool freefps_hook_install(std::wstring& error) {
         return false;
     }
     g_installed = true;
+#if FREEFPS_AVIUTL1_PROBE_LOG
     write_probe_text("FreeRenderFPS AviUtl1 render-prep probe installed\r\n");
+#endif
     return true;
 }
 
@@ -676,17 +661,28 @@ void freefps_hook_uninstall() {
     g_request = FreeFpsRequestContext{};
     g_builder_hits = 0;
     ReleaseSRWLockExclusive(&g_request_lock);
-    auto threads = suspend_other_threads();
+    const FreeFpsPatchRange patches[] = {
+        {g_target, kPatchSize},
+        {g_subframe_target, kSubframePatchSize},
+    };
+    FreeFpsThreadFreeze freeze;
+    if (!freeze.freeze(patches, std::size(patches))) {
+        // Restoring bytes while other threads run could tear an instruction.
+        // With no active request both detours are pass-through, so leave them
+        // installed; the next session reuses them.
+        return;
+    }
     if (std::memcmp(g_target, g_detour.data(), g_detour.size()) == 0) {
-        write_code(g_target, kRenderPrepPrologue.data(), kRenderPrepPrologue.size());
+        freefps_write_code(g_target, kRenderPrepPrologue.data(),
+                           kRenderPrepPrologue.size());
     }
     if (g_subframe_target != nullptr &&
         std::memcmp(g_subframe_target, g_subframe_detour.data(),
                     g_subframe_detour.size()) == 0) {
-        write_code(g_subframe_target, kSubframeApplyPrologue.data(),
-                   kSubframeApplyPrologue.size());
+        freefps_write_code(g_subframe_target, kSubframeApplyPrologue.data(),
+                           kSubframeApplyPrologue.size());
     }
-    resume_threads(threads);
+    freeze.thaw();
     g_installed = false;
     g_target = nullptr;
     g_subframe_target = nullptr;
@@ -703,9 +699,12 @@ bool freefps_hook_begin_request(const FreeFpsRequestContext& request,
     }
     g_request = request;
     g_request.active = true;
-    g_probe_lines = 0;
     g_builder_hits = 0;
+#if FREEFPS_AVIUTL1_PROBE_LOG
+    g_probe_lines = 0;
+#endif
     ReleaseSRWLockExclusive(&g_request_lock);
+#if FREEFPS_AVIUTL1_PROBE_LOG
     char text[512]{};
     _snprintf_s(text, sizeof(text), _TRUNCATE,
                 "request generation=%llu output=%lld public=%d target=%0.12f\r\n",
@@ -713,6 +712,7 @@ bool freefps_hook_begin_request(const FreeFpsRequestContext& request,
                 static_cast<long long>(request.output_sample_index),
                 request.requested_integer_frame, request.target_coordinate);
     write_probe_text(text);
+#endif
     return true;
 }
 

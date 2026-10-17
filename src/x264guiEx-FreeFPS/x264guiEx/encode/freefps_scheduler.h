@@ -35,6 +35,7 @@ public:
     static FreeFpsSession* current();
 
 private:
+    void unregister();
     bool request_at(int public_frame, double coordinate,
                     std::int64_t output_index, DWORD format,
                     void*& frame, std::wstring& error);

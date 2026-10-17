@@ -63,16 +63,22 @@ FreeFpsSession::FreeFpsSession()
 }
 
 FreeFpsSession::~FreeFpsSession() {
-    if (registered_) {
-        AcquireSRWLockExclusive(&g_session_lock);
-        if (g_session == this) {
-            g_session = nullptr;
-        }
-        ReleaseSRWLockExclusive(&g_session_lock);
-    }
+    unregister();
     if (enabled_) {
         freefps_hook_uninstall();
     }
+}
+
+void FreeFpsSession::unregister() {
+    if (!registered_) {
+        return;
+    }
+    AcquireSRWLockExclusive(&g_session_lock);
+    if (g_session == this) {
+        g_session = nullptr;
+    }
+    ReleaseSRWLockExclusive(&g_session_lock);
+    registered_ = false;
 }
 
 bool FreeFpsSession::initialize(const OUTPUT_INFO* project,
@@ -128,7 +134,21 @@ bool FreeFpsSession::initialize(const OUTPUT_INFO* project,
         return false;
     }
 
+    // Claim the single session slot before touching the shared hook, so a
+    // second session is rejected without uninstalling the hook that the
+    // active session is still using.
+    AcquireSRWLockExclusive(&g_session_lock);
+    if (g_session != nullptr) {
+        ReleaseSRWLockExclusive(&g_session_lock);
+        error = L"FreeFPS: another render session is already active.";
+        return false;
+    }
+    g_session = this;
+    registered_ = true;
+    ReleaseSRWLockExclusive(&g_session_lock);
+
     if (!freefps_hook_install(error)) {
+        unregister();
         return false;
     }
     enabled_ = true;
@@ -141,18 +161,6 @@ bool FreeFpsSession::initialize(const OUTPUT_INFO* project,
         effective_.func_set_buffer_size(1, 0);
     }
 #endif
-
-    AcquireSRWLockExclusive(&g_session_lock);
-    if (g_session != nullptr) {
-        ReleaseSRWLockExclusive(&g_session_lock);
-        error = L"FreeFPS: another render session is already active.";
-        freefps_hook_uninstall();
-        enabled_ = false;
-        return false;
-    }
-    g_session = this;
-    registered_ = true;
-    ReleaseSRWLockExclusive(&g_session_lock);
     return true;
 }
 

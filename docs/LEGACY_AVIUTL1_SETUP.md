@@ -32,16 +32,26 @@ serialization pass, including the generic-INI fallback. The Win64 build
 continues to produce the AviUtl2 `.auo2` module.
 
 The AviUtl 1.x host adapter is version-pinned to the official AviUtl 1.10 /
-ExEdit 0.92 images. It keeps a guarded diagnostic render-preparation detour
-and injects the requested fractional frame at ExEdit's filter-dispatch
+ExEdit 0.92 images. It keeps a guarded render-preparation detour that counts
+evaluations (so a cache-bypassed request fails instead of emitting a stale
+image) and injects the requested fractional frame at ExEdit's filter-dispatch
 boundary. ExEdit stores that value as a centiframe remainder in
 `FilterProcInfo + 0x114` (0..99), so the legacy path has a maximum quantization
 error of 0.01 source frame. This is real scene/timeline evaluation at the
 requested output time; it is not frame duplication, frame dropping, metadata
 rewriting, or post-render transcoding.
 
-The diagnostic file `freerenderfps_aviutl1_probe.log` is written in AviUtl's
-working directory while a FreeRenderFPS request is active. The output video
-must still be rendered with this rebuilt `.auo` before claiming parity. The
+Release builds do not write a diagnostic log. The per-request trace
+`freerenderfps_aviutl1_probe.log` (written to AviUtl's working directory) is
+compiled in only when `FREEFPS_AVIUTL1_PROBE_LOG=1` is defined for a local
+diagnostic build; such a build must not be distributed. Builds before this
+change wrote that log on every request.
+
+While FreeRenderFPS is active, the host's copy-frame flag is ignored: the
+encoder loop index is an output sample, not a project frame, and every sample
+is freshly evaluated.
+
+The output video must still be rendered with this rebuilt `.auo` before
+claiming parity. The
 supported host combination is specifically AviUtl 1.10 + ExEdit 0.92; other
 legacy binaries are rejected by image layout, file size, and SHA-256 checks.

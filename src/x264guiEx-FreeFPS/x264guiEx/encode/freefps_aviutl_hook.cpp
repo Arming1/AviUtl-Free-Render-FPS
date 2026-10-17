@@ -1,11 +1,11 @@
 #include "freefps_aviutl_hook.h"
+#include "freefps_code_patch.h"
 
 #include <windows.h>
-#include <tlhelp32.h>
 
 #include <array>
 #include <cstring>
-#include <vector>
+#include <iterator>
 
 #pragma managed(push, off)
 
@@ -48,58 +48,6 @@ std::array<std::uint8_t, kPatchSize> make_absolute_jump(const void* destination)
     const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(destination);
     std::memcpy(bytes.data() + 6, &address, sizeof(address));
     return bytes;
-}
-
-std::vector<HANDLE> suspend_other_threads() {
-    std::vector<HANDLE> threads;
-    const DWORD process_id = GetCurrentProcessId();
-    const DWORD current_thread = GetCurrentThreadId();
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) {
-        return threads;
-    }
-    THREADENTRY32 entry{};
-    entry.dwSize = sizeof(entry);
-    if (Thread32First(snapshot, &entry)) {
-        do {
-            if (entry.th32OwnerProcessID != process_id ||
-                entry.th32ThreadID == current_thread) {
-                continue;
-            }
-            HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME, FALSE,
-                                       entry.th32ThreadID);
-            if (thread != nullptr) {
-                if (SuspendThread(thread) != static_cast<DWORD>(-1)) {
-                    threads.push_back(thread);
-                } else {
-                    CloseHandle(thread);
-                }
-            }
-        } while (Thread32Next(snapshot, &entry));
-    }
-    CloseHandle(snapshot);
-    return threads;
-}
-
-void resume_threads(std::vector<HANDLE>& threads) {
-    for (HANDLE thread : threads) {
-        ResumeThread(thread);
-        CloseHandle(thread);
-    }
-    threads.clear();
-}
-
-bool write_code(void* destination, const void* source, size_t size) {
-    DWORD old_protect = 0;
-    if (!VirtualProtect(destination, size, PAGE_EXECUTE_READWRITE,
-                        &old_protect)) {
-        return false;
-    }
-    std::memcpy(destination, source, size);
-    FlushInstructionCache(GetCurrentProcess(), destination, size);
-    DWORD ignored = 0;
-    VirtualProtect(destination, size, old_protect, &ignored);
-    return true;
 }
 
 bool validate_host(std::uint8_t*& module, std::wstring& error) {
@@ -216,10 +164,16 @@ bool freefps_hook_install(std::wstring& error) {
     }
     g_detour_bytes = make_absolute_jump(
         reinterpret_cast<const void*>(&timeline_builder_detour));
-    auto threads = suspend_other_threads();
-    const bool written = write_code(g_target, g_detour_bytes.data(),
-                                    g_detour_bytes.size());
-    resume_threads(threads);
+    const FreeFpsPatchRange patch{g_target, kPatchSize};
+    FreeFpsThreadFreeze freeze;
+    if (!freeze.freeze(&patch, 1)) {
+        g_target = nullptr;
+        error = L"FreeFPS: cannot pause AviUtl2 threads safely for the timeline detour.";
+        return false;
+    }
+    const bool written = freefps_write_code(g_target, g_detour_bytes.data(),
+                                            g_detour_bytes.size());
+    freeze.thaw();
     if (!written) {
         // Keep an existing trampoline alive. A thread that entered the detour
         // before restoration may still return through it.
@@ -240,11 +194,19 @@ void freefps_hook_uninstall() {
     g_request = FreeFpsRequestContext{};
     g_builder_hits = 0;
     ReleaseSRWLockExclusive(&g_request_lock);
-    auto threads = suspend_other_threads();
-    if (std::memcmp(g_target, g_detour_bytes.data(), g_detour_bytes.size()) == 0) {
-        write_code(g_target, kExpectedPrologue.data(), kExpectedPrologue.size());
+    const FreeFpsPatchRange patch{g_target, kPatchSize};
+    FreeFpsThreadFreeze freeze;
+    if (!freeze.freeze(&patch, 1)) {
+        // Restoring bytes while other threads run could tear an instruction.
+        // With no active request the detour is pass-through, so leave it
+        // installed; the next session reuses it.
+        return;
     }
-    resume_threads(threads);
+    if (std::memcmp(g_target, g_detour_bytes.data(), g_detour_bytes.size()) == 0) {
+        freefps_write_code(g_target, kExpectedPrologue.data(),
+                           kExpectedPrologue.size());
+    }
+    freeze.thaw();
     g_installed = false;
     // Do not free the trampoline here. Restoring the entry prevents new
     // detours; retaining the trampoline avoids racing a pre-existing caller.
