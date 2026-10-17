@@ -44,10 +44,17 @@ TRACK_PIPE_PAYLOADS = frozenset()
 # Modes exempt from the "value count equals frame count" check (study section 2).
 TRACK_COUNT_EXEMPT_MODES = frozenset({"再生範囲"})
 
-# Effect names that cannot be converted safely.
-REFUSED_EFFECT_NAMES = frozenset({"カウンター"})
-# Substrings that mark script text in an effect value.
-SCRIPT_TEXT_MARKERS = ("obj.", "rand", "local ", "function ")
+# Effect names that cannot be converted safely. Empty: カウンター is time-based (速度 = counts per second).
+REFUSED_EFFECT_NAMES = frozenset()
+# Effect whose text value may hold script between '<?' and '?>'.
+TEXT_EFFECT_NAME = "テキスト"
+# Effect whose 速度 must be a plain number (checked, then passed through).
+COUNTER_EFFECT_NAME = "カウンター"
+# Frame-dependent script markers. Time-based uses (obj.time, obj.totaltime, obj.getvalue) are not listed.
+RE_FRAME_MARKER = re.compile(
+    r"\bobj\.(?:frame|totalframe|index|rand)\b|(?<![\w.])rand\s*\(|\bmath\.random\s*\(|\bmath\.randomseed\b")
+# Script part of a テキスト value: text from '<?' to '?>' (or to the end when unterminated).
+RE_TEXT_SCRIPT = re.compile(r"<\?(.*?)(?:\?>|\Z)", re.DOTALL)
 # Refused when a line has this key and this exact value.
 REFUSED_KEY_VALUES = (("コマ落ち", "1"),)
 
@@ -132,8 +139,26 @@ def new_frames(frames, factor, line_no):
     return result
 
 
-def convert(data, in_path, out_path, factor):
-    """Return (output_bytes, changes). Raises Refusal on any unsupported content."""
+def unescape_newlines(text):
+    """A .aup2 text value may hold newlines as literal backslash escapes; turn them into real newlines."""
+    return text.replace("\\r\\n", "\n").replace("\\r", "\n").replace("\\n", "\n")
+
+
+def script_text(effect_name, key, value):
+    """Return the part of one effect value that is scanned for script markers ('' when none)."""
+    if effect_name == TEXT_EFFECT_NAME:
+        if key != TEXT_EFFECT_NAME:
+            return ""
+        return "\n".join(RE_TEXT_SCRIPT.findall(unescape_newlines(value)))
+    return value
+
+
+def convert(data, in_path, out_path, factor, allow_frame_scripts=False):
+    """Return (output_bytes, changes, notes, warnings).
+
+    Raises Refusal on any unsupported content. Frame-dependent script is refused unless
+    allow_frame_scripts is set; then each occurrence is returned in warnings and notes.
+    """
     if factor < 2:
         raise Refusal(None, "factor must be an integer >= 2, got %d" % factor)
 
@@ -154,6 +179,7 @@ def convert(data, in_path, out_path, factor):
     scene_lines = {}
     object_frame_lines = {}
     effect_lines = []
+    effect_props = {}  # (obj_no, effect_no) -> {key: (value, line_index)}
     project_seen = False
     for idx, body in enumerate(lines):
         if body.startswith("[") and body.endswith("]"):
@@ -190,6 +216,7 @@ def convert(data, in_path, out_path, factor):
             object_frame_lines[section[1]] = idx
         elif kind == "effect":
             effect_lines.append(idx)
+            effect_props.setdefault((section[1], section[2]), {})[key] = (value, idx)
 
         for ref_key, ref_value in REFUSED_KEY_VALUES:
             if key == ref_key and value == ref_value:
@@ -226,13 +253,41 @@ def convert(data, in_path, out_path, factor):
     frame_values = {}
     for obj_no, idx in object_frame_lines.items():
         frame_values[obj_no] = parse_frames(lines[idx].partition("=")[2], idx + 1)
+    notes = []
+    warnings = []
+    counter_lines = []
+    for (obj_no, eff_no), props in sorted(effect_props.items()):
+        if props.get("effect.name", (None, None))[0] != COUNTER_EFFECT_NAME:
+            continue
+        name_idx = props["effect.name"][1]
+        if "速度" not in props:
+            raise Refusal(name_idx + 1, "%s has no 速度= line" % COUNTER_EFFECT_NAME)
+        speed, speed_idx = props["速度"]
+        if not RE_NUMBER.match(speed):
+            raise Refusal(speed_idx + 1, "%s 速度 must be a plain number, got %r" % (COUNTER_EFFECT_NAME, speed))
+        counter_lines.append(name_idx + 1)
+    if counter_lines:
+        notes.append("%s: time-based (速度 = counts per second), passed through unchanged (lines %s)"
+                     % (COUNTER_EFFECT_NAME, ", ".join(str(n) for n in counter_lines)))
+
     for idx in effect_lines:
         section = section_of[idx]
         key, _, value = lines[idx].partition("=")
+        props = effect_props[(section[1], section[2])]
+        effect_name = props.get("effect.name", (None, None))[0]
         if key == "effect.name" and value in REFUSED_EFFECT_NAMES:
             raise Refusal(idx + 1, "effect %r is not supported" % value)
-        if any(marker in value for marker in SCRIPT_TEXT_MARKERS):
-            raise Refusal(idx + 1, "script text in effect value (%s)" % key)
+        for marker in RE_FRAME_MARKER.finditer(script_text(effect_name, key, value)):
+            where = "%s effect (%s)" % (effect_name, key)
+            if not allow_frame_scripts:
+                raise Refusal(idx + 1, "script text uses frame-dependent marker %r in %s; "
+                              "refused (pass --allow-frame-scripts to convert anyway)"
+                              % (marker.group(0), where))
+            text = ("WARNING: line %d: frame-dependent script marker %r in %s: frame-based animation "
+                    "will run %d times faster and per-frame random sequences change"
+                    % (idx + 1, marker.group(0), where, factor))
+            warnings.append(text)
+            notes.append(text)
         if not is_trackbar(value):
             continue
         parts = value.split(",")
@@ -281,7 +336,7 @@ def convert(data, in_path, out_path, factor):
         out_bytes += UTF8_BOM
     for (body, eol), new_body in zip(records, new_bodies):
         out_bytes += (new_body + eol).encode("utf-8")
-    return bytes(out_bytes), changes
+    return bytes(out_bytes), changes, notes, warnings
 
 
 def same_path(a, b):
@@ -298,6 +353,8 @@ def build_parser():
     parser.add_argument("--factor", dest="factor", type=int, required=True,
                         help="integer multiplier K >= 2")
     parser.add_argument("--force", action="store_true", help="overwrite existing outputs")
+    parser.add_argument("--allow-frame-scripts", action="store_true",
+                        help="convert despite frame-dependent script (obj.frame, rand(...)); prints a WARNING per occurrence")
     return parser
 
 
@@ -328,10 +385,14 @@ def main(argv=None):
         in_data = fh.read()
 
     try:
-        out_data, changes = convert(in_data, args.in_path, args.out_path, args.factor)
+        out_data, changes, notes, warnings = convert(
+            in_data, args.in_path, args.out_path, args.factor,
+            allow_frame_scripts=args.allow_frame_scripts)
     except Refusal as exc:
         return refuse(exc.message())
 
+    for text in warnings:
+        say(text, err=True)
     with open(args.out_path, "wb") as fh:
         fh.write(out_data)
 
@@ -342,6 +403,7 @@ def main(argv=None):
         "output": {"path": os.path.abspath(args.out_path), "sha256": sha256_hex(out_data)},
         "changed_line_count": len(changes),
         "changes": changes,
+        "notes": notes,
     }
     with open(json_path, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=2)

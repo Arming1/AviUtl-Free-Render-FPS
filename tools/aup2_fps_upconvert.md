@@ -8,7 +8,7 @@ Background and the field table: `docs/aup2_fps_upconvert_feasibility.md`.
 ## Usage
 
 ```
-python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --factor K [--force]
+python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --factor K [--force] [--allow-frame-scripts]
 ```
 
 - `K` is an integer of at least 2.
@@ -16,8 +16,10 @@ python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --factor K [--
 - Refusals exit with code 2, print `REFUSED: line N: reason` (or `REFUSED: reason` when no line applies) to stderr,
   and write nothing.
 - On success it writes `OUT` and `OUT.aup2.convert.json` (the sidecar is `<OUT path>.convert.json`).
-  The sidecar holds the input and output absolute paths with SHA-256, the factor, and every changed line
-  (`line`, `old`, `new`).
+  The sidecar holds the input and output absolute paths with SHA-256, the factor, every changed line
+  (`line`, `old`, `new`), and a `notes` list (empty when there is nothing to note).
+- `--allow-frame-scripts` converts despite frame-dependent script (see below). Each occurrence is printed to
+  stderr as `WARNING: line N: ...` and also written to `notes`.
 
 ## What it changes
 
@@ -34,11 +36,36 @@ values (`audio.rate`, `再生位置`, tempo), trackbar values, and unknown lines
 
 Scene requirements: all `[scene.N]` sections must share the same `video.rate` and `video.scale`, otherwise the tool refuses.
 
+Effects with `effect.name=カウンター` pass through unchanged. Their `速度` is counts per second (time-based), so
+no rewrite is needed. Each counter is listed in `notes` with its line number.
+
+## Script in effects
+
+Only effect values are checked. The frame-dependent markers are:
+
+- `\bobj\.(frame|totalframe|index|rand)\b`
+- `(?<![\w.])rand\s*\(`
+- `\bmath\.random\s*\(`
+- `\bmath\.randomseed\b`
+
+In a `テキスト` effect only the text between `<?` and `?>` is scanned (an unterminated `<?` runs to the end of the
+value). Text outside `<? ?>` is never scanned, so `random rand obj.x` in plain text converts. A literal backslash
+escape such as `\n` is read as a newline first, so `<?\nobj.frame?>` is still caught. In every other effect the
+whole value is scanned.
+
+Time-based uses (`obj.time`, `obj.totaltime`, `obj.getvalue`) are not markers and pass through.
+
+- By default a frame-dependent marker refuses (exit 2, `REFUSED: line N: script text uses frame-dependent marker ...`).
+- With `--allow-frame-scripts` the conversion runs. Each occurrence prints
+  `WARNING: line N: frame-dependent script marker ... frame-based animation will run K times faster and per-frame
+  random sequences change` and is recorded in `notes`.
+
 ## What it refuses
 
 - A `[scene.N]` key that is not on the known list and whose name contains `frame`, `mark`, or `range`.
-- An effect with `effect.name=カウンター`.
-- An effect value containing script text (`obj.`, `rand`, `local `, `function `).
+- A counter (`effect.name=カウンター`) with no `速度=` line, or with a `速度=` value that is not a plain number
+  (`-?\d+(\.\d+)?`).
+- A frame-dependent script marker in an effect value (see above), unless `--allow-frame-scripts` is given.
 - A line `コマ落ち=1`.
 - A trackbar whose move mode is not on the whitelist (`直線移動`, `補間移動`, `瞬間移動`, `移動無し`, `回転`, `再生範囲`), or
   that has a `|` payload (none are whitelisted, because the meaning is undocumented).
@@ -54,6 +81,9 @@ The whitelists and deny-lists are the constants at the top of `tools/aup2_fps_up
   object still plays its own source frames, so every other output frame repeats a source frame.
 - Per-frame random or noise effects, and any effect whose unit is not verified (for example `振動`), will
   produce different results at the higher rate. The tool does not check these beyond the rules above.
+- Script detection is a text match, not a parser. Only the markers listed above are found, so any other way of
+  reading the frame number or a random value is not detected. Text values are read one line at a time, so a value that spans real
+  newlines in the file is not joined; only escaped `\n` / `\r` inside one line are handled.
 - The last trackbar point is moved to the last new frame (option 1 of the study, section 3). The final
   section can stretch by up to one original frame (about 33 ms at 30 FPS).
 - Only integer K is supported.

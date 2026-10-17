@@ -6,6 +6,7 @@ Exit code is non-zero if any test fails.
 """
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -48,11 +49,39 @@ def run_tool(*args):
     return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
 
 
-def convert(in_path, out_path, factor=2, force=False):
+def convert(in_path, out_path, factor=2, force=False, extra=()):
     args = ["--in", in_path, "--out", out_path, "--factor", str(factor)]
     if force:
         args.append("--force")
+    args.extend(extra)
     return run_tool(*args)
+
+
+def read_report(out_path):
+    with open(out_path + ".convert.json", "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def fixture_variant(name, edit):
+    """Write an edited copy of the 30 FPS fixture into a new case dir. Returns (dir, src_path)."""
+    d = case_dir(name)
+    src = os.path.join(d, "src.aup2")
+    write_bytes(src, edit(read_bytes(FIX_30).decode("utf-8")).encode("utf-8"))
+    return d, src
+
+
+def insert_effect(name, extra_line):
+    """Replace the first 標準描画 effect name with `name` and add `extra_line` right after it."""
+    def edit(text):
+        return text.replace("effect.name=標準描画", "effect.name=%s\n%s" % (name, extra_line), 1)
+    return edit
+
+
+def line_number_of(path, needle):
+    lines = read_bytes(path).decode("utf-8").split("\n")
+    hits = [i + 1 for i, line in enumerate(lines) if needle in line]
+    assert len(hits) == 1, "expected one line with %r, got %r" % (needle, hits)
+    return hits[0]
 
 
 def line_changes(old_bytes, new_bytes):
@@ -327,6 +356,177 @@ def test_input_never_modified_by_conversion():
     assert sha256_of(FIX_30) == before, "input fixture was modified"
 
 
+COUNTER_NOTE = "カウンター: time-based (速度 = counts per second), passed through unchanged (lines %d)"
+
+
+def test_counter_passes_through_and_is_noted():
+    d, src = fixture_variant("cnt_ok", insert_effect("カウンター", "速度=1.0"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    assert code == 0, "exit %d: %s" % (code, err)
+    changes = line_changes(read_bytes(src), read_bytes(out))
+    assert set(changes) == {3, 11, 36}, "counter must not change: %r" % changes
+    counter_line = line_number_of(src, "effect.name=カウンター")
+    assert read_report(out)["notes"] == [COUNTER_NOTE % counter_line], read_report(out)["notes"]
+
+
+def test_counter_non_numeric_speed_refused():
+    d, src = fixture_variant("cnt_bad", insert_effect("カウンター", "速度=abc"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    assert code == 2 and "速度" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_text_plain_words_outside_script_pass():
+    d, src = fixture_variant("txt_plain", insert_effect("テキスト", "テキスト=random rand obj.x"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert set(line_changes(read_bytes(src), read_bytes(out))) == {3, 11, 36}
+    assert read_report(out)["notes"] == [] and "WARNING" not in err
+
+
+def test_text_time_based_script_passes():
+    d, src = fixture_variant("txt_time", insert_effect(
+        "テキスト", "テキスト=<?obj.rz=obj.time*360+obj.totaltime+obj.getvalue(\"rz\")?>"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    assert code == 0 and "WARNING" not in err, "exit %d: %s" % (code, err)
+    assert set(line_changes(read_bytes(src), read_bytes(out))) == {3, 11, 36}
+
+
+def test_text_frame_script_refused_by_default():
+    d, src = fixture_variant("txt_frame", insert_effect("テキスト", "テキスト=<?=obj.frame?>"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    line = line_number_of(src, "テキスト=<?=obj.frame?>")
+    assert code == 2 and "line %d" % line in err and "obj.frame" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_text_frame_script_allowed_with_warning():
+    def edit(text):
+        text = text.replace("effect.name=標準描画", "effect.name=テキスト\nテキスト=<?=obj.frame?>", 1)
+        return text.replace("effect.name=図形", "effect.name=テキスト\nテキスト=<?rand(1,10)?>", 1)
+    d, src = fixture_variant("txt_allow", edit)
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2, extra=["--allow-frame-scripts"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    line_frame = line_number_of(src, "テキスト=<?=obj.frame?>")
+    line_rand = line_number_of(src, "テキスト=<?rand(1,10)?>")
+    assert "WARNING: line %d:" % line_frame in err and "'obj.frame'" in err, err
+    assert "WARNING: line %d:" % line_rand in err and "'rand('" in err, err
+    assert err.count("WARNING: line") == 2, err
+    assert "per-frame random sequences change" in err and "2 times faster" in err, err
+    notes = read_report(out)["notes"]
+    warn_notes = [n for n in notes if n.startswith("WARNING: ")]
+    assert len(warn_notes) == 2, notes
+    assert any(n.startswith("WARNING: line %d:" % line_frame) for n in warn_notes), warn_notes
+    assert any(n.startswith("WARNING: line %d:" % line_rand) for n in warn_notes), warn_notes
+    assert set(line_changes(read_bytes(src), read_bytes(out))) == {3, 11, 36}
+
+
+def test_text_rand_call_in_script_refused():
+    d, src = fixture_variant("txt_rand", insert_effect("テキスト", "テキスト=<?rand(1,10)?>"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    assert code == 2 and "rand(" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_text_math_random_refused_by_default_and_warned_when_allowed():
+    d, src = fixture_variant("txt_math", insert_effect("テキスト", "テキスト=<?=math.random(1,9)?>"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    line = line_number_of(src, "テキスト=<?=math.random(1,9)?>")
+    assert code == 2 and "line %d" % line in err and "math.random(" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+    out = os.path.join(d, "out_allow.aup2")
+    code, _, err = convert(src, out, 2, extra=["--allow-frame-scripts"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert "WARNING: line %d:" % line in err and "'math.random('" in err, err
+    notes = read_report(out)["notes"]
+    assert any(n.startswith("WARNING: line %d:" % line) for n in notes), notes
+
+
+def test_text_escaped_newline_inside_script_is_scanned():
+    d, src = fixture_variant("txt_nl", insert_effect("テキスト", "テキスト=<?\\nobj.frame?>"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    assert code == 2, "escaped newline before obj.frame must still refuse: exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+    d, src = fixture_variant("txt_nl_unterminated", insert_effect("テキスト", "テキスト=<?obj.frame"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    assert code == 2, "unterminated <? script must still be scanned: exit %d: %s" % (code, err)
+
+    d, src = fixture_variant("txt_nl_plain", insert_effect("テキスト", "テキスト=plain\\nobj.frame rand"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    assert code == 0, "escaped newline outside script must pass: exit %d: %s" % (code, err)
+
+
+KIND_BY_SECTION_KEY = {
+    ("project", "file"): "project file=",
+    ("scene", "video.rate"): "scene video.rate=",
+    ("scene", "cursor.frame"): "scene frame-unit key",
+    ("scene", "preview.frame"): "scene frame-unit key",
+    ("scene", "display.frame"): "scene frame-unit key",
+    ("object", "frame"): "object frame=",
+}
+
+
+def classify_changed_lines(old_bytes, changes):
+    """Return {kind: count} for changed lines. Fails on any change outside KIND_BY_SECTION_KEY."""
+    section = None
+    sections = []
+    for line in old_bytes.decode("utf-8").split("\n"):
+        line = line.rstrip("\r")
+        if line.startswith("[") and line.endswith("]"):
+            if line == "[project]":
+                section = "project"
+            elif line.startswith("[scene."):
+                section = "scene"
+            elif line[1:-1].isdigit():
+                section = "object"
+            else:
+                section = "effect"
+        sections.append((section, line))
+    counts = {}
+    for line_no, (old, _) in sorted(changes.items()):
+        section, body = sections[line_no - 1]
+        key = body.partition("=")[0]
+        kind = KIND_BY_SECTION_KEY.get((section, key))
+        assert kind is not None, "unexpected change at line %d (%s): %r" % (line_no, section, body)
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
+def test_real_world_changed_lines_by_kind():
+    if not os.path.isfile(REAL_WORLD):
+        print("  SKIP real-world file not present")
+        return
+    before_hash = sha256_of(REAL_WORLD)
+    old = read_bytes(REAL_WORLD)
+    d = case_dir("real_kinds")
+    for factor in (2, 3):
+        out = os.path.join(d, "real_x%d.aup2" % factor)
+        code, _, err = convert(REAL_WORLD, out, factor)
+        assert code == 0, "factor %d: exit %d: %s" % (factor, code, err)
+        assert sha256_of(REAL_WORLD) == before_hash, "real-world input was modified"
+        report = read_report(out)
+        changes = line_changes(old, read_bytes(out))
+        assert {c["line"] for c in report["changes"]} == set(changes), "json changes disagree with output"
+        kinds = classify_changed_lines(old, changes)
+        assert set(kinds) <= set(KIND_BY_SECTION_KEY.values()), kinds
+        assert kinds.get("project file=") == 1, kinds
+        assert any(n.startswith("カウンター: time-based") for n in report["notes"]), report["notes"]
+        print("  INFO factor %d: %d changed lines, by kind: %s" % (factor, len(changes), kinds))
+
+
 TESTS = [
     test_30fps_x2_changes_only_expected_lines,
     test_2112_file_with_rate_reset_to_30_x2,
@@ -343,6 +543,16 @@ TESTS = [
     test_refuse_factor_one,
     test_input_never_modified_by_conversion,
     test_real_world_read_only_check,
+    test_counter_passes_through_and_is_noted,
+    test_counter_non_numeric_speed_refused,
+    test_text_plain_words_outside_script_pass,
+    test_text_time_based_script_passes,
+    test_text_frame_script_refused_by_default,
+    test_text_frame_script_allowed_with_warning,
+    test_text_rand_call_in_script_refused,
+    test_text_escaped_newline_inside_script_is_scanned,
+    test_text_math_random_refused_by_default_and_warned_when_allowed,
+    test_real_world_changed_lines_by_kind,
 ]
 
 
