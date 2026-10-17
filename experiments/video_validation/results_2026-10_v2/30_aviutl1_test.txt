@@ -1,0 +1,24 @@
+Validation: D:\AviUtl Free Render FPS\30 aviutl1 test.mp4
+ffmpeg:     ffmpeg version 2025-11-27-git-61b034a47c-full_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers
+Project:    30/1 fps, 150 frames; target 30/1 fps (ratio 1/1)
+Expected:   150 frames, 5.000000 s
+Video:      h264 640x480 yuv420p, r_frame_rate=30/1 avg_frame_rate=30/1 duration=5.000000 s
+Audio:      aac 44100 Hz 2 ch, duration=5.000000 s
+Decode:     gray 640x480, fps_mode=passthrough
+
+Measured
+  decoded frames                150   (ffprobe -count_frames 150)
+  unique frame hashes           150
+  adjacent exact duplicates     0   at none
+  adjacent near-duplicates      0   (MAD < 0.04410774739583334) at none
+  MAD over boundaries           min 0.4147  median 0.4411  mean 0.4394  max 0.4524
+  pairing score                 N/A (target/project ratio 1/1 is not an integer >= 2)
+
+Checks
+  PASS  frame_count     decoded 150, expected 150, ffprobe -count_frames 150
+  PASS  stream_rate     r_frame_rate 30/1 vs target 30/1
+  PASS  av_duration     video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.033333 s
+  N/A   no_pairing      target/project ratio 1/1 is not an integer >= 2
+  PASS  near_duplicates 0 boundaries with MAD < 0.04410774739583334; 0 at the final boundary ignored (end clamp); 0 counted, limit 1
+
+Overall: PASS

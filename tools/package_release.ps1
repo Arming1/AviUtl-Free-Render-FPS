@@ -2,8 +2,12 @@
 param(
     [string]$Configuration = 'Release',
     [string]$Platform = 'x64',
-    [string]$OutputRoot = (Join-Path $PSScriptRoot '..\dist\AviUtl2-FreeRenderFPS-v1.0.0-rc1'),
-    [string]$InstallerProject = (Join-Path $PSScriptRoot 'installer\FreeRenderFPS.Installer.csproj'),
+    [string]$ReleaseLabel = 'v1.2.1',
+    # Path defaults are resolved below: Windows PowerShell 5.1 leaves
+    # $PSScriptRoot empty while evaluating param() defaults under -File.
+    [string]$OutputRoot = '',
+    [string]$ThirdPartyRoot = '',
+    [string]$InstallerProject = '',
     [switch]$SkipBuild,
     [switch]$SkipInstallerBuild,
     [switch]$KeepStaging,
@@ -14,19 +18,27 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if (-not $OutputRoot) { $OutputRoot = Join-Path $PSScriptRoot "..\dist\AviUtl2-FreeRenderFPS-$ReleaseLabel" }
+# The audited runtime set locked by THIRD_PARTY_MANIFEST.json (rc2a FFmpeg
+# with the fd protocol). build\third_party\artifacts holds an older FFmpeg.
+if (-not $ThirdPartyRoot) { $ThirdPartyRoot = Join-Path $PSScriptRoot '..\build\third_party\rc2a-fixed\artifacts' }
+if (-not $InstallerProject) { $InstallerProject = Join-Path $PSScriptRoot 'installer\FreeRenderFPS.Installer.csproj' }
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $sourceRoot = Join-Path $repoRoot 'src\x264guiEx-FreeFPS'
 $projectFile = Join-Path $sourceRoot 'x264guiEx\x264guiEx.vcxproj'
-$releaseOutput = Join-Path $sourceRoot "$Configuration\$Platform"
+$releaseOutput = Join-Path $sourceRoot "x264guiEx\$Configuration\$Platform"
 $stagingRoot = Join-Path $OutputRoot 'staging'
 $payloadRoot = Join-Path $stagingRoot 'payload'
 $pluginPayload = Join-Path $payloadRoot 'Plugin\x264guiEx-FreeRenderFPS'
 $docsPayload = Join-Path $payloadRoot 'Docs'
 $portableRoot = Join-Path $OutputRoot 'portable'
 $installerPublish = Join-Path $OutputRoot 'setup'
-$setupExeName = 'AviUtl2-FreeRenderFPS-v1.0.0-rc1-setup.exe'
-$portableZip = Join-Path $OutputRoot 'AviUtl2-FreeRenderFPS-v1.0.0-rc1-portable.zip'
-$setupZip = Join-Path $OutputRoot 'AviUtl2-FreeRenderFPS-v1.0.0-rc1-setup.zip'
+$artifactStem = "AviUtl2-FreeRenderFPS-$ReleaseLabel"
+$setupExeName = "$artifactStem-setup.exe"
+$portableZip = Join-Path $OutputRoot "$artifactStem-portable.zip"
+$setupZip = Join-Path $OutputRoot "$artifactStem-setup.zip"
+$sourcesZip = Join-Path $OutputRoot "$artifactStem-third-party-sources.zip"
 
 function Write-Step([string]$Message) {
     Write-Host "[FreeRenderFPS package] $Message" -ForegroundColor Cyan
@@ -64,17 +76,22 @@ function Copy-DirectorySafe([string]$Source, [string]$Destination) {
     Get-ChildItem -LiteralPath $Source -Force | Copy-Item -Destination $Destination -Recurse -Force
 }
 
-function Assert-NoThirdPartyBinaries([string]$Root) {
-    $forbiddenExtensions = @('.exe', '.dll', '.sys', '.ocx', '.so', '.dylib', '.lib', '.exp', '.pdb', '.metagen', '.recipe')
-    $forbiddenNames = @('x264.exe', 'ffmpeg.exe', 'ffmpeg_audenc.exe', 'x264_3223_x64.exe', 'mkvmerge.exe', 'mplex.exe', 'mp4box.exe', 'muxer_x64.exe', 'remuxer_x64.exe', 'timelineeditor_x64.exe', 'LSMASHSource.dll', 'LSMASHSource_indexing.exe', 'check_vc.dll', 'check_dotnet.dll')
+function Assert-AuditedPayload([string]$Root) {
+    $allowedRuntime = @('x264.exe', 'ffmpeg.exe', 'muxer.exe', 'remuxer.exe', 'timelineeditor.exe')
+    $forbiddenExtensions = @('.auo2', '.dll', '.sys', '.ocx', '.so', '.dylib', '.lib', '.exp', '.pdb', '.metagen', '.recipe')
     $violations = @()
     Get-ChildItem -LiteralPath $Root -File -Recurse | ForEach-Object {
-        if ($forbiddenExtensions -contains $_.Extension.ToLowerInvariant() -or $forbiddenNames -contains $_.Name) {
+        $relative = (Get-RelativePathCompat $Root $_.FullName).Replace('\', '/')
+        $extension = $_.Extension.ToLowerInvariant()
+        $isAllowedRuntime = $relative -match '^Plugin/x264guiEx-FreeRenderFPS/exe_files/([^/]+)$' -and $allowedRuntime -contains $_.Name
+        # The single AviUtl2 plugin binary is accepted only directly under the plugin root.
+        $isPluginBinary = $relative -eq 'Plugin/x264guiEx-FreeRenderFPS/x264guiEx-FreeRenderFPS.aux2'
+        if ($forbiddenExtensions -contains $extension -or ($_.Extension -eq '.exe' -and -not $isAllowedRuntime) -or ($extension -eq '.aux2' -and -not $isPluginBinary)) {
             $violations += $_.FullName
         }
     }
     if ($violations.Count -gt 0) {
-        throw "License-safe package contains prohibited runtime binaries:`n$($violations -join "`n")"
+        throw "Package contains an unaudited binary:`n$($violations -join "`n")"
     }
 }
 
@@ -95,9 +112,9 @@ function Get-FileHashRecord([string]$Root) {
 
 function Write-Manifest([string]$Path, [object[]]$Records) {
     $lines = @(
-        '# FreeRenderFPS v1.0.0-rc1 package manifest',
+        "# FreeRenderFPS $ReleaseLabel package manifest",
         '',
-        'This manifest intentionally excludes encoder, muxer, audio-tool, helper-DLL, and system-runtime binaries whose license/provenance is unresolved. Acquire those separately under the documented dependency policy.',
+        'Only the hash-locked x264, FFmpeg and L-SMASH runtime set listed in THIRD_PARTY_MANIFEST.json is embedded.',
         '',
         '| Relative path | SHA-256 | Bytes |',
         '|---|---|---:|'
@@ -115,6 +132,7 @@ function Remove-IfExists([string]$Path) {
 Assert-Path $sourceRoot 'source tree'
 Assert-Path $projectFile 'x264guiEx project'
 Assert-Path $InstallerProject 'installer project'
+Assert-Path $ThirdPartyRoot 'verified third-party artifact directory'
 
 if (-not $AllowDirtyStaging) { Remove-IfExists $OutputRoot }
 New-Item -ItemType Directory -Force -Path $stagingRoot, $pluginPayload, $docsPayload, $portableRoot, $installerPublish | Out-Null
@@ -133,12 +151,22 @@ if (-not $SkipBuild) {
         throw 'MSBuild with the Visual Studio C++ workload was not found. Install it, or run with -SkipBuild after producing a Release x64 output.'
     }
     $msbuildPath = if ($msbuild.PSObject.Properties.Name -contains 'Source') { $msbuild.Source } else { $msbuild.FullName }
-    Invoke-Native $msbuildPath @($projectFile, '/t:Build', "/p:Configuration=$Configuration", "/p:Platform=$Platform", '/m')
+    # A formal package must not reuse stale resource output after a version
+    # header change; force a full rebuild instead of relying on RC dependency
+    # tracking through auo_version.rc.
+    Invoke-Native $msbuildPath @($projectFile, '/t:Rebuild', "/p:Configuration=$Configuration", "/p:Platform=$Platform", '/m')
 }
 
 Assert-Path $releaseOutput 'Release x64 output directory'
+$releaseAux = Join-Path $releaseOutput 'x264guiEx-FreeRenderFPS.aux2'
+Assert-Path $releaseAux 'Release x64 output plugin'
+$expectedProductVersion = $ReleaseLabel -replace '^v', ''
+$actualProductVersion = (Get-Item -LiteralPath $releaseAux).VersionInfo.ProductVersion
+if ($actualProductVersion -ne $expectedProductVersion) {
+    throw "Release plugin version mismatch: expected $expectedProductVersion from ReleaseLabel, found $actualProductVersion in $releaseAux"
+}
 $requiredReleaseFiles = @(
-    'x264guiEx-FreeRenderFPS.auo2',
+    'x264guiEx-FreeRenderFPS.aux2',
     'x264guiEx-FreeRenderFPS.ini',
     'x264guiEx-FreeRenderFPS.en.ini',
     'x264guiEx-FreeRenderFPS.zh.ini'
@@ -146,6 +174,25 @@ $requiredReleaseFiles = @(
 foreach ($name in $requiredReleaseFiles) {
     Copy-Exact (Join-Path $releaseOutput $name) (Join-Path $pluginPayload $name)
 }
+
+$thirdPartyManifest = Join-Path $repoRoot 'third_party\manifests\THIRD_PARTY_MANIFEST.json'
+$thirdPartyArtifactManifest = Join-Path $repoRoot 'third_party\manifests\THIRD_PARTY_RELEASE_ARTIFACTS.json'
+$thirdPartyNotices = Join-Path $repoRoot 'THIRD_PARTY_NOTICES.txt'
+Assert-Path $thirdPartyManifest 'third-party manifest'
+Assert-Path $thirdPartyArtifactManifest 'third-party release artifact manifest'
+Assert-Path $thirdPartyNotices 'plain-text third-party notices'
+$manifestData = Get-Content -LiteralPath $thirdPartyManifest -Raw | ConvertFrom-Json
+foreach ($entry in $manifestData.components) {
+    $name = [IO.Path]::GetFileName($entry.file)
+    $source = Join-Path $ThirdPartyRoot $name
+    Assert-Path $source "audited runtime $name"
+    $actual = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+    if ($actual -ne $entry.sha256) { throw "Audited runtime hash mismatch for $name" }
+    Copy-Exact $source (Join-Path $pluginPayload "exe_files\$name")
+}
+Copy-Exact $thirdPartyManifest (Join-Path $pluginPayload 'THIRD_PARTY_MANIFEST.json')
+Copy-Exact $thirdPartyArtifactManifest (Join-Path $pluginPayload 'THIRD_PARTY_RELEASE_ARTIFACTS.json')
+Copy-Exact $thirdPartyNotices (Join-Path $pluginPayload 'THIRD_PARTY_NOTICES.txt')
 
 $presetSource = Join-Path $sourceRoot 'x264guiEx\x264guiEx_stg'
 if (Test-Path -LiteralPath $presetSource) {
@@ -158,6 +205,7 @@ if (Test-Path -LiteralPath $presetSource) {
 $repoRootDocs = @(
     (Join-Path $repoRoot 'LICENSE'),
     (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md'),
+    (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.txt'),
     (Join-Path $repoRoot 'README.en.md'),
     (Join-Path $repoRoot 'README.zh-CN.md'),
     (Join-Path $repoRoot 'README.ja.md')
@@ -174,11 +222,16 @@ foreach ($doc in $repoNestedDocs) {
     Copy-Exact $doc (Join-Path (Join-Path $docsPayload 'docs') ([IO.Path]::GetFileName($doc)))
 }
 
-Assert-NoThirdPartyBinaries $payloadRoot
+Assert-AuditedPayload $payloadRoot
 $records = @(Get-FileHashRecord $payloadRoot)
 Write-Manifest (Join-Path $stagingRoot 'SHA256SUMS.md') $records
 Copy-Exact (Join-Path $stagingRoot 'SHA256SUMS.md') (Join-Path $portableRoot 'SHA256SUMS.md')
-Copy-DirectorySafe $payloadRoot $portableRoot
+# AviUtl2 v2 stores user-installed plugins below data\Plugin.  Keep release
+# documentation at the ZIP root, but make the plugin tree directly extractable
+# over a clean AviUtl2 directory instead of requiring a manual Plugin ->
+# data\Plugin relocation.
+Copy-DirectorySafe (Join-Path $payloadRoot 'Plugin') (Join-Path $portableRoot 'data\Plugin')
+Copy-DirectorySafe (Join-Path $payloadRoot 'Docs') (Join-Path $portableRoot 'Docs')
 
 if (-not $SkipInstallerBuild) {
     Remove-IfExists $installerPublish
@@ -205,27 +258,33 @@ if ($RunSelfTest) {
     Invoke-Native $selfTestExe @('--self-test')
 }
 
-$missing = @(
-    'x264.exe',
-    'ffmpeg.exe',
-    'remuxer.exe/muxer.exe',
-    'mkvmerge.exe/mplex.exe/other audio encoders',
-    'Microsoft VC++ runtime and .NET Framework'
-)
-Set-Content -LiteralPath (Join-Path $OutputRoot 'MISSING_THIRD_PARTY_TOOLS.txt') -Value @(
-    'These dependencies are intentionally absent from the license-safe RC package.',
-    'Acquire each tool separately, record its exact version/hash/source/license, and install it under the user-selected AviUtl2 plugin runtime policy.',
-    '',
-    ($missing | ForEach-Object { '- ' + $_ })
-) -Encoding UTF8
-
-Copy-Exact (Join-Path $OutputRoot 'MISSING_THIRD_PARTY_TOOLS.txt') (Join-Path $portableRoot 'MISSING_THIRD_PARTY_TOOLS.txt')
-Copy-Exact (Join-Path $OutputRoot 'MISSING_THIRD_PARTY_TOOLS.txt') (Join-Path $installerPublish 'MISSING_THIRD_PARTY_TOOLS.txt')
-
 if (Test-Path -LiteralPath $portableZip) { Remove-Item -LiteralPath $portableZip -Force }
 if (Test-Path -LiteralPath $setupZip) { Remove-Item -LiteralPath $setupZip -Force }
+if (Test-Path -LiteralPath $sourcesZip) { Remove-Item -LiteralPath $sourcesZip -Force }
 Compress-Archive -Path (Join-Path $portableRoot '*') -DestinationPath $portableZip -CompressionLevel Optimal
 Compress-Archive -Path (Join-Path $installerPublish '*') -DestinationPath $setupZip -CompressionLevel Optimal
+
+$sourceBundle = Join-Path $stagingRoot 'third-party-sources'
+New-Item -ItemType Directory -Force -Path (Join-Path $sourceBundle 'archives'), (Join-Path $sourceBundle 'patches'), (Join-Path $sourceBundle 'licenses') | Out-Null
+$sourceArchives = @(
+    'x264-0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee.tar.gz',
+    'ffmpeg-8.1.2.tar.xz',
+    'ffmpeg-8.1.2.tar.xz.asc',
+    'l-smash-a3e0b47.tar.gz'
+)
+foreach ($archive in $sourceArchives) {
+    Copy-Exact (Join-Path $repoRoot "build\source-cache\$archive") (Join-Path $sourceBundle "archives\$archive")
+}
+Copy-Exact (Join-Path $repoRoot 'third_party\sources.lock.json') (Join-Path $sourceBundle 'sources.lock.json')
+Copy-Exact (Join-Path $repoRoot 'tools\build_third_party.ps1') (Join-Path $sourceBundle 'build_third_party.ps1')
+Copy-Exact (Join-Path $repoRoot 'third_party\patches\l-smash-gcc16.patch') (Join-Path $sourceBundle 'patches\l-smash-gcc16.patch')
+Copy-Exact (Join-Path $repoRoot 'third_party\patches\l-smash-vs2022.patch') (Join-Path $sourceBundle 'patches\l-smash-vs2022.patch')
+Copy-Exact (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.txt') (Join-Path $sourceBundle 'THIRD_PARTY_NOTICES.txt')
+Copy-Exact (Join-Path $repoRoot 'docs\THIRD_PARTY_RUNTIME_AUDIT.md') (Join-Path $sourceBundle 'BUILD_AND_SOURCE_CORRESPONDENCE.md')
+Copy-Exact 'D:\frfps-third-party-work\x264\COPYING' (Join-Path $sourceBundle 'licenses\GPL-2.0-x264.txt')
+Copy-Exact 'D:\frfps-third-party-work\ffmpeg-8.1.2\COPYING.LGPLv2.1' (Join-Path $sourceBundle 'licenses\LGPL-2.1-FFmpeg.txt')
+Copy-Exact 'D:\frfps-third-party-work\l-smash\LICENSE' (Join-Path $sourceBundle 'licenses\ISC-L-SMASH.txt')
+Compress-Archive -Path (Join-Path $sourceBundle '*') -DestinationPath $sourcesZip -CompressionLevel Optimal
 
 # The ZIPs are the distributable views. Keep one adjacent payload beside the
 # top-level setup EXE, and remove duplicate expanded setup/portable trees.
@@ -243,4 +302,4 @@ $checksumLines = Get-ChildItem -LiteralPath $OutputRoot -File | Where-Object Nam
 }
 Set-Content -LiteralPath (Join-Path $OutputRoot 'SHA256SUMS.txt') -Value $checksumLines -Encoding ascii
 Write-Step "Package complete: $OutputRoot"
-Write-Step 'Third-party encoder/muxer/runtime binaries were not embedded.'
+Write-Step 'Embedded runtime set was sourced only from the verified third-party artifact directory.'

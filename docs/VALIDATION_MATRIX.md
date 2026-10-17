@@ -1,69 +1,83 @@
-# FreeRenderFPS validation matrix
+# FreeRenderFPS v1.0.0 validation matrix
 
 Date: 2026-08-13  
-Candidate: v1.0.0-rc1  
-Supported host claim: AviUtl2 v2.1.4 x64 only
+Host: AviUtl2 v2.1.4 x64  
+Final AUO2 version: `1.0.0`  
+Final AUO2 SHA-256: `A9A60EEB4A92073B7CBA539433821E7E18DAF69D714A4CA9857ED45B8054B29B`
 
-## Status vocabulary
+Frame identity was measured after decoding. Container FPS metadata alone was
+not accepted as temporal-sampling evidence.
 
-- **PASS**: retained artifact or executed check supports every listed metric.
-- **PASS (lifecycle only)**: installer filesystem behavior passed; this does not
-  mean an encode completed from that package.
-- **NOT REVALIDATED**: the task names the conversion as historically successful,
-  but no recovered RC1 artifact/log supports a fresh metrics claim.
-- **BLOCKED**: a prerequisite required by the release definition is absent.
+## Output matrix
 
-## Recovery and host checks
+| Project → target | Output frames | Video FPS | Video duration | Audio duration | Unique decoded frames | Adjacent equal | Result |
+|---|---:|---|---:|---:|---:|---:|---|
+| FreeFPS OFF, 66 → 66 | 330 | 66/1 | 5.000000 s | 5.000000 s | — | — | PASS |
+| 30 → 60 | 300 | 60/1 | 5.000000 s | 5.000000 s | 300 | 0 | PASS |
+| 66 → 60 | 300 | 60/1 | 5.000000 s | 5.000000 s | 300 | 0 | PASS |
+| 66 → 59.94 | 300 | 60000/1001 | 5.005000 s | 5.000000 s | 300 | 0 | PASS |
+| 66 → 24 | 120 | 24/1 | 5.000000 s | 5.000000 s | 120 | 0 | PASS |
+| 66 → 120 | 600 | 120/1 | 5.000000 s | 5.000000 s | 600 | 0 | PASS |
+| 120 → 60 | 300 | 60/1 | 5.000000 s | 5.000000 s | 300 | 0 | PASS |
 
-| Check | Result | Evidence |
+The 60-second 66 → 60000/1001 test produced 3597 frames and 60.008333 s
+video against 60.000000 s audio. The +8.333 ms endpoint delta is below one
+target-frame interval and follows the documented ceiling boundary rule. It
+contained 3590 unique decoded frames and seven adjacent equal images on the
+simple linear-motion fixture.
+
+## Final package-only smoke tests
+
+| Path | Package use | Result |
 |---|---|---|
-| Backup before recovery | PASS | Workspace and ProgramData ZIPs plus manifest in the Codex checkpoint directory; hashes recorded in `FINAL_REPORT.md` |
-| Release x64 rebuild | PASS | 0 errors, 7 existing warnings; plugin SHA-256 `66266D5D08DF368D067B3FF74C0815965BD5177E2FF9C4E04181D053EAFD5DD5` |
-| Debug runtime absent | PASS | `dumpbin /dependents` contains Release CRT names; no `ucrtbased`, `VCRUNTIME140D`, or `MSVCP140D` |
-| Plugin appears once | PASS | Clean ProgramData `Plugin` enumeration contained only `x264guiEx-FreeRenderFPS` during recovery test |
-| Settings open / close | PASS | Release plugin UI opened and closed without exception after the fixed config identity was rebuilt |
-| Project config callback save/load | PASS | `project_config_roundtrip.exe`: `save=PASS load=PASS key=freerenderfps_config bytes=1300 single_line=PASS fields=PASS` |
-| Project save / reopen / resave | PASS | `recovery_release_roundtrip.aup2` was saved, reopened, and saved again without the prior structured exception |
-| FreeFPS OFF output | BLOCKED | No retained recovered-RC1 encode artifact |
+| Setup EXE | non-interactive install into a fresh isolated host; one AUO2 loaded | H.264 150 frames at 30/1, AAC 217 frames, both 5.000000 s — PASS |
+| Portable ZIP | extracted directly over a fresh isolated AviUtl2 root | `data\Plugin` layout, one AUO2 loaded; same real encode — PASS |
 
-## Temporal-output matrix
+Retained final media:
 
-| Project → target | Project frames | Output frames | Video FPS | Video duration | Audio duration | Adjacent duplicates | Unique frames | Cadence/crash | Result |
-|---|---:|---:|---|---:|---:|---:|---:|---|---|
-| 30 → 60 | 161 | 322 | 60/1 | 5.366667 s | 5.366667 s | 0 | 322 | no reported crash; every `(2k,2k+1)` differs | **PASS on retained integrated artifact** |
-| 66 → 60 | 330 | 300 | 60/1 | 5.000000 s | 5.000000 s | 0 | 300 | 0 cadence spikes; no crash | **PASS on retained integrated artifact** |
-| 66 → 59.94 | — | — | — | — | — | — | — | no recovered metrics | **NOT REVALIDATED** |
-| 66 → 24 | — | — | — | — | — | — | — | no recovered metrics | **NOT REVALIDATED** |
-| 66 → 120 | — | — | — | — | — | — | — | no recovered metrics | **NOT REVALIDATED** |
-| 120 → 60 | — | — | — | — | — | — | — | no recovered metrics | **NOT REVALIDATED** |
+- `experiments/66_to_60_validation/v100_setup_clean_30_off.mp4`
+- `experiments/66_to_60_validation/v100_portable_clean_30_off.mp4`
 
-Retained media:
+The full FreeFPS matrix was run on the same release code and audited runtime
+before the final version-resource-only rebuild. The final `1.0.0` package then
+passed both package-only compatibility encodes. RC1 was not overwritten.
 
-- `experiments/subframe_scheduler_test/phase7_freefps_60_true.mp4`, SHA-256
-  `4BA43DB0D7940BCE5150163992C765FF6B8211A2A0911E2F5235478E80BBC145`.
-- `experiments/66_to_60_validation/freerenderfps_66_to_60_v3.mp4`, SHA-256
-  `E88A7C3EE307CBBF2E0566F70EC07A94797D0304E0746EF377ABEFEB7A5A92AF`.
-- Machine-readable 66→60 metrics:
-  `experiments/66_to_60_validation/66_to_60_summary.json`.
+## AviUtl2 v2.1.12 — Free FPS Export（精确运动模式），2026-10-17
 
-The two PASS rows validate the integrated FreeRenderFPS code line, including
-true changing scene states, but were produced before the final recovery-only
-identity/version edits. The final RC1 plugin itself was rebuilt and callback/UI
-checked, not fully re-encoded.
+Host: AviUtl2 v2.1.12 x64  
+Plugin: `x264guiEx-FreeRenderFPS.aux2`, version resource 1.1.0, SHA-256 `114C307016679E852674DF7A974889CACF4E340449DA475578C3A1A259F6076B`, 1,532,928 bytes, from the `dist\AviUtl2-FreeRenderFPS-v1.1.0` package repacked on 2026-10-17 17:52 (the first 1.1.0 build did not contain the precise mode). Exported through Edit > Free FPS Export...  
+The tested plugin is the one the user has installed at `C:\ProgramData\aviutl2\Plugin\x264guiEx-FreeRenderFPS\`; its hash matches the dist file above.
 
-## Installer matrix
+### 运动 (8 组)
 
-| Scenario | Result | Scope |
-|---|---|---|
-| Clean install | PASS (lifecycle only) | Formal four plugin files installed from an isolated package payload |
-| Upgrade | PASS (lifecycle only) | Timestamped backup created; replacement file installed; config and presets preserved |
-| Uninstall | PASS (lifecycle only) | Runtime removed; requested config/presets retained |
-| Rollback | PASS (lifecycle only) | Latest validated backup restored |
-| Original x264guiEx coexistence | PASS (filesystem) | Sentinel in original directory remained unchanged through the complete test |
-| Clean package → real encode | BLOCKED | License-cleared external encoder/audio/mux runtime set is absent |
+| 用例 | 目标 FPS | 期望/实际帧 | 运动最大残差 (px) | 零步 | 反向 | 速度误差 | 结论 |
+|---|---|---|---:|---:|---:|---:|---|
+| 60_to_66 | 66 | 330/330 | 0.1425 | 0 | 0 | 0.0031% | PASS |
+| 72_to_60 | 60 | 300/300 | 0.1477 | 0 | 0 | 0.0069% | PASS |
+| 30_to_5994 | 60000/1001 | 300/300 | 0.1431 | 0 | 0 | 0.0043% | PASS |
+| 66_to_24 | 24 | 120/120 | 0.1351 | 0 | 0 | 0.0017% | PASS |
+| 66_to_120 | 120 | 600/600 | 0.2262 | 0 | 0 | 0.0046% | PASS |
+| 120_to_60 | 60 | 300/300 | 0.1331 | 0 | 0 | 0.0004% | PASS |
+| 60_to_50 | 50 | 250/250 | 0.1247 | 0 | 0 | 0.0032% | PASS |
+| 72_to_59 | 59 | 295/295 | 0.1657 | 0 | 0 | 0.0057% | PASS |
 
-## Release decision
+速度误差 = |线性拟合斜率 − 原工程斜率| / 原工程斜率。在 `SUMMARY_precise.md` 的 "运动诊断" 中，原工程斜率对应 "模型斜率"，线性拟合斜率对应 "线性拟合斜率"。残差上限 1.0 px，零步阈值 |Δx| < 0.05 px。
 
-The required matrix is incomplete. In accordance with the user's release
-blocker rules, **v1.0.0 must not be published**. RC1 is suitable for continued
-license/runtime integration and the missing final regression runs.
+同一批视频若用旧的（非精确）`retimed` 运动模型判定，30_to_5994（1.7528 px）和 66_to_24（2.1256 px）FAIL。这与精确导出的预期一致：输出的运动会越过重定时后的终点继续延伸。因此可以确认导出确实走了精确模式。
+
+### 30 分钟音画同步 (1800 s)
+
+| 目标 FPS | 解码/期望帧 | 最大 \|偏移\| | 漂移斜率 | 时长相对误差 | 结论 |
+|---|---:|---:|---:|---:|---|
+| 66 | 118800/118800 | 0.00 ms | 0.000 ms/min | +0.0000% | PASS |
+| 50 | 90000/90000 | 0.00 ms | 0.000 ms/min | +0.0000% | PASS |
+| 60000/1001 | 107892/107892 | 8.33 ms | −0.004 ms/min | −0.0001% | PASS |
+
+1800 对闪白/嘀声一一配对。59.94 的 ±8.33 ms 是半个输出帧内的取整结果；均值 +0.01 ms，没有漂移。
+
+### 证据
+
+- `experiments/free_fps_matrix/run_20261017_precise/`: `SUMMARY_precise.md`, `summary_precise.json`, `8组_precise.log`, `SUMMARY_retimed.md`, `SUMMARY_original.md`, `validator/*.validator.json`
+- `experiments/long_av_sync/run_20261017/`: `long_66.txt`, `long_50.txt`, `long_5994.txt`
+
+视频文件未入库。

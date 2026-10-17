@@ -578,6 +578,25 @@ AuofcgCBRunBatBeforeAudio=音声エンコード開始前、バッチ処理を行
 AuofcgLBAudioPriority=音声優先度
 AuofcgLBAMPAutoBitrate=※目標ビットレートを自動にするには\n　　上限設定が必要です。
 AuofcgMain=AviUtl 出力 プラグイン
+AuofcgtabPageFreeFps=Free Render FPS
+AuofcgGBFreeFps=Free Render FPS
+AuofcgCBFreeFpsEnable=Free Render FPS を有効にする
+AuofcgLBFreeFpsTarget=出力FPS：
+AuofcgLBFreeFpsRate=分子 (Rate)
+AuofcgLBFreeFpsScale=分母 (Scale)
+AuofcgLBFreeFpsNotice=FreeRenderFPS は新しい時間点で画面を再計算します。フレームの複製ではありません。
+AuofcgLBFreeFpsHostHint=内蔵の Free Render FPS は AviUtl2 v2.1.4 x64 のみ対応しています。他のバージョンでは 編集 > Free FPS Export... を使用してください。
+AuofcgFreeFpsCustom=カスタム
+AuoFreeFpsExportTitle=Free FPS Export
+AuoFreeFpsExportTargetFps=出力FPS（正確な値: 66、60000/1001。小数は不可）
+AuoFreeFpsExportOutputFile=出力ファイル
+AuoFreeFpsExportBrowse=参照...
+AuoFreeFpsExportPrecise=精密モーション（直線運動の速度を正確に）
+AuoFreeFpsExportEncSettings=エンコード設定...
+AuoFreeFpsExportEncSummary=エンコード：
+AuoFreeFpsExportExtMismatch=出力ファイルの拡張子が、エンコード設定のコンテナ（%s）と一致しません。このまま続行しますか？
+AuoFreeFpsExportOK=OK
+AuoFreeFpsExportCancel=キャンセル
 
 [AUO_CONFIG_CX]
 AUO_CONFIG_CX_X264_ENCMODE_SINGLE_CBR=シングルパス - ビットレート指定

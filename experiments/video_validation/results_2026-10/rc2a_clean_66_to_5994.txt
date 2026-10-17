@@ -1,0 +1,29 @@
+Validation: D:\AviUtl Free Render FPS\experiments\66_to_60_validation\rc2a_clean_66_to_5994.mp4
+ffmpeg:     ffmpeg version 2025-11-27-git-61b034a47c-full_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers
+Project:    66/1 fps, 330 frames; target 60000/1001 fps (ratio 10000/11011)
+Expected:   300 frames, 5.005000 s
+Video:      h264 640x360 yuv420p, r_frame_rate=60000/1001 avg_frame_rate=60000/1001 duration=5.005000 s
+Audio:      aac 44100 Hz 2 ch, duration=5.000000 s
+Decode:     gray 640x360, fps_mode=passthrough
+
+Measured
+  decoded frames                300   (ffprobe -count_frames 300)
+  unique frame hashes           300
+  adjacent exact duplicates     0   at none
+  adjacent near-duplicates      299   (MAD < 0.5) at 1 (frames 0-1), 2 (frames 1-2), 3 (frames 2-3), 4 (frames 3-4), 5 (frames 4-5), 6 (frames 5-6), 7 (frames 6-7), 8 (frames 7-8), 9 (frames 8-9), 10 (frames 9-10), 11 (frames 10-11), 12 (frames 11-12), 13 (frames 12-13), 14 (frames 13-14), 15 (frames 14-15), 16 (frames 15-16), 17 (frames 16-17), 18 (frames 17-18), 19 (frames 18-19), 20 (frames 19-20), ... (+279 more)
+  MAD over boundaries           min 0.1104  median 0.1420  mean 0.1426  max 0.1567
+  pairing score                 N/A (target/project ratio 10000/11011 is not an integer >= 2)
+
+Checks
+  PASS  frame_count     decoded 300, expected 300, ffprobe -count_frames 300
+  PASS  stream_rate     r_frame_rate 60000/1001 vs target 60000/1001
+  PASS  av_duration     video 5.005000 s, audio 5.000000 s, |delta| 0.005000 s, tolerance < 0.016683 s
+  N/A   no_pairing      target/project ratio 10000/11011 is not an integer >= 2
+  FAIL  near_duplicates 299 boundaries with MAD < 0.5; 1 at the final boundary ignored (end clamp); 298 counted, limit 1
+
+Reference (informational, not a check)
+                frames   unique   r_frame_rate       size
+  target           300      300     60000/1001    640x360
+  reference        330      330           66/1    640x360
+
+Overall: FAIL

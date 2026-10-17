@@ -28,15 +28,15 @@
 #ifndef _AUO_VERSION_H_
 #define _AUO_VERSION_H_
 
-#define AUO_VERSION         1,0,0,0
-#define AUO_VERSION_STR      "1.0.0-rc1"
-#define AUO_VERSION_STR_W   L"1.0.0-rc1"
+#define AUO_VERSION         1,2,1,0
+#define AUO_VERSION_STR      "1.2.1"
+#define AUO_VERSION_STR_W   L"1.2.1"
 #define AUO_NAME_R            x264guiEx
 #define AUO_NAME_WITHOUT_EXT "x264guiEx-FreeRenderFPS"
 #define AUO_NAME_WITHOUT_EXT_W L"x264guiEx-FreeRenderFPS"
 #if _M_X64
-#define AUO_NAME             "x264guiEx-FreeRenderFPS.auo2"
-#define AUO_NAME_W          L"x264guiEx-FreeRenderFPS.auo2"
+#define AUO_NAME             "x264guiEx-FreeRenderFPS.aux2"
+#define AUO_NAME_W          L"x264guiEx-FreeRenderFPS.aux2"
 #else
 #define AUO_NAME             "x264guiEx-FreeRenderFPS.auo"
 #define AUO_NAME_W          L"x264guiEx-FreeRenderFPS.auo"

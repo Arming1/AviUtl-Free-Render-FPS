@@ -327,6 +327,25 @@ void guiEx_settings::initialize(BOOL disable_loading, const TCHAR *_auo_path, co
         if (!language_ini_selected) {
             apply_appendix(ini_fileName_tstr, _countof(ini_fileName_tstr), auo_path, INI_APPENDIX);
         }
+        // The original x264guiEx distribution used x264guiEx.ini as the
+        // companion file.  FreeRenderFPS uses a versioned plugin basename, so
+        // its normal companion is x264guiEx-FreeRenderFPS.ini.  Accept the
+        // original basename as a compatibility fallback when a user copies
+        // the plugin into an existing AviUtl 1.x Plugins directory; this
+        // avoids the misleading "ini is missing/old" failure during settings
+        // discovery while still preferring the same-basename file above.
+        if (!PathFileExists(ini_fileName_tstr)) {
+            TCHAR auo_dir[MAX_PATH_LEN] = { 0 };
+            get_auo_path(auo_dir, _countof(auo_dir));
+            PathRemoveFileSpecFixed(auo_dir);
+            TCHAR fallback_ini[MAX_PATH_LEN] = { 0 };
+            PathCombineLong(fallback_ini, _countof(fallback_ini), auo_dir,
+                            _T("x264guiEx.ini"));
+            if (PathFileExists(fallback_ini)) {
+                _tcscpy_s(ini_fileName_tstr, _countof(ini_fileName_tstr),
+                          fallback_ini);
+            }
+        }
         if (!canbe_converted_to(ini_fileName_tstr, CP_THREAD_ACP)) {
             // CP_THREAD_ACP = sjisに変換できない場合は、相対パスにする
             TCHAR ini_fileName_tstr_relative[MAX_PATH_LEN];

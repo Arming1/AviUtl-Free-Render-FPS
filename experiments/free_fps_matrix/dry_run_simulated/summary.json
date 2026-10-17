@@ -1,0 +1,271 @@
+{
+  "label": "FAKE/SIMULATED (existing samples, not host exports)",
+  "run_dir": "D:\\AviUtl Free Render FPS\\experiments\\free_fps_matrix\\dry_run_simulated",
+  "timeline": "original",
+  "overall": "PASS",
+  "selected_cases": [
+    "66_to_24",
+    "66_to_120",
+    "120_to_60"
+  ],
+  "cases": [
+    {
+      "id": "66_to_24",
+      "source_fixture": "experiments/66_to_60_validation/freerenderfps_66fps.aup2",
+      "source_fps": "66",
+      "source_frames": 330,
+      "target_fps": "24",
+      "expected_frames": 120,
+      "expected_duration": "5",
+      "video": "D:\\AviUtl Free Render FPS\\experiments\\free_fps_matrix\\dry_run_simulated\\66_to_24.mp4",
+      "timeline": "original",
+      "endpoint": {
+        "k": "4/11",
+        "retimed_first_frame": 0,
+        "retimed_last_frame": 119,
+        "T_original_s": 4.984848484848484,
+        "T_retimed_s": 4.958333333333333,
+        "delta_s": -0.026515151515151516,
+        "delta_original_frames": -1.75,
+        "delta_output_frames": -0.6363636363636364,
+        "bound_s": 0.04734848484848485,
+        "bound_output_frames": 1.1363636363636365,
+        "within_bound": true
+      },
+      "status": "PASS",
+      "validator": {
+        "exit_code": 0,
+        "overall": "PASS",
+        "checks": [
+          {
+            "name": "frame_count",
+            "status": "PASS",
+            "detail": "decoded 120, expected 120, ffprobe -count_frames 120"
+          },
+          {
+            "name": "stream_rate",
+            "status": "PASS",
+            "detail": "r_frame_rate 24/1 vs target 24/1"
+          },
+          {
+            "name": "av_duration",
+            "status": "PASS",
+            "detail": "video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.041667 s"
+          },
+          {
+            "name": "no_pairing",
+            "status": "N/A",
+            "detail": "target/project ratio 1/1 is not an integer >= 2"
+          },
+          {
+            "name": "near_duplicates",
+            "status": "PASS",
+            "detail": "0 boundaries with MAD < 0.034724826388888894; 0 at the final boundary ignored (end clamp); 0 counted, limit 1"
+          }
+        ]
+      },
+      "motion": {
+        "status": "PASS",
+        "decoded_frames": 120,
+        "frames_without_object": 0,
+        "in_motion_frames": 120,
+        "max_abs_residual_px": 0.14284455514177807,
+        "tolerance_px": 1.0,
+        "max_abs_residual_y_px": 0.07252747252746872,
+        "reversals": 0,
+        "zero_steps": 0,
+        "strictly_monotonic": true,
+        "model": {
+          "timeline": "original",
+          "start_s": 0.0,
+          "x0": 120.0,
+          "x1": 520.0,
+          "y0": 180.0,
+          "T_seconds": 4.984848484848484,
+          "slope_px_per_s": 80.24316109422493
+        },
+        "fit": {
+          "slope_px_per_s": 80.24510191757328,
+          "intercept_px": 120.00035896984988,
+          "max_abs_residual_px": 0.13286233618964616
+        }
+      },
+      "original_time_check": {
+        "max_abs_residual_px": 0.14284455514177807,
+        "T_seconds": 4.984848484848484
+      }
+    },
+    {
+      "id": "66_to_120",
+      "source_fixture": "experiments/66_to_60_validation/freerenderfps_66fps.aup2",
+      "source_fps": "66",
+      "source_frames": 330,
+      "target_fps": "120",
+      "expected_frames": 600,
+      "expected_duration": "5",
+      "video": "D:\\AviUtl Free Render FPS\\experiments\\free_fps_matrix\\dry_run_simulated\\66_to_120.mp4",
+      "timeline": "original",
+      "endpoint": {
+        "k": "20/11",
+        "retimed_first_frame": 0,
+        "retimed_last_frame": 599,
+        "T_original_s": 4.984848484848484,
+        "T_retimed_s": 4.991666666666666,
+        "delta_s": 0.006818181818181818,
+        "delta_original_frames": 0.45,
+        "delta_output_frames": 0.8181818181818182,
+        "bound_s": 0.010984848484848484,
+        "bound_output_frames": 1.3181818181818181,
+        "within_bound": true
+      },
+      "status": "PASS",
+      "validator": {
+        "exit_code": 0,
+        "overall": "PASS",
+        "checks": [
+          {
+            "name": "frame_count",
+            "status": "PASS",
+            "detail": "decoded 600, expected 600, ffprobe -count_frames 600"
+          },
+          {
+            "name": "stream_rate",
+            "status": "PASS",
+            "detail": "r_frame_rate 120/1 vs target 120/1"
+          },
+          {
+            "name": "av_duration",
+            "status": "PASS",
+            "detail": "video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.008333 s"
+          },
+          {
+            "name": "no_pairing",
+            "status": "N/A",
+            "detail": "target/project ratio 1/1 is not an integer >= 2"
+          },
+          {
+            "name": "near_duplicates",
+            "status": "PASS",
+            "detail": "0 boundaries with MAD < 0.007322048611111111; 0 at the final boundary ignored (end clamp); 0 counted, limit 1"
+          }
+        ]
+      },
+      "motion": {
+        "status": "PASS",
+        "decoded_frames": 600,
+        "frames_without_object": 0,
+        "in_motion_frames": 599,
+        "max_abs_residual_px": 0.1702868801265538,
+        "tolerance_px": 1.0,
+        "max_abs_residual_y_px": 0.0981308411215025,
+        "reversals": 0,
+        "zero_steps": 0,
+        "strictly_monotonic": true,
+        "model": {
+          "timeline": "original",
+          "start_s": 0.0,
+          "x0": 120.0,
+          "x1": 520.0,
+          "y0": 180.0,
+          "T_seconds": 4.984848484848484,
+          "slope_px_per_s": 80.24316109422493
+        },
+        "fit": {
+          "slope_px_per_s": 80.24448937283879,
+          "intercept_px": 119.99503814997736,
+          "max_abs_residual_px": 0.16624375614517817
+        }
+      },
+      "original_time_check": {
+        "max_abs_residual_px": 0.1702868801265538,
+        "T_seconds": 4.984848484848484
+      }
+    },
+    {
+      "id": "120_to_60",
+      "source_fixture": "experiments/66_to_60_validation/freerenderfps_120fps.aup2",
+      "source_fps": "120",
+      "source_frames": 600,
+      "target_fps": "60",
+      "expected_frames": 300,
+      "expected_duration": "5",
+      "video": "D:\\AviUtl Free Render FPS\\experiments\\free_fps_matrix\\dry_run_simulated\\120_to_60.mp4",
+      "timeline": "original",
+      "endpoint": {
+        "k": "1/2",
+        "retimed_first_frame": 0,
+        "retimed_last_frame": 299,
+        "T_original_s": 4.991666666666666,
+        "T_retimed_s": 4.983333333333333,
+        "delta_s": -0.008333333333333333,
+        "delta_original_frames": -1.0,
+        "delta_output_frames": -0.5,
+        "bound_s": 0.016666666666666666,
+        "bound_output_frames": 1.0,
+        "within_bound": true
+      },
+      "status": "PASS",
+      "validator": {
+        "exit_code": 0,
+        "overall": "PASS",
+        "checks": [
+          {
+            "name": "frame_count",
+            "status": "PASS",
+            "detail": "decoded 300, expected 300, ffprobe -count_frames 300"
+          },
+          {
+            "name": "stream_rate",
+            "status": "PASS",
+            "detail": "r_frame_rate 60/1 vs target 60/1"
+          },
+          {
+            "name": "av_duration",
+            "status": "PASS",
+            "detail": "video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.016667 s"
+          },
+          {
+            "name": "no_pairing",
+            "status": "N/A",
+            "detail": "target/project ratio 1/1 is not an integer >= 2"
+          },
+          {
+            "name": "near_duplicates",
+            "status": "PASS",
+            "detail": "0 boundaries with MAD < 0.014253906250000002; 0 at the final boundary ignored (end clamp); 0 counted, limit 1"
+          }
+        ]
+      },
+      "motion": {
+        "status": "PASS",
+        "decoded_frames": 300,
+        "frames_without_object": 0,
+        "in_motion_frames": 300,
+        "max_abs_residual_px": 0.17661096314515135,
+        "tolerance_px": 1.0,
+        "max_abs_residual_y_px": 0.10540838852097068,
+        "reversals": 0,
+        "zero_steps": 0,
+        "strictly_monotonic": true,
+        "model": {
+          "timeline": "original",
+          "start_s": 0.0,
+          "x0": 120.0,
+          "x1": 520.0,
+          "y0": 180.0,
+          "T_seconds": 4.991666666666666,
+          "slope_px_per_s": 80.13355592654425
+        },
+        "fit": {
+          "slope_px_per_s": 80.13565193448648,
+          "intercept_px": 119.99579467385736,
+          "max_abs_residual_px": 0.17285145910727806
+        }
+      },
+      "original_time_check": {
+        "max_abs_residual_px": 0.17661096314515135,
+        "T_seconds": 4.991666666666666
+      }
+    }
+  ]
+}

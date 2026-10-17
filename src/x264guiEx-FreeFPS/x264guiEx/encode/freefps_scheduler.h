@@ -35,6 +35,7 @@ public:
     static FreeFpsSession* current();
 
 private:
+    void unregister();
     bool request_at(int public_frame, double coordinate,
                     std::int64_t output_index, DWORD format,
                     void*& frame, std::wstring& error);
@@ -53,4 +54,5 @@ private:
     std::uint64_t coordinate_denominator_;
     std::uint64_t generation_;
     FreeFpsCacheWorkaround cache_;
+    FreeFpsFrameStash stash_;
 };

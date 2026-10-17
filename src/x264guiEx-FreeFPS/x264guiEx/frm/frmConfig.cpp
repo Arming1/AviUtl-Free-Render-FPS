@@ -394,6 +394,7 @@ System::Void frmConfig::fcgTSBOtherSettings_Click(System::Object^  sender, Syste
     ActivateToolTip(stg.s_local.disable_tooltip_help == FALSE);
     if (str_has_char(stg.s_local.conf_font.name))
         SetFontFamilyToForm(this, gcnew FontFamily(String(stg.s_local.conf_font.name).ToString()), this->Font->FontFamily);
+    LayoutFreeFpsControls();
 }
 
 System::Void frmConfig::fcgTSBCMDOnly_CheckedChanged(System::Object^  sender, System::EventArgs^  e) {
@@ -1353,6 +1354,7 @@ System::Void frmConfig::InitForm() {
     //フォントの設定
     if (str_has_char(sys_dat->exstg->s_local.conf_font.name))
         SetFontFamilyToForm(this, gcnew FontFamily(String(sys_dat->exstg->s_local.conf_font.name).ToString()), this->Font->FontFamily);
+    LayoutFreeFpsControls();
 }
 
 
@@ -1560,6 +1562,36 @@ System::Void frmConfig::LoadLangText() {
     LOAD_CLI_TEXT(fcgLBBatBeforeAudioPath);
     LOAD_CLI_TEXT(fcgCBRunBatBeforeAudio);
     LOAD_CLI_TEXT(fcgLBAudioPriority);
+    //Free Render FPS タブ
+    {
+        String^ messtr = LOAD_CLI_STRING(AuofcgtabPageFreeFps);
+        if (messtr->Length > 0) fcgTabFreeFps->Text = messtr;
+    }
+    {
+        String^ messtr = LOAD_CLI_STRING(AuofcgGBFreeFps);
+        if (messtr->Length > 0) fcgGroupFreeFps->Text = messtr;
+    }
+    LOAD_CLI_TEXT(fcgCBFreeFpsEnable);
+    LOAD_CLI_TEXT(fcgLBFreeFpsTarget);
+    LOAD_CLI_TEXT(fcgLBFreeFpsRate);
+    LOAD_CLI_TEXT(fcgLBFreeFpsScale);
+    LOAD_CLI_TEXT(fcgLBFreeFpsNotice);
+#if AVIUTL_TARGET_VER == 2
+    LOAD_CLI_TEXT(fcgLBFreeFpsHostHint);
+#endif
+    {
+        //最後の項目 (Custom) の文字列だけを差し替える。選択中の項目は維持する
+        String^ messtr = LOAD_CLI_STRING(AuofcgFreeFpsCustom);
+        if (messtr->Length > 0) {
+            const int selected = fcgCXFreeFpsPreset->SelectedIndex;
+            const bool wasUpdating = freeFpsUpdating;
+            freeFpsUpdating = true;
+            fcgCXFreeFpsPreset->Items[fcgCXFreeFpsPreset->Items->Count - 1] = messtr;
+            fcgCXFreeFpsPreset->SelectedIndex = selected;
+            freeFpsUpdating = wasUpdating;
+        }
+    }
+    LayoutFreeFpsControls();
     //LOAD_CLI_MAIN_TEXT(fcgMain);
 
     //ローカル設定のロード(ini変更を反映)

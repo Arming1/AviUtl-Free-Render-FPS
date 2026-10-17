@@ -1,0 +1,9 @@
+60_to_66     PASS
+72_to_60     PASS
+30_to_5994   FAIL
+66_to_24     FAIL
+66_to_120    PASS
+120_to_60    PASS
+60_to_50     PASS
+72_to_59     PASS
+overall FAIL  (see D:\AviUtl Free Render FPS\experiments\free_fps_matrix\run_20261017\SUMMARY.md)

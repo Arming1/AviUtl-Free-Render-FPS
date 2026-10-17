@@ -5,7 +5,11 @@
 #include <limits>
 #include <numeric>
 
+#if AVIUTL_TARGET_VER == 2
 #include "freefps_aviutl_hook.h"
+#else
+#include "freefps_aviutl1_hook.h"
+#endif
 
 namespace {
 
@@ -59,16 +63,22 @@ FreeFpsSession::FreeFpsSession()
 }
 
 FreeFpsSession::~FreeFpsSession() {
-    if (registered_) {
-        AcquireSRWLockExclusive(&g_session_lock);
-        if (g_session == this) {
-            g_session = nullptr;
-        }
-        ReleaseSRWLockExclusive(&g_session_lock);
-    }
+    unregister();
     if (enabled_) {
         freefps_hook_uninstall();
     }
+}
+
+void FreeFpsSession::unregister() {
+    if (!registered_) {
+        return;
+    }
+    AcquireSRWLockExclusive(&g_session_lock);
+    if (g_session == this) {
+        g_session = nullptr;
+    }
+    ReleaseSRWLockExclusive(&g_session_lock);
+    registered_ = false;
 }
 
 bool FreeFpsSession::initialize(const OUTPUT_INFO* project,
@@ -124,7 +134,21 @@ bool FreeFpsSession::initialize(const OUTPUT_INFO* project,
         return false;
     }
 
+    // Claim the single session slot before touching the shared hook, so a
+    // second session is rejected without uninstalling the hook that the
+    // active session is still using.
+    AcquireSRWLockExclusive(&g_session_lock);
+    if (g_session != nullptr) {
+        ReleaseSRWLockExclusive(&g_session_lock);
+        error = L"FreeFPS: another render session is already active.";
+        return false;
+    }
+    g_session = this;
+    registered_ = true;
+    ReleaseSRWLockExclusive(&g_session_lock);
+
     if (!freefps_hook_install(error)) {
+        unregister();
         return false;
     }
     enabled_ = true;
@@ -132,21 +156,11 @@ bool FreeFpsSession::initialize(const OUTPUT_INFO* project,
     effective_.rate = target_rate_;
     effective_.scale = target_scale_;
     effective_.n = output_frames_;
+#if AVIUTL_TARGET_VER == 2
     if (effective_.func_set_buffer_size != nullptr) {
         effective_.func_set_buffer_size(1, 0);
     }
-
-    AcquireSRWLockExclusive(&g_session_lock);
-    if (g_session != nullptr) {
-        ReleaseSRWLockExclusive(&g_session_lock);
-        error = L"FreeFPS: another render session is already active.";
-        freefps_hook_uninstall();
-        enabled_ = false;
-        return false;
-    }
-    g_session = this;
-    registered_ = true;
-    ReleaseSRWLockExclusive(&g_session_lock);
+#endif
     return true;
 }
 
@@ -213,16 +227,28 @@ void* FreeFpsSession::request_video(std::int64_t output_index, DWORD format,
     }
     const double coordinate = coordinate_for(output_index);
     const int public_frame = public_frame_for(output_index);
+    // An earlier eviction already rendered this exact coordinate. The host
+    // cache is untouched on this path, so cache_.record_target is not called.
+    if (const void* stashed = stash_.take(public_frame, coordinate)) {
+        return const_cast<void*>(stashed);
+    }
     if (cache_.needs_eviction(public_frame, coordinate)) {
         const int neighbor = cache_.eviction_frame(public_frame);
         if (neighbor < 0) {
             error = L"FreeFPS: no neighbor frame is available for cache eviction.";
             return nullptr;
         }
-        void* ignored = nullptr;
+        void* evicted = nullptr;
         if (!request_at(neighbor, static_cast<double>(neighbor), -1, format,
-                        ignored, error)) {
+                        evicted, error)) {
             return nullptr;
+        }
+        if (neighbor > public_frame) {
+            const size_t bytes = freefps_host_frame_bytes(
+                static_cast<std::uint32_t>(format), effective_.w, effective_.h);
+            if (bytes != 0) {
+                stash_.store(neighbor, static_cast<double>(neighbor), evicted, bytes);
+            }
         }
     }
     void* frame = nullptr;

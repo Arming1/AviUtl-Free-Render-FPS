@@ -1,0 +1,405 @@
+{
+  "schema": 1,
+  "overall": "INCOMPLETE",
+  "fake_results": true,
+  "results_file": "D:\\AviUtl Free Render FPS\\experiments\\host_matrix\\run_dryrun\\FAKE_auto_export_jobs.tsv.results.tsv",
+  "run_dir": "D:\\AviUtl Free Render FPS\\experiments\\host_matrix\\run_dryrun",
+  "cases": [
+    {
+      "id": "off_66_66",
+      "label": "FreeFPS OFF 66 -> 66",
+      "project_fps": "66",
+      "target_fps": "66",
+      "project_frames": 330,
+      "expected_frames": 330,
+      "export_status": "OK",
+      "export_reason": "",
+      "checks": [
+        {
+          "name": "host_loaded_project",
+          "status": "PASS",
+          "detail": "rate=66/1 frame_max=329 expected project 66 fps, frame_max=329"
+        },
+        {
+          "name": "output_file",
+          "status": "PASS",
+          "detail": "24705 bytes"
+        },
+        {
+          "name": "frame_count",
+          "status": "PASS",
+          "detail": "decoded 330, expected 330, ffprobe -count_frames 330"
+        },
+        {
+          "name": "stream_rate",
+          "status": "PASS",
+          "detail": "r_frame_rate 66/1 vs target 66/1"
+        },
+        {
+          "name": "av_duration",
+          "status": "PASS",
+          "detail": "video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.015152 s"
+        },
+        {
+          "name": "no_pairing",
+          "status": "N/A",
+          "detail": "target/project ratio 1/1 is not an integer >= 2"
+        },
+        {
+          "name": "near_duplicates",
+          "status": "PASS",
+          "detail": "0 boundaries with MAD < 0.013053819444444446; 0 at the final boundary ignored (end clamp); 0 counted, limit 1"
+        }
+      ],
+      "overall": "PASS"
+    },
+    {
+      "id": "30_60",
+      "label": "30 -> 60",
+      "project_fps": "30",
+      "target_fps": "60",
+      "project_frames": 150,
+      "expected_frames": 300,
+      "export_status": "OK",
+      "export_reason": "",
+      "checks": [
+        {
+          "name": "host_loaded_project",
+          "status": "PASS",
+          "detail": "rate=30/1 frame_max=149 expected project 30 fps, frame_max=149"
+        },
+        {
+          "name": "output_file",
+          "status": "PASS",
+          "detail": "22830 bytes"
+        },
+        {
+          "name": "frame_count",
+          "status": "PASS",
+          "detail": "decoded 300, expected 300, ffprobe -count_frames 300"
+        },
+        {
+          "name": "stream_rate",
+          "status": "PASS",
+          "detail": "r_frame_rate 60/1 vs target 60/1"
+        },
+        {
+          "name": "av_duration",
+          "status": "PASS",
+          "detail": "video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.016667 s"
+        },
+        {
+          "name": "no_pairing",
+          "status": "PASS",
+          "detail": "r=2 in-group median MAD 0.1426 vs out-of-group 0.1436, ratio 0.9932, need >= 0.25"
+        },
+        {
+          "name": "near_duplicates",
+          "status": "PASS",
+          "detail": "1 boundaries with MAD < 0.014302083333333335; 1 at the final boundary ignored (end clamp); 0 counted, limit 1"
+        }
+      ],
+      "overall": "PASS"
+    },
+    {
+      "id": "66_60",
+      "label": "66 -> 60",
+      "project_fps": "66",
+      "target_fps": "60",
+      "project_frames": 330,
+      "expected_frames": 300,
+      "export_status": "OK",
+      "export_reason": "",
+      "checks": [
+        {
+          "name": "host_loaded_project",
+          "status": "PASS",
+          "detail": "rate=66/1 frame_max=329 expected project 66 fps, frame_max=329"
+        },
+        {
+          "name": "output_file",
+          "status": "PASS",
+          "detail": "22024 bytes"
+        },
+        {
+          "name": "frame_count",
+          "status": "PASS",
+          "detail": "decoded 300, expected 300, ffprobe -count_frames 300"
+        },
+        {
+          "name": "stream_rate",
+          "status": "PASS",
+          "detail": "r_frame_rate 60/1 vs target 60/1"
+        },
+        {
+          "name": "av_duration",
+          "status": "PASS",
+          "detail": "video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.016667 s"
+        },
+        {
+          "name": "no_pairing",
+          "status": "N/A",
+          "detail": "target/project ratio 10/11 is not an integer >= 2"
+        },
+        {
+          "name": "near_duplicates",
+          "status": "PASS",
+          "detail": "0 boundaries with MAD < 0.014193576388888891; 0 at the final boundary ignored (end clamp); 0 counted, limit 1"
+        }
+      ],
+      "overall": "PASS"
+    },
+    {
+      "id": "66_5994",
+      "label": "66 -> 60000/1001",
+      "project_fps": "66",
+      "target_fps": "60000/1001",
+      "project_frames": 330,
+      "expected_frames": 300,
+      "export_status": "OK",
+      "export_reason": "",
+      "checks": [
+        {
+          "name": "host_loaded_project",
+          "status": "PASS",
+          "detail": "rate=66/1 frame_max=329 expected project 66 fps, frame_max=329"
+        },
+        {
+          "name": "output_file",
+          "status": "PASS",
+          "detail": "22768 bytes"
+        },
+        {
+          "name": "frame_count",
+          "status": "PASS",
+          "detail": "decoded 300, expected 300, ffprobe -count_frames 300"
+        },
+        {
+          "name": "stream_rate",
+          "status": "PASS",
+          "detail": "r_frame_rate 60000/1001 vs target 60000/1001"
+        },
+        {
+          "name": "av_duration",
+          "status": "PASS",
+          "detail": "video 5.005000 s, audio 5.000000 s, |delta| 0.005000 s, tolerance < 0.016683 s"
+        },
+        {
+          "name": "no_pairing",
+          "status": "N/A",
+          "detail": "target/project ratio 10000/11011 is not an integer >= 2"
+        },
+        {
+          "name": "near_duplicates",
+          "status": "PASS",
+          "detail": "0 boundaries with MAD < 0.01420355902777778; 0 at the final boundary ignored (end clamp); 0 counted, limit 1"
+        }
+      ],
+      "overall": "PASS"
+    },
+    {
+      "id": "66_24",
+      "label": "66 -> 24",
+      "project_fps": "66",
+      "target_fps": "24",
+      "project_frames": 330,
+      "expected_frames": 120,
+      "export_status": "OK",
+      "export_reason": "",
+      "checks": [
+        {
+          "name": "host_loaded_project",
+          "status": "PASS",
+          "detail": "rate=66/1 frame_max=329 expected project 66 fps, frame_max=329"
+        },
+        {
+          "name": "output_file",
+          "status": "PASS",
+          "detail": "12964 bytes"
+        },
+        {
+          "name": "frame_count",
+          "status": "PASS",
+          "detail": "decoded 120, expected 120, ffprobe -count_frames 120"
+        },
+        {
+          "name": "stream_rate",
+          "status": "PASS",
+          "detail": "r_frame_rate 24/1 vs target 24/1"
+        },
+        {
+          "name": "av_duration",
+          "status": "PASS",
+          "detail": "video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.041667 s"
+        },
+        {
+          "name": "no_pairing",
+          "status": "N/A",
+          "detail": "target/project ratio 4/11 is not an integer >= 2"
+        },
+        {
+          "name": "near_duplicates",
+          "status": "PASS",
+          "detail": "0 boundaries with MAD < 0.034724826388888894; 0 at the final boundary ignored (end clamp); 0 counted, limit 1"
+        }
+      ],
+      "overall": "PASS"
+    },
+    {
+      "id": "66_120",
+      "label": "66 -> 120",
+      "project_fps": "66",
+      "target_fps": "120",
+      "project_frames": 330,
+      "expected_frames": 600,
+      "export_status": "OK",
+      "export_reason": "",
+      "checks": [
+        {
+          "name": "host_loaded_project",
+          "status": "PASS",
+          "detail": "rate=66/1 frame_max=329 expected project 66 fps, frame_max=329"
+        },
+        {
+          "name": "output_file",
+          "status": "PASS",
+          "detail": "37781 bytes"
+        },
+        {
+          "name": "frame_count",
+          "status": "PASS",
+          "detail": "decoded 600, expected 600, ffprobe -count_frames 600"
+        },
+        {
+          "name": "stream_rate",
+          "status": "PASS",
+          "detail": "r_frame_rate 120/1 vs target 120/1"
+        },
+        {
+          "name": "av_duration",
+          "status": "PASS",
+          "detail": "video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.008333 s"
+        },
+        {
+          "name": "no_pairing",
+          "status": "N/A",
+          "detail": "target/project ratio 20/11 is not an integer >= 2"
+        },
+        {
+          "name": "near_duplicates",
+          "status": "PASS",
+          "detail": "0 boundaries with MAD < 0.007322048611111111; 0 at the final boundary ignored (end clamp); 0 counted, limit 1"
+        }
+      ],
+      "overall": "PASS"
+    },
+    {
+      "id": "120_60",
+      "label": "120 -> 60",
+      "project_fps": "120",
+      "target_fps": "60",
+      "project_frames": 600,
+      "expected_frames": 300,
+      "export_status": "OK",
+      "export_reason": "",
+      "checks": [
+        {
+          "name": "host_loaded_project",
+          "status": "PASS",
+          "detail": "rate=120/1 frame_max=599 expected project 120 fps, frame_max=599"
+        },
+        {
+          "name": "output_file",
+          "status": "PASS",
+          "detail": "22125 bytes"
+        },
+        {
+          "name": "frame_count",
+          "status": "PASS",
+          "detail": "decoded 300, expected 300, ffprobe -count_frames 300"
+        },
+        {
+          "name": "stream_rate",
+          "status": "PASS",
+          "detail": "r_frame_rate 60/1 vs target 60/1"
+        },
+        {
+          "name": "av_duration",
+          "status": "PASS",
+          "detail": "video 5.000000 s, audio 5.000000 s, |delta| 0.000000 s, tolerance < 0.016667 s"
+        },
+        {
+          "name": "no_pairing",
+          "status": "N/A",
+          "detail": "target/project ratio 1/2 is not an integer >= 2"
+        },
+        {
+          "name": "near_duplicates",
+          "status": "PASS",
+          "detail": "0 boundaries with MAD < 0.014253906250000002; 0 at the final boundary ignored (end clamp); 0 counted, limit 1"
+        }
+      ],
+      "overall": "PASS"
+    },
+    {
+      "id": "30_120",
+      "label": "30 -> 120",
+      "project_fps": "30",
+      "target_fps": "120",
+      "project_frames": 150,
+      "expected_frames": 600,
+      "export_status": "NOT_RUN",
+      "export_reason": "no row in results file",
+      "checks": [],
+      "overall": "NOT_RUN"
+    },
+    {
+      "id": "66_5994_60s",
+      "label": "66 -> 60000/1001, 60 s",
+      "project_fps": "66",
+      "target_fps": "60000/1001",
+      "project_frames": 3960,
+      "expected_frames": 3597,
+      "export_status": "OK",
+      "export_reason": "",
+      "checks": [
+        {
+          "name": "host_loaded_project",
+          "status": "PASS",
+          "detail": "rate=66/1 frame_max=3959 expected project 66 fps, frame_max=3959"
+        },
+        {
+          "name": "output_file",
+          "status": "PASS",
+          "detail": "214990 bytes"
+        },
+        {
+          "name": "frame_count",
+          "status": "PASS",
+          "detail": "decoded 3597, expected 3597, ffprobe -count_frames 3597"
+        },
+        {
+          "name": "stream_rate",
+          "status": "PASS",
+          "detail": "r_frame_rate 60000/1001 vs target 60000/1001"
+        },
+        {
+          "name": "av_duration",
+          "status": "PASS",
+          "detail": "video 60.008333 s, audio 60.000000 s, |delta| 0.008333 s, tolerance < 0.016683 s"
+        },
+        {
+          "name": "no_pairing",
+          "status": "N/A",
+          "detail": "target/project ratio 10000/11011 is not an integer >= 2"
+        },
+        {
+          "name": "near_duplicates",
+          "status": "WARN",
+          "detail": "11 boundaries with MAD < 0.0012465277777777778; 0 at the final boundary ignored (end clamp); 11 counted, limit 1"
+        }
+      ],
+      "overall": "PASS"
+    }
+  ]
+}

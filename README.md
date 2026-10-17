@@ -1,4 +1,4 @@
-<h1 align="center">AviUtl2 FreeRenderFPS</h1>
+<h1 align="center">FreeRenderFPS for AviUtl2 and AviUtl 1.x</h1>
 
 <p align="center">
   <a href="README.zh-CN.md">简体中文</a> |
@@ -6,60 +6,83 @@
   <a href="README.en.md">English</a>
 </p>
 
-FreeRenderFPS is an x264guiEx-based AviUtl2 output plugin that samples the real
-scene timeline at an output FPS independent of the project FPS. A 30 FPS
-project can therefore be evaluated at 0.0, 0.5, 1.0, 1.5... project-frame
-coordinates for a true 60 FPS output; it does not duplicate frames or merely
-change container metadata.
+> **AI-assisted development notice:** This project was developed with AI assistance.
+> The code, documentation and test tools were mainly written by AI (OpenAI Codex in
+> the early stages, then Anthropic Claude / Claude Code). The author planned and
+> reviewed the work and tested it on real AviUtl2 installations.
 
-## Release status
+FreeRenderFPS is an x264guiEx-based output plugin with AviUtl2 and legacy
+AviUtl 1.x host adapters. It evaluates the real scene timeline at an output FPS
+independent from the project FPS. A 30 FPS project can therefore render genuine
+60 FPS states at coordinates 0.0, 0.5, 1.0, 1.5… It does not copy frames or
+merely change FPS metadata.
 
-FreeRenderFPS is currently available as a release candidate for AviUtl2 v2.1.4 x64.
+## v1.2.1
 
-The core project-FPS / output-FPS decoupling feature is working and available for testing. Conversions such as 30 → 60 FPS and 66 → 60 FPS have passed previous integrated validation while preserving the original project duration.
+v1.2.1 is a patch release on v1.2.0; see [CHANGELOG.md](CHANGELOG.md).
 
-Some additional FPS combinations are still being revalidated on the current RC build, so this release is not yet considered v1.0.0 stable.
+- Free FPS Export has an **Encoder settings...** button that opens the x264guiEx
+  settings window, and an encoder summary line. The container follows the output
+  file extension.
+- Free FPS Export encodes with the settings in the x264guiEx settings window. It
+  only turns off the built-in Enable Free Render FPS switch for the export.
+- The Free FPS Export dialog and the Free Render FPS tab support Chinese, Japanese
+  and English. Error messages are still English.
+- The Free Render FPS tab layout is fixed: the target FPS dropdown is no longer
+  covered by its label.
 
-The installer currently includes the plugin and required configuration files only. External encoders and muxing tools are not bundled and must be provided separately.
+### v1.2.0 features
 
-Bug reports and real-world testing are welcome.
+v1.2.0 keeps the v1.1.0 single-plugin layout and adds Precise motion.
 
-For detailed validation and development status, see FINAL_REPORT.md and docs/VALIDATION_MATRIX.md.
+- Adds **Precise motion** (exact speed for linear motion) to Free FPS Export. The
+  checkbox is on by default.
+- `x264guiEx-FreeRenderFPS.aux2` contains the output plugin and Edit >
+  **Free FPS Export...**, which re-times the scene through the public AviUtl2
+  SDK. Any rational output FPS works on AviUtl2 v2.1.12.
+- The built-in Enable Free Render FPS hook still supports AviUtl2 v2.1.4 x64
+  only. Other hosts get a message that points to Free FPS Export.
+- The installer migrates legacy `.auo2` installs to `.aux2` and keeps backups
+  outside `Plugin`. `--cleanup-legacy-backups` moves old backup folders out of
+  `Plugin` (opt-in; it never deletes).
+- Adds the `.aup2` retimer tool, host-free tests and validation tools.
 
-## Installation
+The release gates and measurements below are v1.0.0 results. Free FPS Export was
+checked in-host on AviUtl2 v2.1.12 on 2026-10-17: 8 conversions with Precise motion
+enabled (frame counts equal the expected values, no duplicate or reversed frames,
+motion residual 0.12–0.23 px against a 1.0 px limit), and a 30-minute A/V sync run
+at 66, 50 and 60000/1001 fps (all PASS; maximum offset 0.00 ms at 66 and 50 fps,
+±8.33 ms, half a frame, at 60000/1001). The tested binary was
+`x264guiEx-FreeRenderFPS.aux2` (version resource 1.1.0, SHA256 114C3070…6076B,
+repacked 2026-10-17 17:52, contains Precise motion); the first 1.1.0 build did
+not contain precise mode. That build's contents are the 1.2.0 feature set; only the
+version number was not bumped. The built-in hook on AviUtl2 v2.1.4 still needs in-host validation. The AviUtl 1.x package is still v1.0.1 and needs
+re-validation on AviUtl 1.10 + ExEdit 0.92.
 
-There is no production one-click download yet. For RC evaluation:
+Release gates passed by v1.0.0 on AviUtl2 v2.1.4 x64:
 
-1. Download `AviUtl2-FreeRenderFPS-v1.0.0-rc1-setup.zip`.
-2. Extract the complete ZIP.
-3. Double-click `AviUtl2-FreeRenderFPS-v1.0.0-rc1-setup.exe`.
-4. Restart AviUtl2 v2.1.4 x64.
-5. Select `x264guiEx FreeRenderFPS`.
+- FreeFPS OFF compatibility output passes.
+- 30 → 60, 66 → 60, 66 → 59.94, 66 → 24, 66 → 120 and 120 → 60 pass.
+- 30 → 60 and 66 → 60 each produce 300/300 unique decoded frames.
+- Setup and portable package-only clean-host H.264/AAC encodes pass.
+- Runtime source/build provenance and exact release artifact hashes are locked.
 
-The RC installer installs only the plugin, formal INIs, presets, and notices.
-Encoder/muxer tools must be supplied separately until a source-complete,
-license-cleared runtime bundle is available.
+See [the final report](FINAL_REPORT.md), [validation matrix](docs/VALIDATION_MATRIX.md),
+and [installation guide](docs/INSTALL.md).
 
-Full language-specific instructions:
+The AviUtl2 build is the single plugin `x264guiEx-FreeRenderFPS.aux2`. It
+provides the x264guiEx FreeRenderFPS output plugin and the Edit menu item
+**Free FPS Export...**, which gives free render FPS on AviUtl2 v2.1.12. The
+built-in FreeRenderFPS hook supports only AviUtl2 v2.1.4 x64; unknown host
+signatures fail closed. Upgrade notes (old `.auo2`, `free_fps_export.aux2`, and
+backup folders) are in [docs/INSTALL.md](docs/INSTALL.md).
 
-- [English](README.en.md)
-- [简体中文](README.zh-CN.md)
-- [日本語](README.ja.md)
+The AviUtl 1.x adapter supports official AviUtl 1.10 + ExEdit 0.92 only and is
+distributed as an x86 `.auo` manual-install package at
+`dist\AviUtl1-FreeRenderFPS-v1.0.1`. Its current direct media validation covers
+30 → 60 with real continuous-motion sub-frame evaluation and preserved audio
+duration; the remaining legacy FPS matrix cases are explicitly pending.
 
-## Evidence at a glance
-
-| Conversion | Evidence | Status |
-|---|---|---|
-| 30 → 60 | 322/322 unique frames, 5.366667 s video/audio | PASS on the prior integrated build |
-| 66 → 60 | 300/300 unique frames, 5.000000 s video/audio | PASS on the prior integrated build |
-| 66 → 59.94, 66 → 24, 66 → 120, 120 → 60 | No retained recovered RC artifact | NOT REVALIDATED |
-
-Supported host is currently limited to **AviUtl2 v2.1.4 x64**. The guarded
-internal hook refuses unknown images/signatures.
-
-## Credits and license
-
-Based on [x264guiEx by rigaya](https://github.com/rigaya/x264guiEx). Project
-code is provided under [LICENSE](LICENSE); third-party attribution and
-redistribution status are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-and [docs/RUNTIME_DEPENDENCIES.md](docs/RUNTIME_DEPENDENCIES.md).
+Project code is under [LICENSE](LICENSE). Third-party notices and redistribution
+details are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
+[docs/RUNTIME_DEPENDENCIES.md](docs/RUNTIME_DEPENDENCIES.md).

@@ -1,0 +1,7 @@
+Microsoft (R) COFF/PE Dumper Version 14.44.35228.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+
+Dump of file src\x264guiEx-FreeFPS\x264guiEx\Release\Win32\x264guiEx\temp\freefps_aviutl1_hook.obj
+
+File Type: ANONYMOUS OBJECT

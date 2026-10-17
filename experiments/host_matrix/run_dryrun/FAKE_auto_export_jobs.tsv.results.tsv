@@ -1,0 +1,10 @@
+# FAKE RESULTS - generated for a dry run from rc2a_clean sample MP4s; NOT an AviUtl2 export
+index	status	project	output	plugin	rate	scale	frame_max	width	height	output_bytes	elapsed_ms	reason
+1	OK	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\projects\off_66_66.aup2	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\out\off_66_66.mp4	x264guiEx FreeRenderFPS	66	1	329	640	360	24705	0	
+2	OK	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\projects\30_60.aup2	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\out\30_60.mp4	x264guiEx FreeRenderFPS	30	1	149	640	360	22830	0	
+3	OK	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\projects\66_60.aup2	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\out\66_60.mp4	x264guiEx FreeRenderFPS	66	1	329	640	360	22024	0	
+4	OK	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\projects\66_5994.aup2	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\out\66_5994.mp4	x264guiEx FreeRenderFPS	66	1	329	640	360	22768	0	
+5	OK	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\projects\66_24.aup2	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\out\66_24.mp4	x264guiEx FreeRenderFPS	66	1	329	640	360	12964	0	
+6	OK	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\projects\66_120.aup2	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\out\66_120.mp4	x264guiEx FreeRenderFPS	66	1	329	640	360	37781	0	
+7	OK	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\projects\120_60.aup2	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\out\120_60.mp4	x264guiEx FreeRenderFPS	120	1	599	640	360	22125	0	
+9	OK	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\projects\66_5994_60s.aup2	D:\AviUtl Free Render FPS\experiments\host_matrix\run_dryrun\out\66_5994_60s.mp4	x264guiEx FreeRenderFPS	66	1	3959	640	360	214990	0	

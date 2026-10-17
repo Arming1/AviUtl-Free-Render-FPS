@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "release": "1.0.0",
+  "generatedUtc": "2026-08-13T09:50:22Z",
+  "sourceProvenanceLock": "third_party/sources.lock.json",
+  "buildScriptSha256": "25B51E32D6B825BB0B7276D5C92EA22A7C100C8DE8241D3C1A0E26CD263FD692",
+  "classification": {
+    "x264": "byteReproducible across D:\\frfps-repro-a and D:\\frfps-repro-b",
+    "FFmpeg": "provenance-locked; cross-root byte reproducibility not established",
+    "L-SMASH CLI": "provenance-locked; upstream __DATE__/__TIME__ and MSVC project debug settings prevent cross-root byte reproducibility"
+  },
+  "artifacts": [
+    { "file": "ffmpeg.exe", "bytes": 2608640, "sha256": "BC5C8D78B67ACEA262586F943DC54F531ABC0F9A78312DC31E4015F73FB091B9" },
+    { "file": "muxer.exe", "bytes": 810496, "sha256": "64842603E5D1C7D42AA4B8A254F11E09D08DF3289D6C908988A965650CEE57D5" },
+    { "file": "remuxer.exe", "bytes": 822272, "sha256": "B6B875F36FC48FD85A1952850054F49AA6B978F10AF84FBECCA9D0B06377F5FE" },
+    { "file": "timelineeditor.exe", "bytes": 814080, "sha256": "F4180B51D5843EF9100C7D420906FE6029A115F32CE2CCA37A3AFFE24BB73F50" },
+    { "file": "x264.exe", "bytes": 2713088, "sha256": "52102BAF1A286FAFA2538D23CF409705114F85A340FFC91D2FB4AB49345FD30A" }
+  ]
+}

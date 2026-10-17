@@ -1,4 +1,11 @@
-# FreeRenderFPS v1.0.0-rc1 runtime dependency and redistribution audit
+# FreeRenderFPS v1.0.0 runtime dependency and redistribution audit
+
+> v1.0.0 update: the release payload contains only the source-built
+> x264 0.165.3223M, LGPL FFmpeg 8.1.2, and ISC L-SMASH rev1484 binaries listed
+> in `third_party/manifests/THIRD_PARTY_MANIFEST.json`. Their exact source
+> archives, licenses, patches, recipe, toolchain and artifact hashes are
+> retained. The historical staged binaries inventoried later in this document
+> remain excluded and must not be confused with the v1.0.0 runtime.
 
 This is the release-time dependency audit for the current working tree (2026-08-13).
 It is intentionally conservative: a binary whose exact license, provenance, or

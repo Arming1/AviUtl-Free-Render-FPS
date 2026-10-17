@@ -1,4 +1,7 @@
-LIBRARY "x264guiEx-FreeRenderFPS.auo2"
+LIBRARY "x264guiEx-FreeRenderFPS.aux2"
 
 EXPORTS
-    GetOutputPluginTable
+    GetCommonPluginTable
+    RegisterPlugin
+    UninitializePlugin
+    InitializeLogger

@@ -1,4 +1,4 @@
-# Building AviUtl2 FreeRenderFPS v1.0.0-rc1
+# Building FreeRenderFPS v1.1.0
 
 ## Supported build target
 
@@ -23,14 +23,19 @@ From the repository root:
 Output:
 
 ```text
-src\x264guiEx-FreeFPS\Release\x64\x264guiEx-FreeRenderFPS.auo2
+src\x264guiEx-FreeFPS\Release\x64\x264guiEx-FreeRenderFPS.aux2
 src\x264guiEx-FreeFPS\Release\x64\x264guiEx-FreeRenderFPS.ini
 src\x264guiEx-FreeFPS\Release\x64\x264guiEx-FreeRenderFPS.en.ini
 src\x264guiEx-FreeFPS\Release\x64\x264guiEx-FreeRenderFPS.zh.ini
 ```
 
-The recovered RC1 build completed with 0 errors and 7 existing upstream
-warnings. Its plugin SHA-256 is:
+The single `.aux2` is a general AviUtl2 plugin. It registers the x264guiEx
+FreeRenderFPS output plugin (`register_output_plugin`) and the Edit menu item
+**Free FPS Export...**. The x64 build no longer produces `.auo2`; the Win32
+AviUtl 1.x `.auo` is unchanged.
+
+The recovered RC1 build (its `.auo2` output, before the single-`.aux2` format)
+completed with 0 errors and 7 existing upstream warnings. Its plugin SHA-256 is:
 
 ```text
 66266D5D08DF368D067B3FF74C0815965BD5177E2FF9C4E04181D053EAFD5DD5
@@ -49,23 +54,43 @@ warnings. Its plugin SHA-256 is:
 The script:
 
 1. performs a clean Release x64 plugin build;
-2. stages only the formal AUO2, adjacent INIs, presets, and notices;
-3. rejects EXE/DLL/PDB/Debug/probe files from the payload;
+2. stages only the formal AUX2, adjacent INIs, presets, and notices;
+3. rejects EXE/DLL/PDB/Debug/probe files and any `.auo2` from the payload; a
+   `.aux2` is accepted only directly under the plugin folder;
 4. compiles the installer with Visual Studio Roslyn;
-5. runs install → upgrade → uninstall → rollback in an isolated temporary tree;
+5. runs install → upgrade → uninstall → rollback in an isolated temporary tree,
+   including the legacy `.auo2` migration (the file is kept in the backup and
+   restored by rollback);
 6. creates setup and portable ZIPs;
 7. writes SHA-256 manifests.
 
 The installer EXE is intentionally accompanied by a `payload` directory inside
 the setup ZIP. Extract the whole ZIP before running it.
 
-## Missing runtime policy
+### AviUtl 1.x package
 
-The packaging script deliberately excludes the currently staged x264, FFmpeg,
-muxer, external audio, L-SMASH-Works, and helper DLL binaries. Their precise
-source/provenance/notice bundle is incomplete. A formal v1.0.0 package must
-either include a checksum-pinned, source-complete and license-compliant runtime
-set, or implement verified acquisition from official upstream sources.
+Build the AviUtl2 package first (it produces the third-party sources ZIP that
+both packages share), then run:
+
+    .\tools\package_aviutl1_release.ps1
+
+It rebuilds the Release Win32 plugin, rejects a version mismatch, probe-log
+code, debug CRT imports, unaudited binaries, and any `.conf`, then writes
+`dist\AviUtl1-FreeRenderFPS-<label>` with a portable ZIP, an expanded `payload`
+and SHA-256 manifests. It refuses to overwrite an existing release folder.
+
+## Third-party runtime build
+
+Run `tools/build_third_party.ps1` against the pinned MSYS2 and Visual Studio
+toolchains. It verifies official source archives, applies the recorded patches,
+builds x264/FFmpeg/L-SMASH, and validates the selected release hashes. The
+minimal LGPL FFmpeg configuration includes `file`, `pipe`, and `fd`; `fd` is
+required because FFmpeg 8.1.2 resolves x264guiEx's `-i -` input through it.
+
+Source/build provenance is locked independently from a specific release
+artifact hash. Only x264 currently passes cross-root byte-for-byte comparison;
+FFmpeg and L-SMASH remain artifact-hash locked without a false reproducibility
+claim. See `THIRD_PARTY_REPRODUCIBILITY.md`.
 
 See [RUNTIME_DEPENDENCIES.md](RUNTIME_DEPENDENCIES.md).
 
@@ -80,4 +105,6 @@ See [RUNTIME_DEPENDENCIES.md](RUNTIME_DEPENDENCIES.md).
 - installer upgrade/uninstall/rollback and original x264guiEx coexistence;
 - SHA-256 values regenerated after the last source change.
 
-Do not rename RC artifacts to v1.0.0 until every release blocker is closed.
+The v1.0.0 identity, corrected portable layout, installer lifecycle, and final
+setup/portable package-only smoke encodes have been validated. v1.1.0 packages
+are produced by the same scripts; their in-host validation is pending.

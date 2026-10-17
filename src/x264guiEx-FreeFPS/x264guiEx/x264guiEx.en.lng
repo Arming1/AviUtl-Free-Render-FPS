@@ -580,6 +580,25 @@ AuofcgCBRunBatBeforeAudio=Run bat file before audio encoding
 AuofcgLBAudioPriority=Audio priority
 AuofcgLBAMPAutoBitrate=* Auto bitrate mode requires\n    upper limit settings(s).
 AuofcgMain=Aviutl Output Plugin
+AuofcgtabPageFreeFps=Free Render FPS
+AuofcgGBFreeFps=Free Render FPS
+AuofcgCBFreeFpsEnable=Enable Free Render FPS
+AuofcgLBFreeFpsTarget=Target FPS:
+AuofcgLBFreeFpsRate=Rate
+AuofcgLBFreeFpsScale=Scale
+AuofcgLBFreeFpsNotice=Supported host: AviUtl2 v2.1.4 x64. FreeRenderFPS changes actual scene evaluation time. It does not duplicate frames.
+AuofcgLBFreeFpsHostHint=Other AviUtl2 versions: use Edit > Free FPS Export... instead.
+AuofcgFreeFpsCustom=Custom
+AuoFreeFpsExportTitle=Free FPS Export
+AuoFreeFpsExportTargetFps=Target FPS (exact: 66, 60000/1001, decimals are refused)
+AuoFreeFpsExportOutputFile=Output file
+AuoFreeFpsExportBrowse=Browse...
+AuoFreeFpsExportPrecise=Precise motion (exact speed for linear motion)
+AuoFreeFpsExportEncSettings=Encoder settings...
+AuoFreeFpsExportEncSummary=Encoder:
+AuoFreeFpsExportExtMismatch=The output file extension does not match the container in the encoder settings (%s). Continue anyway?
+AuoFreeFpsExportOK=OK
+AuoFreeFpsExportCancel=Cancel
 
 [AUO_CONFIG_CX]
 AUO_CONFIG_CX_X264_ENCMODE_SINGLE_CBR=Single Pass - Bitrate mode

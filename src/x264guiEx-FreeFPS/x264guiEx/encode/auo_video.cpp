@@ -968,16 +968,21 @@ static AUO_RESULT enc_out(CONF_GUIEX *conf, const OUTPUT_INFO *oip, PRM_ENC *pe,
             if (AUO_RESULT_SUCCESS != ret)
                 break;
 
+            FreeFpsSession *freefps = FreeFpsSession::current();
+            const bool freefps_active = freefps != nullptr && freefps->enabled() && !afs;
+
 #if AVIUTL_TARGET_VER == 1
             //コピーフレームフラグ処理
-            copy_frame = (!!i_frame & (oip->func_get_flag(i_frame) & OUTPUT_INFO_FRAME_FLAG_COPYFRAME));
+            // FreeFPS: i_frame is an output sample index, not a project frame,
+            // and every sample is a fresh timeline evaluation, so the host's
+            // copy-frame flag must not make us resend the previous image.
+            copy_frame = !freefps_active && (!!i_frame & (oip->func_get_flag(i_frame) & OUTPUT_INFO_FRAME_FLAG_COPYFRAME));
 #endif
 
             //Aviutl(afs)からフレームをもらう
             QueryPerformanceCounter((LARGE_INTEGER *)&qp_start);
             std::wstring freefps_error;
-            FreeFpsSession *freefps = FreeFpsSession::current();
-            if (freefps != nullptr && freefps->enabled() && !afs) {
+            if (freefps_active) {
                 frame = freefps->request_video(i, aviutl_color_fmt, freefps_error);
             } else {
                 frame = (afs) ? afs_get_video((OUTPUT_INFO *)oip, i_frame, &drop, next_jitter)
