@@ -52,8 +52,9 @@ advanced options. The extracted `payload` directory must stay beside the EXE.
 ## Manual installation
 
 Extract the v1.0.1 portable ZIP directly over the AviUtl2 root. It already
-contains `data\Plugin\x264guiEx-FreeRenderFPS`. Keep the four formal adjacent
-files together. Do not copy Debug, PDB, probe, watcher, or breakpoint artifacts.
+contains `data\Plugin\x264guiEx-FreeRenderFPS`. Keep
+`x264guiEx-FreeRenderFPS.aux2` and its three adjacent INI files together. Do not
+copy Debug, PDB, probe, watcher, or breakpoint artifacts.
 
 ### Legacy AviUtl 1.x (Win32)
 
@@ -63,6 +64,24 @@ same-basename INIs together. The package places the external runtime under
 `Plugins\exe_files` and presets under `Plugins\x264guiEx-FreeRenderFPS_stg`.
 Do not rename the AUO to the old `x264guiEx-FreeFPS.auo`, and do not load a
 stale copy alongside it. See [docs/LEGACY_AVIUTL1_SETUP.md](docs/LEGACY_AVIUTL1_SETUP.md).
+
+## Upgrading from v1.0.x
+
+- The installer (install or upgrade) backs up the installed folder and removes
+  the old `x264guiEx-FreeRenderFPS.auo2` from it; the copy stays in the
+  timestamped backup. If you installed manually, delete the `.auo2` yourself.
+  AviUtl2 must not load both `.auo2` and `.aux2`.
+- Delete `free_fps_export.aux2` if you copied the experimental file earlier. It
+  is superseded by Free FPS Export in the main plugin; the installer does not
+  touch it.
+- Installer backups now go to `C:\ProgramData\aviutl2\FreeRenderFPS-backups`,
+  outside `Plugin`. Older `x264guiEx-FreeRenderFPS.backup-*` folders in
+  `C:\ProgramData\aviutl2\Plugin` each hold a copy of the plugin binary (the
+  older ones contain a `.auo2`). AviUtl2 reads plugins one folder below `Plugin`,
+  so these copies can load as duplicates. Default install, upgrade and uninstall
+  leave them alone. To move them into `FreeRenderFPS-backups` (nothing is
+  deleted), run the installer with `--cleanup-legacy-backups`; add `--dry-run` to
+  list them first.
 
 ## Usage
 
@@ -75,6 +94,13 @@ stale copy alongside it. See [docs/LEGACY_AVIUTL1_SETUP.md](docs/LEGACY_AVIUTL1_
 Turning Free Render FPS off follows the original x264guiEx integer-frame path.
 FreeFPS mode changes the effective video FPS/frame count while retaining the
 project duration and original audio sample count.
+
+## Free FPS Export (AviUtl2 v2.1.12)
+
+The same `x264guiEx-FreeRenderFPS.aux2` adds **Free FPS Export...** to the
+AviUtl2 **Edit** menu. On AviUtl2 v2.1.12, use it for free render FPS: it
+re-times the project with public SDK APIs and exports at any rational FPS. Save
+the project to a file before exporting.
 
 ## FPS presets
 
@@ -110,7 +136,8 @@ media before claiming the full AviUtl2 matrix for AviUtl 1.x. See
 
 ## Supported AviUtl2
 
-Only **AviUtl2 v2.1.4 x64**. FreeFPS validates the host image size, entry RVA,
+The built-in hook supports only **AviUtl2 v2.1.4 x64**; on v2.1.12 use Free FPS
+Export. FreeFPS validates the host image size, entry RVA,
 timeline-builder bytes, and caller relationship before enabling. Unknown builds
 are rejected; ordinary output remains available with FreeFPS disabled.
 

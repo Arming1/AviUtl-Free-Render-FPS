@@ -23,14 +23,19 @@ From the repository root:
 Output:
 
 ```text
-src\x264guiEx-FreeFPS\Release\x64\x264guiEx-FreeRenderFPS.auo2
+src\x264guiEx-FreeFPS\Release\x64\x264guiEx-FreeRenderFPS.aux2
 src\x264guiEx-FreeFPS\Release\x64\x264guiEx-FreeRenderFPS.ini
 src\x264guiEx-FreeFPS\Release\x64\x264guiEx-FreeRenderFPS.en.ini
 src\x264guiEx-FreeFPS\Release\x64\x264guiEx-FreeRenderFPS.zh.ini
 ```
 
-The recovered RC1 build completed with 0 errors and 7 existing upstream
-warnings. Its plugin SHA-256 is:
+The single `.aux2` is a general AviUtl2 plugin. It registers the x264guiEx
+FreeRenderFPS output plugin (`register_output_plugin`) and the Edit menu item
+**Free FPS Export...**. The x64 build no longer produces `.auo2`; the Win32
+AviUtl 1.x `.auo` is unchanged.
+
+The recovered RC1 build (its `.auo2` output, before the single-`.aux2` format)
+completed with 0 errors and 7 existing upstream warnings. Its plugin SHA-256 is:
 
 ```text
 66266D5D08DF368D067B3FF74C0815965BD5177E2FF9C4E04181D053EAFD5DD5
@@ -49,10 +54,13 @@ warnings. Its plugin SHA-256 is:
 The script:
 
 1. performs a clean Release x64 plugin build;
-2. stages only the formal AUO2, adjacent INIs, presets, and notices;
-3. rejects EXE/DLL/PDB/Debug/probe files from the payload;
+2. stages only the formal AUX2, adjacent INIs, presets, and notices;
+3. rejects EXE/DLL/PDB/Debug/probe files and any `.auo2` from the payload; a
+   `.aux2` is accepted only directly under the plugin folder;
 4. compiles the installer with Visual Studio Roslyn;
-5. runs install → upgrade → uninstall → rollback in an isolated temporary tree;
+5. runs install → upgrade → uninstall → rollback in an isolated temporary tree,
+   including the legacy `.auo2` migration (the file is kept in the backup and
+   restored by rollback);
 6. creates setup and portable ZIPs;
 7. writes SHA-256 manifests.
 

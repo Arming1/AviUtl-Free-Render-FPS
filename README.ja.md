@@ -48,7 +48,8 @@ setup/portable 最終パッケージのみを使った実エンコードに合�
 ## Manual installation
 
 v1.0.1 portable ZIP を AviUtl2 ルートへ直接展開します。ZIP には
-`data\Plugin\x264guiEx-FreeRenderFPS` が含まれます。正式 AUO2 と 3 個の INI を保ち、
+`data\Plugin\x264guiEx-FreeRenderFPS` が含まれます。正式な
+`x264guiEx-FreeRenderFPS.aux2` と 3 個の INI を保ち、
 Debug、PDB、Probe、watcher、ブレークポイント用ツールをコピーしないでください。
 
 ### 旧 AviUtl 1.x（Win32）
@@ -61,6 +62,16 @@ Debug、PDB、Probe、watcher、ブレークポイント用ツールをコピー
 ください。詳細は [docs/LEGACY_AVIUTL1_SETUP.md](docs/LEGACY_AVIUTL1_SETUP.md) を
 参照してください。
 
+## v1.0.x からの更新
+
+- インストーラーは導入/更新時に、プラグインフォルダー内の旧 `x264guiEx-FreeRenderFPS.auo2`
+  をバックアップした上で削除します。手動で導入した場合は自分で削除してください。
+  AviUtl2 に `.auo2` と `.aux2` を同時に読み込ませないでください。
+- 実験版 `free_fps_export.aux2` をコピーしていた場合は削除してください。上記の
+  Free FPS Export に置き換えられており、インストーラーは触れません。
+- インストーラーのバックアップは `C:\ProgramData\aviutl2\FreeRenderFPS-backups` に作成されるようになり、`Plugin` の外に置かれます。
+  `C:\ProgramData\aviutl2\Plugin` 内の古い `x264guiEx-FreeRenderFPS.backup-*` フォルダーには、それぞれプラグインファイルのコピーが入っています（古いものには `.auo2` があります）。AviUtl2 は `Plugin` の 1 階層下のフォルダーのプラグインも読み込むため、これらの複製が重複として読み込まれる可能性があります。導入・更新・アンインストールの既定動作ではこれらには触れません。`FreeRenderFPS-backups` へ移動する場合（移動のみで削除はしません）は、インストーラーに `--cleanup-legacy-backups` を指定してください。先に一覧を確認するには `--dry-run` を付けます。
+
 ## Usage
 
 1. `x264guiEx FreeRenderFPS` の設定を開きます。
@@ -71,6 +82,13 @@ Debug、PDB、Probe、watcher、ブレークポイント用ツールをコピー
 
 Free Render FPS を無効にすると元の整数フレーム経路を使用します。有効時は
 プロジェクト FPS を変えず、同じ期間を目標 FPS で評価します。
+
+## Free FPS Export（AviUtl2 v2.1.12）
+
+同じ `x264guiEx-FreeRenderFPS.aux2` が AviUtl2 の **編集（Edit）** メニューに
+**Free FPS Export...** を追加します。AviUtl2 v2.1.12 でフリー描画 FPS を使う場合は
+こちらを使用してください。公開 SDK の API でプロジェクトのタイミングを組み直し、
+任意の有理数 FPS で出力します。出力前にプロジェクトをファイルとして保存してください。
 
 ## FPS presets
 
@@ -104,7 +122,8 @@ Free Render FPS を無効にすると元の整数フレーム経路を使用し�
 
 ## Supported AviUtl2
 
-現在は **AviUtl2 v2.1.4 x64 のみ**です。有効化前に image size、entry RVA、
+内蔵フックは **AviUtl2 v2.1.4 x64 のみ**対応です。AviUtl2 v2.1.12 では Free FPS Export を使用してください。
+有効化前に image size、entry RVA、
 timeline builder のバイト列と呼び出し関係を検査し、未知のビルドでは拒否します。
 
 ## 対応する旧 AviUtl 1.x

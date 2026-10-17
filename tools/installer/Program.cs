@@ -34,7 +34,11 @@ internal static class Program
             log.Info($"FreeRenderFPS installer {typeof(Program).Assembly.GetName().Version ?? new Version(1, 0)}");
             log.Info($"Command={options.Command}; target={target}");
 
-            if (options.Command is "install" or "upgrade")
+            if (options.CleanupLegacyBackups)
+            {
+                Installer.CleanupLegacyBackups(target, options, log);
+            }
+            else if (options.Command is "install" or "upgrade")
             {
                 var source = Installer.ResolveSourceDirectory(options);
                 Installer.Install(source, target, options, log);
@@ -108,15 +112,18 @@ internal sealed class Options
     public bool DryRun { get; private set; }
     public bool SelfTest { get; private set; }
     public bool KeepTestRoot { get; private set; }
+    public bool CleanupLegacyBackups { get; private set; }
     public bool Help { get; private set; }
 
     public static Options Parse(string[] args)
     {
         var result = new Options();
         var index = 0;
+        var hasCommand = false;
         if (args.Length > 0 && !args[0].StartsWith("-", StringComparison.Ordinal))
         {
             result.Command = args[0].ToLowerInvariant();
+            hasCommand = true;
             index = 1;
         }
 
@@ -170,11 +177,16 @@ internal sealed class Options
                 case "--keep-test-root":
                     result.KeepTestRoot = true;
                     break;
+                case "--cleanup-legacy-backups":
+                    result.CleanupLegacyBackups = true;
+                    break;
                 default:
                     throw new InstallerException($"Unknown option '{arg}'. Use --help for usage.");
             }
         }
 
+        if (result.CleanupLegacyBackups && hasCommand)
+            throw new InstallerException("--cleanup-legacy-backups cannot be combined with a command.");
         if (!new[] { "install", "upgrade", "uninstall", "rollback" }.Contains(result.Command)
             && !result.SelfTest && !result.Help)
             throw new InstallerException($"Unknown command '{result.Command}'. Use --help for usage.");
@@ -196,10 +208,13 @@ internal sealed class Options
         Console.WriteLine("  FreeRenderFPS.Installer.exe [install|upgrade] [options]");
         Console.WriteLine("  FreeRenderFPS.Installer.exe uninstall [options]");
         Console.WriteLine("  FreeRenderFPS.Installer.exe rollback [options]");
+        Console.WriteLine("  FreeRenderFPS.Installer.exe --cleanup-legacy-backups [options]");
         Console.WriteLine("  FreeRenderFPS.Installer.exe --self-test [--test-root <dir>]");
         Console.WriteLine();
         Console.WriteLine("The default target is %ProgramData%\\aviutl2\\Plugin\\x264guiEx-FreeRenderFPS.");
         Console.WriteLine("Only the FreeRenderFPS directory is changed; the original x264guiEx directory is rejected.");
+        Console.WriteLine("Backups, staging and swap folders live in %ProgramData%\\aviutl2\\FreeRenderFPS-backups,");
+        Console.WriteLine("outside Plugin, so AviUtl2 never loads them as plugins.");
         Console.WriteLine("Run elevated only when the selected target is not writable by the current user.");
         Console.WriteLine();
         Console.WriteLine("Options:");
@@ -210,6 +225,8 @@ internal sealed class Options
         Console.WriteLine("  --remove-user-data      Remove FreeRenderFPS config/presets on uninstall");
         Console.WriteLine("  --log <file>            Write an installer log to this path");
         Console.WriteLine("  --backup <dir>          Rollback backup directory (rollback only)");
+        Console.WriteLine("  --cleanup-legacy-backups  Move old Plugin\\x264guiEx-FreeRenderFPS.backup-* folders into");
+        Console.WriteLine("                          FreeRenderFPS-backups (moves only, never deletes; opt-in)");
         Console.WriteLine("  --non-interactive       Never prompt; suitable for deployment scripts");
         Console.WriteLine("  --dry-run               Validate and report without changing files");
         Console.WriteLine("  --test-root <dir>       Use an isolated root for tests");
@@ -261,13 +278,20 @@ internal static class Installer
 {
     private const string ProductDirectoryName = "x264guiEx-FreeRenderFPS";
     private const string OriginalDirectoryName = "x264guiEx";
-    private static readonly string[] RequiredPluginFiles =
+    // Sibling of the Plugin folder. AviUtl2 scans Plugin and one level below it,
+    // so nothing the installer writes here can be loaded as a duplicate plugin.
+    private const string BackupRootName = "FreeRenderFPS-backups";
+    private const string BackupPattern = ProductDirectoryName + ".backup-*";
+    private const string PluginBinaryName = "x264guiEx-FreeRenderFPS.aux2";
+    // Pre-v2 AviUtl2 output plugin. Only legacy rollback backups may still contain it.
+    private const string LegacyPluginBinaryName = "x264guiEx-FreeRenderFPS.auo2";
+    private static readonly string[] RequiredSidecarFiles =
     {
-        "x264guiEx-FreeRenderFPS.auo2",
         "x264guiEx-FreeRenderFPS.ini",
         "x264guiEx-FreeRenderFPS.en.ini",
         "x264guiEx-FreeRenderFPS.zh.ini"
     };
+    private static readonly string[] RequiredPluginFiles = new[] { PluginBinaryName }.Concat(RequiredSidecarFiles).ToArray();
     private static readonly IReadOnlyDictionary<string, string> AuditedRuntimeHashes =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -333,8 +357,10 @@ internal static class Installer
         var parent = Directory.GetParent(target)?.FullName ?? throw new InstallerException("Target has no parent directory.");
         Directory.CreateDirectory(parent);
         EnsureNotReparsePoint(parent);
-        var staging = target + ".staging-" + Stamp();
-        var old = target + ".old-" + Stamp();
+        var workRoot = BackupRoot(target);
+        EnsureNotReparsePoint(workRoot);
+        var staging = System.IO.Path.Combine(workRoot, "staging-" + Stamp());
+        var old = System.IO.Path.Combine(workRoot, "old-" + Stamp());
         string? backup = null;
         try
         {
@@ -347,6 +373,7 @@ internal static class Installer
             {
                 EnsureNotReparsePoint(target);
                 backup = CreateBackup(target, log);
+                MigrateLegacyPluginBinary(target, backup, log);
                 Directory.Move(target, old);
             }
             Directory.Move(staging, target);
@@ -383,6 +410,16 @@ internal static class Installer
         }
     }
 
+    // The old .auo2 leaves the installed folder with the swap in Install: the new
+    // payload never contains it, and the timestamped backup keeps the copy.
+    // Logging it here makes the migration visible in the install log.
+    private static void MigrateLegacyPluginBinary(string target, string backup, InstallerLog log)
+    {
+        if (!File.Exists(System.IO.Path.Combine(target, LegacyPluginBinaryName)))
+            return;
+        log.Info($"Legacy {LegacyPluginBinaryName} found; it is kept in {backup} and is not carried into the new install. Only {PluginBinaryName} is loaded.");
+    }
+
     public static void Uninstall(string target, Options options, InstallerLog log)
     {
         EnsureSafeTarget(target);
@@ -399,7 +436,7 @@ internal static class Installer
         }
 
         var backup = CreateBackup(target, log);
-        var old = target + ".uninstall-" + Stamp();
+        var old = System.IO.Path.Combine(BackupRoot(target), "uninstall-" + Stamp());
         try
         {
             Directory.Move(target, old);
@@ -436,12 +473,7 @@ internal static class Installer
         EnsureSafeTarget(target);
         var backup = options.BackupPath;
         if (string.IsNullOrWhiteSpace(backup))
-        {
-            var parent = Directory.GetParent(target)?.FullName ?? throw new InstallerException("Target has no parent directory.");
-            backup = Directory.EnumerateDirectories(parent, ProductDirectoryName + ".backup-*", SearchOption.TopDirectoryOnly)
-                .OrderByDescending(path => Directory.GetLastWriteTimeUtc(path))
-                .FirstOrDefault();
-        }
+            backup = FindLatestBackup(target);
         if (string.IsNullOrWhiteSpace(backup) || !Directory.Exists(backup))
             throw new InstallerException("No timestamped backup was found. Use --backup <directory> to select one.");
         backup = System.IO.Path.GetFullPath(backup);
@@ -454,7 +486,7 @@ internal static class Installer
         }
 
         var currentBackup = Directory.Exists(target) ? CreateBackup(target, log, "rollback-current") : null;
-        var old = target + ".rollback-" + Stamp();
+        var old = System.IO.Path.Combine(BackupRoot(target), "rollback-" + Stamp());
         try
         {
             if (Directory.Exists(target))
@@ -476,6 +508,42 @@ internal static class Installer
         }
     }
 
+    // Opt-in only: moves old Plugin\x264guiEx-FreeRenderFPS.backup-* folders out of the
+    // plugin search path. Nothing is deleted; each folder keeps its contents.
+    public static void CleanupLegacyBackups(string target, Options options, InstallerLog log)
+    {
+        EnsureSafeTarget(target);
+        var pluginDirectory = Directory.GetParent(target)?.FullName ?? throw new InstallerException("Target has no parent directory.");
+        var legacy = Directory.Exists(pluginDirectory)
+            ? Directory.EnumerateDirectories(pluginDirectory, BackupPattern, SearchOption.TopDirectoryOnly)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : new List<string>();
+        if (legacy.Count == 0)
+        {
+            log.Info($"No legacy backups found under {pluginDirectory}.");
+            return;
+        }
+
+        foreach (var path in legacy)
+            log.Info($"Legacy backup found: {path}");
+        if (options.DryRun)
+        {
+            log.Info("Dry-run requested; no legacy backups were moved.");
+            return;
+        }
+
+        var destinationRoot = BackupRoot(target);
+        Directory.CreateDirectory(destinationRoot);
+        foreach (var source in legacy)
+        {
+            EnsureNotReparsePoint(source);
+            var destination = System.IO.Path.Combine(destinationRoot, System.IO.Path.GetFileName(source) + "-from-plugin-" + Stamp());
+            Directory.Move(source, destination);
+            log.Info($"Moved legacy backup {source} to {destination}");
+        }
+    }
+
     public static int RunSelfTest(Options options)
     {
         _selfTestAllowsRuntimePlaceholders = true;
@@ -489,8 +557,10 @@ internal static class Installer
         root = System.IO.Path.GetFullPath(root);
         var payload = System.IO.Path.Combine(root, "payload", "Plugin", ProductDirectoryName);
         var docs = System.IO.Path.Combine(root, "payload", "Docs");
-        var target = System.IO.Path.Combine(root, "aviutl2", "Plugin", ProductDirectoryName);
-        var original = System.IO.Path.Combine(root, "aviutl2", "Plugin", OriginalDirectoryName);
+        var pluginDirectory = System.IO.Path.Combine(root, "aviutl2", "Plugin");
+        var target = System.IO.Path.Combine(pluginDirectory, ProductDirectoryName);
+        var original = System.IO.Path.Combine(pluginDirectory, OriginalDirectoryName);
+        var backupRoot = System.IO.Path.Combine(root, "aviutl2", BackupRootName);
         var logPath = System.IO.Path.Combine(root, "self-test.log");
         try
         {
@@ -515,27 +585,107 @@ internal static class Installer
                 var installOptions = OptionsForTest("install", options, preserveConfig: true, preservePresets: true);
                 Install(System.IO.Path.Combine(root, "payload"), target, installOptions, log);
             }
-            Assert(File.Exists(System.IO.Path.Combine(target, RequiredPluginFiles[0])), "initial plugin file missing");
+            Assert(File.Exists(System.IO.Path.Combine(target, PluginBinaryName)), "initial plugin file missing");
+            Assert(BackupDirectories(target).Count == 0, "initial install created a backup");
+            AssertPluginBinariesOnlyInTarget(pluginDirectory, target, "after install");
+
             File.WriteAllText(System.IO.Path.Combine(target, "x264guiEx-FreeRenderFPS.conf"), "user-config");
             File.WriteAllText(System.IO.Path.Combine(target, "x264guiEx_stg", "user.stg"), "user-preset");
-            File.WriteAllText(System.IO.Path.Combine(payload, RequiredPluginFiles[0]), "test-payload-v2");
+            File.WriteAllText(System.IO.Path.Combine(payload, PluginBinaryName), "test-payload-v2");
 
             using (var log = new InstallerLog(logPath, target))
                 Install(System.IO.Path.Combine(root, "payload"), target, OptionsForTest("upgrade", options, true, true), log);
             Assert(File.ReadAllText(System.IO.Path.Combine(target, "x264guiEx-FreeRenderFPS.conf")) == "user-config", "config was not preserved on upgrade");
             Assert(File.ReadAllText(System.IO.Path.Combine(target, "x264guiEx_stg", "user.stg")) == "user-preset", "preset was not preserved on upgrade");
             Assert(File.ReadAllText(System.IO.Path.Combine(original, "must-not-change.txt")) == "original", "original x264guiEx directory changed");
-            Assert(Directory.EnumerateDirectories(Directory.GetParent(target)!.FullName, ProductDirectoryName + ".backup-*", SearchOption.TopDirectoryOnly).Any(), "upgrade backup missing");
+            Assert(BackupDirectories(target).Count == 1, "upgrade backup missing");
+            Assert(!Directory.EnumerateDirectories(pluginDirectory, BackupPattern, SearchOption.TopDirectoryOnly).Any(), "upgrade wrote a backup under Plugin");
+            AssertNoWorkDirectories(backupRoot, "after upgrade");
+            AssertPluginBinariesOnlyInTarget(pluginDirectory, target, "after upgrade");
 
             using (var log = new InstallerLog(logPath, target))
                 Uninstall(target, OptionsForTest("uninstall", options, true, true), log);
             Assert(File.Exists(System.IO.Path.Combine(target, "x264guiEx-FreeRenderFPS.conf")), "config was not preserved on uninstall");
-            Assert(!File.Exists(System.IO.Path.Combine(target, RequiredPluginFiles[0])), "plugin remained after uninstall");
+            Assert(!File.Exists(System.IO.Path.Combine(target, PluginBinaryName)), "plugin remained after uninstall");
+            AssertPluginBinariesOnlyInTarget(pluginDirectory, target, "after uninstall");
 
             using (var log = new InstallerLog(logPath, target))
                 Rollback(target, OptionsForTest("rollback", options, false, false), log);
-            Assert(File.Exists(System.IO.Path.Combine(target, RequiredPluginFiles[0])), "rollback did not restore plugin");
+            Assert(File.Exists(System.IO.Path.Combine(target, PluginBinaryName)), "rollback did not restore plugin");
             Assert(File.ReadAllText(System.IO.Path.Combine(original, "must-not-change.txt")) == "original", "original x264guiEx directory changed during rollback");
+            AssertPluginBinariesOnlyInTarget(pluginDirectory, target, "after rollback");
+
+            // A payload must never ship the legacy .auo2, nor a .aux2 outside the plugin root.
+            AssertPayloadRejects(payload, LegacyPluginBinaryName, "payload with legacy auo2 was accepted");
+            var nestedProbe = System.IO.Path.Combine("probe-nested", PluginBinaryName);
+            AssertPayloadRejects(payload, nestedProbe, "payload with nested aux2 was accepted");
+            TryDeleteDirectory(System.IO.Path.Combine(payload, "probe-nested"), null);
+
+            // Migration: a v1.0.x target (legacy .auo2, no .aux2) is upgraded to .aux2.
+            // The legacy file must leave the installed folder, stay in a backup outside
+            // Plugin, and come back when rolling back to that backup.
+            var backupsBeforeMigration = BackupDirectories(target);
+            File.Delete(System.IO.Path.Combine(target, PluginBinaryName));
+            File.WriteAllText(System.IO.Path.Combine(target, LegacyPluginBinaryName), "legacy-auo2");
+            using (var log = new InstallerLog(logPath, target))
+                Install(System.IO.Path.Combine(root, "payload"), target, OptionsForTest("upgrade", options, true, true), log);
+            Assert(!File.Exists(System.IO.Path.Combine(target, LegacyPluginBinaryName)), "legacy auo2 remained after migration");
+            Assert(File.Exists(System.IO.Path.Combine(target, PluginBinaryName)), "aux2 missing after migration");
+            var migrationBackups = BackupDirectories(target).Where(path => !backupsBeforeMigration.Contains(path)).ToList();
+            Assert(migrationBackups.Count == 1, "migration backup missing");
+            Assert(string.Equals(System.IO.Path.GetDirectoryName(migrationBackups[0]), System.IO.Path.GetFullPath(backupRoot), StringComparison.OrdinalIgnoreCase), "migration backup was not created outside Plugin");
+            Assert(File.ReadAllText(System.IO.Path.Combine(migrationBackups[0], LegacyPluginBinaryName)) == "legacy-auo2", "legacy auo2 not kept in migration backup");
+            AssertPluginBinariesOnlyInTarget(pluginDirectory, target, "after migration");
+
+            using (var log = new InstallerLog(logPath, target))
+                Rollback(target, Options.Parse(new[] { "rollback", "--non-interactive", "--backup", migrationBackups[0] }), log);
+            Assert(File.ReadAllText(System.IO.Path.Combine(target, LegacyPluginBinaryName)) == "legacy-auo2", "rollback did not restore legacy auo2");
+            Assert(!File.Exists(System.IO.Path.Combine(target, PluginBinaryName)), "rollback to legacy backup left aux2 in place");
+            AssertPluginBinariesOnlyInTarget(pluginDirectory, target, "after rollback to migration backup");
+
+            // Legacy-location backups (Plugin\x264guiEx-FreeRenderFPS.backup-*) stay usable for
+            // rollback, are never touched by a default upgrade, and are moved (not deleted)
+            // by --cleanup-legacy-backups.
+            var cleanupFlag = Options.Parse(new[] { "--cleanup-legacy-backups" });
+            Assert(cleanupFlag.CleanupLegacyBackups, "cleanup flag not parsed");
+            var rejectedCombination = false;
+            try
+            {
+                Options.Parse(new[] { "install", "--cleanup-legacy-backups" });
+            }
+            catch (InstallerException)
+            {
+                rejectedCombination = true;
+            }
+            Assert(rejectedCombination, "cleanup flag combined with a command was accepted");
+
+            var legacyBackup = System.IO.Path.Combine(pluginDirectory, ProductDirectoryName + ".backup-20000101-000000000Z-legacy");
+            CopyDirectory(target, legacyBackup);
+            File.WriteAllText(System.IO.Path.Combine(legacyBackup, "x264guiEx-FreeRenderFPS.conf"), "legacy-marker");
+            Assert(File.Exists(System.IO.Path.Combine(legacyBackup, LegacyPluginBinaryName)), "legacy-location backup lacks auo2");
+
+            using (var log = new InstallerLog(logPath, target))
+                Install(System.IO.Path.Combine(root, "payload"), target, OptionsForTest("upgrade", options, true, true), log);
+            Assert(Directory.Exists(legacyBackup), "default upgrade touched a legacy-location backup");
+            Assert(File.Exists(System.IO.Path.Combine(target, PluginBinaryName)), "aux2 missing after upgrade over legacy state");
+
+            using (var log = new InstallerLog(logPath, target))
+                Rollback(target, Options.Parse(new[] { "rollback", "--non-interactive", "--backup", legacyBackup }), log);
+            Assert(File.ReadAllText(System.IO.Path.Combine(target, LegacyPluginBinaryName)) == "legacy-auo2", "rollback from legacy-location backup did not restore auo2");
+            Assert(!File.Exists(System.IO.Path.Combine(target, PluginBinaryName)), "rollback from legacy-location backup left aux2 in place");
+
+            using (var log = new InstallerLog(logPath, target))
+                CleanupLegacyBackups(target, Options.Parse(new[] { "--cleanup-legacy-backups", "--non-interactive" }), log);
+            Assert(!Directory.Exists(legacyBackup), "legacy-location backup still under Plugin after cleanup");
+            var movedBackups = BackupDirectories(target)
+                .Where(path => System.IO.Path.GetFileName(path).StartsWith(System.IO.Path.GetFileName(legacyBackup) + "-from-plugin-", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            Assert(movedBackups.Count == 1, "cleanup did not move the legacy backup");
+            Assert(File.ReadAllText(System.IO.Path.Combine(movedBackups[0], "x264guiEx-FreeRenderFPS.conf")) == "legacy-marker", "moved legacy backup content changed");
+            Assert(File.Exists(System.IO.Path.Combine(movedBackups[0], LegacyPluginBinaryName)), "moved legacy backup lost its auo2");
+            AssertPluginBinariesOnlyInTarget(pluginDirectory, target, "after legacy cleanup");
+            Assert(File.ReadAllText(System.IO.Path.Combine(original, "must-not-change.txt")) == "original", "original x264guiEx directory changed at end of self-test");
+
             Console.WriteLine("Self-test passed. Sandbox: " + root);
             return 0;
         }
@@ -566,7 +716,66 @@ internal static class Installer
             throw new InstallerException(message);
     }
 
-    private static string ResolvePluginPayload(string source)
+    private static void AssertPayloadRejects(string payload, string relativeProbe, string message)
+    {
+        var probe = System.IO.Path.Combine(payload, relativeProbe);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(probe)!);
+        File.WriteAllText(probe, "must-not-ship");
+        bool rejected;
+        try
+        {
+            ValidatePluginPayload(payload, allowUserData: false);
+            rejected = false;
+        }
+        catch (InstallerException)
+        {
+            rejected = true;
+        }
+        finally
+        {
+            File.Delete(probe);
+        }
+        Assert(rejected, message);
+    }
+
+    // Every plugin binary under Plugin must be inside the install folder itself.
+    private static void AssertPluginBinariesOnlyInTarget(string pluginDirectory, string target, string stage)
+    {
+        var targetPrefix = System.IO.Path.GetFullPath(target).TrimEnd(System.IO.Path.DirectorySeparatorChar) + System.IO.Path.DirectorySeparatorChar;
+        var offenders = Directory.EnumerateFiles(pluginDirectory, "*", SearchOption.AllDirectories)
+            .Where(file => IsPluginBinary(file) && !System.IO.Path.GetFullPath(file).StartsWith(targetPrefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert(offenders.Count == 0, $"plugin binary outside the install folder ({stage}): {string.Join(", ", offenders)}");
+    }
+
+    private static bool IsPluginBinary(string path)
+    {
+        var extension = System.IO.Path.GetExtension(path);
+        return extension.Equals(".aux2", StringComparison.OrdinalIgnoreCase) || extension.Equals(".auo2", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AssertNoWorkDirectories(string backupRoot, string stage)
+    {
+        if (!Directory.Exists(backupRoot))
+            return;
+        var leftovers = Directory.EnumerateDirectories(backupRoot, "*", SearchOption.TopDirectoryOnly)
+            .Where(path => System.IO.Path.GetFileName(path).StartsWith("staging-", StringComparison.OrdinalIgnoreCase) || System.IO.Path.GetFileName(path).StartsWith("old-", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert(leftovers.Count == 0, $"work directory left behind ({stage}): {string.Join(", ", leftovers)}");
+    }
+
+    private static HashSet<string> BackupDirectories(string target)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var root = BackupRoot(target);
+        if (!Directory.Exists(root))
+            return result;
+        foreach (var path in Directory.EnumerateDirectories(root, BackupPattern, SearchOption.TopDirectoryOnly))
+            result.Add(path);
+        return result;
+    }
+
+    private static string ResolvePluginPayload(string source, bool allowLegacyBinary = false)
     {
         var candidates = new[]
         {
@@ -577,10 +786,17 @@ internal static class Installer
         };
         foreach (var candidate in candidates)
         {
-            if (Directory.Exists(candidate) && RequiredPluginFiles.All(file => File.Exists(System.IO.Path.Combine(candidate, file))))
+            if (Directory.Exists(candidate) && HasFormalPluginFiles(candidate, allowLegacyBinary))
                 return System.IO.Path.GetFullPath(candidate);
         }
-        throw new InstallerException("Payload does not contain the four formal Release plugin files (.auo2 and adjacent .ini files).");
+        throw new InstallerException($"Payload does not contain the formal Release plugin files ({PluginBinaryName} and adjacent .ini files).");
+    }
+
+    private static bool HasFormalPluginFiles(string candidate, bool allowLegacyBinary)
+    {
+        var hasBinary = File.Exists(System.IO.Path.Combine(candidate, PluginBinaryName))
+            || (allowLegacyBinary && File.Exists(System.IO.Path.Combine(candidate, LegacyPluginBinaryName)));
+        return hasBinary && RequiredSidecarFiles.All(file => File.Exists(System.IO.Path.Combine(candidate, file)));
     }
 
     private static string? ResolveDocsPayload(string source)
@@ -594,7 +810,7 @@ internal static class Installer
         return candidates.FirstOrDefault(Directory.Exists);
     }
 
-    private static void ValidatePluginPayload(string payload, bool allowUserData)
+    private static void ValidatePluginPayload(string payload, bool allowUserData, bool allowLegacyBinary = false)
     {
         foreach (var file in Directory.EnumerateFiles(payload, "*", SearchOption.AllDirectories))
         {
@@ -627,7 +843,11 @@ internal static class Installer
             }
             if (allowUserData && IsConfigFile(file))
                 continue;
-            if (!RequiredPluginFiles.Contains(name, StringComparer.OrdinalIgnoreCase)
+            // The plugin binary is accepted only at the plugin root, by exact name.
+            var isPluginBinary = relative.Equals(PluginBinaryName, StringComparison.OrdinalIgnoreCase)
+                || (allowLegacyBinary && relative.Equals(LegacyPluginBinaryName, StringComparison.OrdinalIgnoreCase));
+            if (!isPluginBinary
+                && !RequiredSidecarFiles.Contains(name, StringComparer.OrdinalIgnoreCase)
                 && !name.Equals("THIRD_PARTY_MANIFEST.json", StringComparison.OrdinalIgnoreCase)
                 && !name.Equals("THIRD_PARTY_RELEASE_ARTIFACTS.json", StringComparison.OrdinalIgnoreCase)
                 && !name.Equals("THIRD_PARTY_NOTICES.txt", StringComparison.OrdinalIgnoreCase))
@@ -658,8 +878,9 @@ internal static class Installer
 
     private static void ValidateRollbackBackup(string backup)
     {
-        var plugin = ResolvePluginPayload(backup);
-        ValidatePluginPayload(plugin, allowUserData: true);
+        // Backups taken before the .aux2 format still hold the legacy .auo2.
+        var plugin = ResolvePluginPayload(backup, allowLegacyBinary: true);
+        ValidatePluginPayload(plugin, allowUserData: true, allowLegacyBinary: true);
         var docs = ResolveDocsPayload(backup);
         if (docs is not null)
             ValidateDocsPayload(docs);
@@ -697,9 +918,31 @@ internal static class Installer
         }
     }
 
+    // Backups, staging and swap folders live beside the Plugin folder, never inside it.
+    // For %ProgramData%\aviutl2\Plugin\x264guiEx-FreeRenderFPS this is %ProgramData%\aviutl2\FreeRenderFPS-backups.
+    private static string BackupRoot(string target)
+    {
+        var pluginDirectory = Directory.GetParent(target)?.FullName ?? throw new InstallerException("Target has no parent directory.");
+        var dataDirectory = Directory.GetParent(pluginDirectory)?.FullName ?? throw new InstallerException("Plugin folder has no parent directory.");
+        return System.IO.Path.Combine(dataDirectory, BackupRootName);
+    }
+
+    private static string? FindLatestBackup(string target)
+    {
+        var candidates = new List<string>();
+        var root = BackupRoot(target);
+        if (Directory.Exists(root))
+            candidates.AddRange(Directory.EnumerateDirectories(root, BackupPattern, SearchOption.TopDirectoryOnly));
+        // Backups written before the move out of Plugin remain valid rollback sources.
+        var pluginDirectory = Directory.GetParent(target)!.FullName;
+        if (Directory.Exists(pluginDirectory))
+            candidates.AddRange(Directory.EnumerateDirectories(pluginDirectory, BackupPattern, SearchOption.TopDirectoryOnly));
+        return candidates.OrderByDescending(path => Directory.GetLastWriteTimeUtc(path)).FirstOrDefault();
+    }
+
     private static string CreateBackup(string target, InstallerLog log, string suffix = "")
     {
-        var path = target + ".backup-" + Stamp() + (string.IsNullOrEmpty(suffix) ? "" : "-" + suffix);
+        var path = System.IO.Path.Combine(BackupRoot(target), ProductDirectoryName + ".backup-" + Stamp() + (string.IsNullOrEmpty(suffix) ? "" : "-" + suffix));
         CopyDirectory(target, path);
         log.Info("Created timestamped backup: " + path);
         return path;

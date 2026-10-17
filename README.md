@@ -36,7 +36,12 @@ Release gates passed by v1.0.0 on AviUtl2 v2.1.4 x64:
 See [the final report](FINAL_REPORT.md), [validation matrix](docs/VALIDATION_MATRIX.md),
 and [installation guide](docs/INSTALL.md).
 
-Only AviUtl2 v2.1.4 x64 is supported. Unknown host signatures fail closed.
+The AviUtl2 build is the single plugin `x264guiEx-FreeRenderFPS.aux2`. It
+provides the x264guiEx FreeRenderFPS output plugin and the Edit menu item
+**Free FPS Export...**, which gives free render FPS on AviUtl2 v2.1.12. The
+built-in FreeRenderFPS hook supports only AviUtl2 v2.1.4 x64; unknown host
+signatures fail closed. Upgrade notes (old `.auo2`, `free_fps_export.aux2`, and
+backup folders) are in [docs/INSTALL.md](docs/INSTALL.md).
 
 The AviUtl 1.x adapter supports official AviUtl 1.10 + ExEdit 0.92 only and is
 distributed as an x86 `.auo` manual-install package at

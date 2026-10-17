@@ -78,12 +78,15 @@ function Copy-DirectorySafe([string]$Source, [string]$Destination) {
 
 function Assert-AuditedPayload([string]$Root) {
     $allowedRuntime = @('x264.exe', 'ffmpeg.exe', 'muxer.exe', 'remuxer.exe', 'timelineeditor.exe')
-    $forbiddenExtensions = @('.dll', '.sys', '.ocx', '.so', '.dylib', '.lib', '.exp', '.pdb', '.metagen', '.recipe')
+    $forbiddenExtensions = @('.auo2', '.dll', '.sys', '.ocx', '.so', '.dylib', '.lib', '.exp', '.pdb', '.metagen', '.recipe')
     $violations = @()
     Get-ChildItem -LiteralPath $Root -File -Recurse | ForEach-Object {
         $relative = (Get-RelativePathCompat $Root $_.FullName).Replace('\', '/')
+        $extension = $_.Extension.ToLowerInvariant()
         $isAllowedRuntime = $relative -match '^Plugin/x264guiEx-FreeRenderFPS/exe_files/([^/]+)$' -and $allowedRuntime -contains $_.Name
-        if ($forbiddenExtensions -contains $_.Extension.ToLowerInvariant() -or ($_.Extension -eq '.exe' -and -not $isAllowedRuntime)) {
+        # The single AviUtl2 plugin binary is accepted only directly under the plugin root.
+        $isPluginBinary = $relative -eq 'Plugin/x264guiEx-FreeRenderFPS/x264guiEx-FreeRenderFPS.aux2'
+        if ($forbiddenExtensions -contains $extension -or ($_.Extension -eq '.exe' -and -not $isAllowedRuntime) -or ($extension -eq '.aux2' -and -not $isPluginBinary)) {
             $violations += $_.FullName
         }
     }
@@ -155,15 +158,15 @@ if (-not $SkipBuild) {
 }
 
 Assert-Path $releaseOutput 'Release x64 output directory'
-$releaseAuo = Join-Path $releaseOutput 'x264guiEx-FreeRenderFPS.auo2'
-Assert-Path $releaseAuo 'Release x64 output plugin'
+$releaseAux = Join-Path $releaseOutput 'x264guiEx-FreeRenderFPS.aux2'
+Assert-Path $releaseAux 'Release x64 output plugin'
 $expectedProductVersion = $ReleaseLabel -replace '^v', ''
-$actualProductVersion = (Get-Item -LiteralPath $releaseAuo).VersionInfo.ProductVersion
+$actualProductVersion = (Get-Item -LiteralPath $releaseAux).VersionInfo.ProductVersion
 if ($actualProductVersion -ne $expectedProductVersion) {
-    throw "Release plugin version mismatch: expected $expectedProductVersion from ReleaseLabel, found $actualProductVersion in $releaseAuo"
+    throw "Release plugin version mismatch: expected $expectedProductVersion from ReleaseLabel, found $actualProductVersion in $releaseAux"
 }
 $requiredReleaseFiles = @(
-    'x264guiEx-FreeRenderFPS.auo2',
+    'x264guiEx-FreeRenderFPS.aux2',
     'x264guiEx-FreeRenderFPS.ini',
     'x264guiEx-FreeRenderFPS.en.ini',
     'x264guiEx-FreeRenderFPS.zh.ini'

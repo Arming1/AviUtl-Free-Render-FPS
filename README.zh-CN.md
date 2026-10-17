@@ -46,9 +46,9 @@ AviUtl 宿主本体。
 ## 手动安装
 
 将 v1.0.1 portable ZIP 直接解压到 AviUtl2 根目录；包内已包含
-`data\Plugin\x264guiEx-FreeRenderFPS`。必须保持正式 AUO2 与三个相邻 INI
-同名同目录，
-不要复制 Debug、PDB、Probe、watcher 或断点工具，也不要重命名正式文件。
+`data\Plugin\x264guiEx-FreeRenderFPS`。必须保持正式 `x264guiEx-FreeRenderFPS.aux2`
+与三个相邻 INI 同名同目录，不要复制 Debug、PDB、Probe、watcher 或断点工具，
+也不要重命名正式文件。
 
 ### 旧版 AviUtl 1.x（Win32）
 
@@ -58,6 +58,19 @@ INI 放在一起；runtime 位于 `Plugins\exe_files`，预设位于
 `Plugins\x264guiEx-FreeRenderFPS_stg`。不要把 AUO 重命名为旧的
 `x264guiEx-FreeFPS.auo`，也不要同时加载旧副本。详见
 [docs/LEGACY_AVIUTL1_SETUP.md](docs/LEGACY_AVIUTL1_SETUP.md)。
+
+## 从 v1.0.x 升级
+
+- 安装器在安装/升级时，会把插件文件夹中旧的 `x264guiEx-FreeRenderFPS.auo2`
+  备份后移除；手动安装的请自行删除它。AviUtl2 不能同时加载 `.auo2` 与 `.aux2`。
+- 如果复制过实验版 `free_fps_export.aux2`，请删除。它已被下面的 Free FPS Export
+  取代，安装器不会处理它。
+- 安装器的备份现在放在 `C:\ProgramData\aviutl2\FreeRenderFPS-backups`，不在 `Plugin` 内。
+  `C:\ProgramData\aviutl2\Plugin` 下较早的 `x264guiEx-FreeRenderFPS.backup-*` 文件夹
+  仍在原处，每个都含一份插件文件（较早的含 `.auo2`）。AviUtl2 会读取 `Plugin` 下一层
+  子文件夹中的插件，这些副本可能被当作重复插件加载。默认的安装、升级、卸载不会动它们。
+  如需把它们移入 `FreeRenderFPS-backups`（只移动，不删除），请运行安装器的
+  `--cleanup-legacy-backups`；加 `--dry-run` 可先列出。
 
 ## 使用方法
 
@@ -69,6 +82,12 @@ INI 放在一起；runtime 位于 `Plugins\exe_files`，预设位于
 
 关闭 Free Render FPS 时走原始 x264guiEx 整数帧路径。开启时只改变视频求值
 采样率和视频帧数，工程 FPS 不变，工程时长和音频采样数保持不变。
+
+## Free FPS Export（AviUtl2 v2.1.12）
+
+同一个 `x264guiEx-FreeRenderFPS.aux2` 还会在 AviUtl2 的 **编辑（Edit）** 菜单中加入
+**Free FPS Export...**。在 AviUtl2 v2.1.12 上请用它获得自由渲染帧率：插件用公开 SDK
+接口重新排布工程时间并导出，可输出任意有理数 FPS。导出前需先把工程保存为文件。
 
 ## FPS 预设
 
@@ -102,7 +121,8 @@ Custom。内部使用有理数 rate/scale；59.94 对应 60000/1001。
 
 ## 支持的 AviUtl2
 
-目前仅支持 **AviUtl2 v2.1.4 x64**。启用前会校验宿主 image size、入口
+内置 Hook 目前仅支持 **AviUtl2 v2.1.4 x64**；在 AviUtl2 v2.1.12 上请使用 Free FPS Export。
+启用前会校验宿主 image size、入口
 RVA、时间轴构造器指令和调用关系；未知版本会被拒绝。关闭 FreeFPS 时普通
 输出仍可使用。
 
