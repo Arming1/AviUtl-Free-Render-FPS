@@ -1,6 +1,7 @@
 {
   "label": "FAKE/SIMULATED (existing samples, not host exports)",
   "run_dir": "D:\\AviUtl Free Render FPS\\experiments\\free_fps_matrix\\dry_run_simulated",
+  "timeline": "original",
   "overall": "PASS",
   "selected_cases": [
     "66_to_24",
@@ -17,6 +18,20 @@
       "expected_frames": 120,
       "expected_duration": "5",
       "video": "D:\\AviUtl Free Render FPS\\experiments\\free_fps_matrix\\dry_run_simulated\\66_to_24.mp4",
+      "timeline": "original",
+      "endpoint": {
+        "k": "4/11",
+        "retimed_first_frame": 0,
+        "retimed_last_frame": 119,
+        "T_original_s": 4.984848484848484,
+        "T_retimed_s": 4.958333333333333,
+        "delta_s": -0.026515151515151516,
+        "delta_original_frames": -1.75,
+        "delta_output_frames": -0.6363636363636364,
+        "bound_s": 0.04734848484848485,
+        "bound_output_frames": 1.1363636363636365,
+        "within_bound": true
+      },
       "status": "PASS",
       "validator": {
         "exit_code": 0,
@@ -61,6 +76,8 @@
         "zero_steps": 0,
         "strictly_monotonic": true,
         "model": {
+          "timeline": "original",
+          "start_s": 0.0,
           "x0": 120.0,
           "x1": 520.0,
           "y0": 180.0,
@@ -72,6 +89,10 @@
           "intercept_px": 120.00035896984988,
           "max_abs_residual_px": 0.13286233618964616
         }
+      },
+      "original_time_check": {
+        "max_abs_residual_px": 0.14284455514177807,
+        "T_seconds": 4.984848484848484
       }
     },
     {
@@ -83,6 +104,20 @@
       "expected_frames": 600,
       "expected_duration": "5",
       "video": "D:\\AviUtl Free Render FPS\\experiments\\free_fps_matrix\\dry_run_simulated\\66_to_120.mp4",
+      "timeline": "original",
+      "endpoint": {
+        "k": "20/11",
+        "retimed_first_frame": 0,
+        "retimed_last_frame": 599,
+        "T_original_s": 4.984848484848484,
+        "T_retimed_s": 4.991666666666666,
+        "delta_s": 0.006818181818181818,
+        "delta_original_frames": 0.45,
+        "delta_output_frames": 0.8181818181818182,
+        "bound_s": 0.010984848484848484,
+        "bound_output_frames": 1.3181818181818181,
+        "within_bound": true
+      },
       "status": "PASS",
       "validator": {
         "exit_code": 0,
@@ -127,6 +162,8 @@
         "zero_steps": 0,
         "strictly_monotonic": true,
         "model": {
+          "timeline": "original",
+          "start_s": 0.0,
           "x0": 120.0,
           "x1": 520.0,
           "y0": 180.0,
@@ -138,6 +175,10 @@
           "intercept_px": 119.99503814997736,
           "max_abs_residual_px": 0.16624375614517817
         }
+      },
+      "original_time_check": {
+        "max_abs_residual_px": 0.1702868801265538,
+        "T_seconds": 4.984848484848484
       }
     },
     {
@@ -149,6 +190,20 @@
       "expected_frames": 300,
       "expected_duration": "5",
       "video": "D:\\AviUtl Free Render FPS\\experiments\\free_fps_matrix\\dry_run_simulated\\120_to_60.mp4",
+      "timeline": "original",
+      "endpoint": {
+        "k": "1/2",
+        "retimed_first_frame": 0,
+        "retimed_last_frame": 299,
+        "T_original_s": 4.991666666666666,
+        "T_retimed_s": 4.983333333333333,
+        "delta_s": -0.008333333333333333,
+        "delta_original_frames": -1.0,
+        "delta_output_frames": -0.5,
+        "bound_s": 0.016666666666666666,
+        "bound_output_frames": 1.0,
+        "within_bound": true
+      },
       "status": "PASS",
       "validator": {
         "exit_code": 0,
@@ -193,6 +248,8 @@
         "zero_steps": 0,
         "strictly_monotonic": true,
         "model": {
+          "timeline": "original",
+          "start_s": 0.0,
           "x0": 120.0,
           "x1": 520.0,
           "y0": 180.0,
@@ -204,6 +261,10 @@
           "intercept_px": 119.99579467385736,
           "max_abs_residual_px": 0.17285145910727806
         }
+      },
+      "original_time_check": {
+        "max_abs_residual_px": 0.17661096314515135,
+        "T_seconds": 4.991666666666666
       }
     }
   ]

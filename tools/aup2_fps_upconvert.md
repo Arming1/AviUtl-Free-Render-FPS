@@ -94,6 +94,51 @@ The shortened end can exceed 1/(2·Rt) because a 1-frame object is longer than i
 section of the sidecar reports the exact values. The project end moves by at most 1/(2·Rt), or 3/(2·Rt) when the last
 object is shortened.
 
+### Motion endpoints (measured, AviUtl2 v2.1.12)
+
+The table above bounds the object's frame range. It does not bound when a linear motion reaches its end. AviUtl
+interpolates the move from the object's first frame to its last frame. After retiming, the last frame is
+`e' = round_half_up((e+1)·k) − 1`, so the motion ends at `e'/Rt` instead of `e/Rp`. With `k = Rt/Rp` and
+`δ = e' − ((e+1)·k − 1)`, where `|δ| ≤ 1/2`:
+
+    (e'/Rt − e/Rp) × Rt = (k − 1) + δ        (in output frames)
+
+In seconds the end-time deviation is `e'/Rt − e/Rp = 1/Rp − 1/Rt + δ/Rt`, so
+
+    |end-time deviation| ≤ |1/Rp − 1/Rt| + half an output frame (1/(2·Rt))
+
+Here `Rp` is the source (project) rate and `Rt` the target rate. In output frames the bound is `|k − 1| + 1/2`.
+
+Measured on 2026-10-17 with the 1.1.0 Free FPS Export, using the retimed motion model
+(`experiments/free_fps_matrix/analyze.py`, default `--timeline retimed`; results in `experiments/free_fps_matrix/run_20261017/SUMMARY.md`):
+
+| Case | k | End deviation (output frames) | Motion residual (px) |
+|---|---|---:|---:|
+| 60 → 66 | 11/10 | +0.10 | 0.156 |
+| 72 → 60 | 5/6 | −0.17 | 0.146 |
+| 30 → 60000/1001 | 2000/1001 | +1.30 | 0.146 |
+| 66 → 24 | 4/11 | −0.64 | 0.156 |
+| 66 → 120 | 20/11 | +0.82 | 0.192 |
+| 120 → 60 | 1/2 | −0.50 | 0.146 |
+| 60 → 50 | 5/6 | −0.17 | 0.161 |
+| 72 → 59 | 59/72 | −0.18 | 0.188 |
+
+All eight cases pass the motion check (residual limit 1.0 px). The largest measured end deviation is
++21.65 ms (+1.30 output frames) for 30 → 60000/1001. Its bound is about 25.0 ms (1.5 output frames). For 66 → 24
+it is −26.5 ms (−0.64 output frames), with a bound of about 47 ms.
+
+An earlier run modelled the motion on the original project timeline. It reported 66 → 24 (2.18 px) and
+30 → 60000/1001 (1.80 px) as FAIL. That model ignored the endpoint shift above, so it is no longer used.
+
+Every output frame is rendered at its own output time; none is a copy.
+
+Not yet verified: cumulative drift over long durations, and audio-video sync. Both are being checked with host-free
+tests and a 30-minute real-footage run.
+
+In progress, not in the 1.1.0 build: a `--precise` mode (the plugin dialog will check it by default). For linear
+moves it re-samples the keyframe values from the original curve at the new times. The speed error is then zero
+apart from quantization. The end of the motion is extrapolated by at most about one output frame.
+
 ## Scene requirements
 
 - All `[scene.N]` sections must share one `video.rate`/`video.scale`, otherwise the tool refuses.

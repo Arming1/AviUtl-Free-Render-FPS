@@ -21,6 +21,23 @@
 - The AviUtl 1.x adapter supports official AviUtl 1.10 + ExEdit 0.92 only. Its
   sub-frame precision is 0.01 project frame, and the last output sample may be
   clamped to the final project frame.
-- The 1.1.0 AviUtl2 binary has not yet been validated inside AviUtl2 v2.1.12
-  (Free FPS Export) or v2.1.4 (built-in hook); the AviUtl 1.x package is still
-  1.0.1 and has not been re-validated. The measured matrices are from 1.0.0.
+- Free FPS Export (AviUtl2 v2.1.12, 1.1.0) was run in AviUtl2 on 2026-10-17 for
+  eight cases (60→66, 72→60, 30→60000/1001, 66→24, 66→120, 120→60, 60→50, 72→59).
+  Frame counts, video/audio durations, adjacent near-duplicate frames and motion
+  steps match the targets. The retimed motion check passes all eight, with
+  residuals of 0.146–0.192 px against a 1.0 px limit. Results are in
+  `experiments/free_fps_matrix/run_20261017/`.
+- Free FPS Export rounds each object's last frame to the new rate, so a linear
+  motion ends at `e'/Rt` instead of `e/Rp`. The end-time deviation is bounded by
+  `|1/Rp − 1/Rt| + half an output frame`. Measured: +21.65 ms (1.30 output frames)
+  for 30→60000/1001, bound about 25.0 ms; −26.5 ms (0.64 output frames) for 66→24,
+  bound about 47 ms. See `tools/aup2_fps_upconvert.md`, "Motion endpoints".
+- Long-duration cumulative drift and audio-video sync are not yet reported. They
+  are being checked with host-free tests and a 30-minute real-footage run.
+- A speed-error target of ≤ 0.01% needs the `--precise` mode, which is being
+  implemented and is not in the 1.1.0 build. It re-samples linear-move keyframe
+  values from the original curve at the new times (plugin dialog default: on).
+  Its end is extrapolated by at most about one output frame.
+- The built-in FreeFPS hook (v2.1.4) has not been validated with the 1.1.0 binary.
+  The AviUtl 1.x package is still 1.0.1 and has not been re-validated. The
+  measured AviUtl 1.x matrices are from 1.0.0.

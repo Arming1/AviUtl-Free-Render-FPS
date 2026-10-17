@@ -3,7 +3,8 @@
 
 Usage:
     python -I experiments/free_fps_matrix/analyze.py RUN_DIR [--label TEXT]
-        [--only ID[,ID...]] [--ffmpeg PATH] [--ffprobe PATH]
+        [--only ID[,ID...]] [--timeline retimed|original]
+        [--ffmpeg PATH] [--ffprobe PATH]
 
 RUN_DIR holds one MP4 per case, named <case_id>.mp4 (ids from cases.json).
 For each selected case the script runs:
@@ -11,6 +12,14 @@ For each selected case the script runs:
 1. tools/validate_freefps_output.py with --project-fps = --target-fps = the
    case target and --project-frames = the expected output frame count;
 2. a motion check of the moving object (see motion_check()).
+
+--timeline picks the motion model that decides PASS/FAIL:
+  retimed   (default) the project was retimed by tools/aup2_fps_upconvert.py
+            (Free FPS Export). Motion runs over the retimed frame range s', e'.
+  original  the source fixture's frame range is used unchanged. This is the
+            plugin Hook path (dry_run_simulated samples, not retimed exports).
+The original-time model is always computed as a diagnostic, together with the
+end-time deviation T' - T.
 
 Outputs: RUN_DIR/SUMMARY.md (Chinese), RUN_DIR/summary.json and raw per-case
 files under RUN_DIR/analysis/.
@@ -28,6 +37,7 @@ import math
 import re
 import subprocess
 import sys
+import types
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -41,11 +51,23 @@ except ImportError:  # pragma: no cover - environment problem
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 VALIDATOR = REPO / "tools" / "validate_freefps_output.py"
+RETIMING_TOOL = REPO / "tools" / "aup2_fps_upconvert.py"
 CASES_PATH = HERE / "cases.json"
 
 MOTION_TOL_PX = 1.0   # max |measured centroid x - model x(t)| allowed
 MASK_DELTA = 30       # object pixels: |Y - frame median luma| > MASK_DELTA
 STEP_EPS_PX = 0.05    # consecutive centroids closer than this are a zero step
+TIMELINE_MODES = ("retimed", "original")
+ENDPOINT_NOTE = "已知近似：直线移动终点对齐到重定时后的最后一帧，终点时间偏差 ≤ |1/源帧率 − 1/目标帧率| + 半个输出帧"
+TIMELINE_TITLE = {
+    "retimed": "重定时帧范围 (Free FPS Export)",
+    "original": "原工程帧范围 (插件 Hook 路径样本, 未重定时)",
+}
+TIMELINE_FORMULA = {
+    "retimed": ("起点 t_s = s'/目标帧率, T' = (e' - s')/目标帧率, s' = rhu(s·k), e' = rhu((e+1)·k) - 1, "
+                "k = 目标帧率/源帧率, rhu = 四舍五入向上 (与 tools/aup2_fps_upconvert.py 的 rescale_frames 相同)"),
+    "original": "起点 t_s = 0, T = (末帧 - 首帧)/源帧率",
+}
 EXIT_OK, EXIT_FAIL, EXIT_ERROR = 0, 1, 2
 
 
@@ -73,6 +95,18 @@ class Fixture:
     def motion_span(self) -> Fraction:
         # Time at which the trackbar reaches its end value (last keyframe frame).
         return Fraction(self.last_frame - self.first_frame) / self.rate
+
+
+@dataclass(frozen=True)
+class Timeline:
+    """Linear 直線移動 model: X reaches X_end at start + span seconds and holds there."""
+    name: str
+    start: Fraction  # seconds on the output timeline
+    span: Fraction   # seconds
+
+    @property
+    def end(self) -> Fraction:
+        return self.start + self.span
 
 
 def fstr(value: Fraction) -> str:
@@ -129,6 +163,44 @@ def check_case_consistency(case: dict, fixture: Fixture) -> None:
         raise InputError(f"{case['id']}: expected_duration mismatch")
 
 
+def load_retiming_tool():
+    """Load tools/aup2_fps_upconvert.py so the frame rule is the tool's own code.
+
+    The file is compiled from its bytes and run in a fresh module, so no
+    __pycache__ entry is written into tools/.
+    """
+    if not RETIMING_TOOL.is_file():
+        raise InputError(f"missing {RETIMING_TOOL}")
+    module = types.ModuleType("aup2_fps_upconvert")
+    module.__file__ = str(RETIMING_TOOL)
+    exec(compile(RETIMING_TOOL.read_bytes(), str(RETIMING_TOOL), "exec"), module.__dict__)
+    return module
+
+
+def original_timeline(fixture: Fixture) -> Timeline:
+    """Source project's own frame range: starts at t = 0, T = (last - first) / source rate."""
+    return Timeline("original", Fraction(0), fixture.motion_span)
+
+
+def retimed_timeline(fixture: Fixture, target: Fraction) -> tuple[Timeline, dict]:
+    """Motion over the frame range that tools/aup2_fps_upconvert.py writes for this object.
+
+    k = target / source rate. s', e' come from the tool's rescale_frames(), the same
+    function convert() uses for every object. start = s'/target, span = (e' - s')/target.
+    """
+    tool = load_retiming_tool()
+    k = target / fixture.rate
+    try:
+        frames, shortened = tool.rescale_frames([fixture.first_frame, fixture.last_frame], k, 0)
+    except tool.Refusal as exc:
+        raise InputError(f"{fixture.path.name}: retiming refused: {exc.reason}")
+    new_first, new_last = frames
+    if shortened or new_last <= new_first:
+        raise InputError(f"{fixture.path.name}: retimed object has no motion span ({new_first}..{new_last})")
+    timeline = Timeline("retimed", Fraction(new_first) / target, Fraction(new_last - new_first) / target)
+    return timeline, {"k": fstr(k), "first_frame": new_first, "last_frame": new_last}
+
+
 def probe_dimensions(ffprobe: str, path: Path) -> tuple[int, int]:
     proc = subprocess.run(
         [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
@@ -156,16 +228,11 @@ def decode_gray(ffmpeg: str, path: Path, width: int, height: int) -> np.ndarray:
     return np.frombuffer(proc.stdout, dtype=np.uint8).reshape(-1, height, width)
 
 
-def motion_check(frames: np.ndarray, fixture: Fixture, target: Fraction) -> tuple[dict, list[dict]]:
-    """Compare the moving object's per-frame centroid with the analytic motion.
+def object_centroids(frames: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-frame centroid (x, y) and pixel count of the moving object; NaN where no object pixel.
 
     Object mask per frame: |Y - median(Y)| > MASK_DELTA. Centroid is the mean
     pixel position in continuous coordinates (pixel index + 0.5).
-    Model (AviUtl centre convention, to be confirmed by the fit diagnostics):
-        x0 = W/2 + X_start,  x1 = W/2 + X_end,  y = H/2 + Y_start
-        x(t) = x0 + (x1 - x0) * min(t, T) / T,   t = n / target,  T = fixture.motion_span
-    Only frames with t <= T are used for monotonicity, zero-step and the
-    linear-fit diagnostics; frames after T are held at x1 by the model.
     """
     n = frames.shape[0]
     h, w = frames.shape[1], frames.shape[2]
@@ -182,16 +249,29 @@ def motion_check(frames: np.ndarray, fixture: Fixture, target: Fraction) -> tupl
             continue
         cx[i] = float(xx[mask].mean())
         cy[i] = float(yy[mask].mean())
+    return cx, cy, counts
 
-    if fixture.motion_span <= 0:
-        raise InputError("fixture motion span must be positive")
+
+def motion_check(cx: np.ndarray, cy: np.ndarray, counts: np.ndarray, fixture: Fixture,
+                 target: Fraction, timeline: Timeline) -> tuple[dict, list[dict]]:
+    """Compare the moving object's per-frame centroid with the linear model of `timeline`.
+
+    Model (AviUtl centre convention, to be confirmed by the fit diagnostics):
+        x0 = W/2 + X_start,  x1 = W/2 + X_end,  y = H/2 + Y_start
+        x(t) = x0 + (x1 - x0) * min(max(t - start, 0), span) / span,  t = n / target
+    Only frames with start <= t <= end are used for monotonicity, zero-step and the
+    linear-fit diagnostics; frames after the end are held at x1 by the model.
+    """
+    n = cx.shape[0]
     x0 = fixture.width / 2 + float(fixture.x_start)
     x1 = fixture.width / 2 + float(fixture.x_end)
     y0 = fixture.height / 2 + float(fixture.y_start)
-    span = fixture.motion_span
+    span = timeline.span
+    if span <= 0:
+        raise InputError("motion span must be positive")
     times = [Fraction(i) / target for i in range(n)]
-    model = np.array([x0 + (x1 - x0) * float(min(t, span) / span) for t in times])
-    in_motion = [i for i in range(n) if times[i] <= span]
+    model = np.array([x0 + (x1 - x0) * float(min(max(t - timeline.start, 0), span) / span) for t in times])
+    in_motion = [i for i in range(n) if timeline.start <= times[i] <= timeline.end]
     in_idx = np.array(in_motion, dtype=np.int64)
 
     resid = cx - model
@@ -227,7 +307,8 @@ def motion_check(frames: np.ndarray, fixture: Fixture, target: Fraction) -> tupl
         "reversals": reversals,
         "zero_steps": zero_steps,
         "strictly_monotonic": reversals == 0 and zero_steps == 0,
-        "model": {"x0": x0, "x1": x1, "y0": y0, "T_seconds": float(span), "slope_px_per_s": (x1 - x0) / float(span)},
+        "model": {"timeline": timeline.name, "start_s": float(timeline.start), "x0": x0, "x1": x1, "y0": y0,
+                  "T_seconds": float(span), "slope_px_per_s": (x1 - x0) / float(span)},
         "fit": {"slope_px_per_s": fit_slope, "intercept_px": fit_intercept, "max_abs_residual_px": fit_max_resid},
     }
     rows = []
@@ -235,7 +316,7 @@ def motion_check(frames: np.ndarray, fixture: Fixture, target: Fraction) -> tupl
         rows.append({
             "frame": i,
             "t_seconds": float(times[i]),
-            "in_motion": times[i] <= span,
+            "in_motion": timeline.start <= times[i] <= timeline.end,
             "centroid_x": "" if not math.isfinite(cx[i]) else round(cx[i], 4),
             "centroid_y": "" if not math.isfinite(cy[i]) else round(cy[i], 4),
             "object_pixels": int(counts[i]),
@@ -271,10 +352,19 @@ def run_validator(case: dict, video: Path, json_path: Path, ffmpeg: str | None, 
 
 
 def analyse_case(case: dict, run_dir: Path, analysis_dir: Path, ffmpeg: str, ffprobe: str,
-                 ffmpeg_override: str | None, ffprobe_override: str | None) -> dict:
+                 ffmpeg_override: str | None, ffprobe_override: str | None, timeline_mode: str) -> dict:
     fixture = parse_fixture(REPO / case["source_fixture"])
     check_case_consistency(case, fixture)
     target = Fraction(case["target_fps"])
+    retimed, retime_info = retimed_timeline(fixture, target)
+    original = original_timeline(fixture)
+    primary = retimed if timeline_mode == "retimed" else original
+    delta = retimed.span - original.span
+    # Theoretical bound on |T' - T|. With e' = rhu((e+1)k) - 1 and s' = rhu(s*k), the end term
+    # gives e'/Rt - e/Rp = (1/Rp - 1/Rt) + delta_e/Rt with |delta_e| <= 1/2; the start term adds
+    # -delta_s/Rt, which is 0 when s = 0 (all fixtures start at frame 0).
+    start_half = Fraction(1, 2) if fixture.first_frame != 0 else Fraction(0)
+    bound = abs(1 / fixture.rate - 1 / target) + (Fraction(1, 2) + start_half) / target
     video = run_dir / f"{case['id']}.mp4"
     entry = {
         "id": case["id"],
@@ -285,9 +375,24 @@ def analyse_case(case: dict, run_dir: Path, analysis_dir: Path, ffmpeg: str, ffp
         "expected_frames": case["expected_frames"],
         "expected_duration": case["expected_duration"],
         "video": str(video),
+        "timeline": timeline_mode,
+        "endpoint": {
+            "k": retime_info["k"],
+            "retimed_first_frame": retime_info["first_frame"],
+            "retimed_last_frame": retime_info["last_frame"],
+            "T_original_s": float(original.span),
+            "T_retimed_s": float(retimed.span),
+            "delta_s": float(delta),
+            "delta_original_frames": float(delta * fixture.rate),
+            "delta_output_frames": float(delta * target),
+            "bound_s": float(bound),
+            "bound_output_frames": float(bound * target),
+            "within_bound": abs(delta) <= bound,
+        },
         "status": "MISSING",
         "validator": None,
         "motion": None,
+        "original_time_check": None,
     }
     if not video.is_file():
         return entry
@@ -297,8 +402,17 @@ def analyse_case(case: dict, run_dir: Path, analysis_dir: Path, ffmpeg: str, ffp
         entry["motion"] = {"status": "FAIL", "detail": f"resolution {width}x{height} != fixture {fixture.width}x{fixture.height}"}
     else:
         frames = decode_gray(ffmpeg, video, width, height)
-        motion, rows = motion_check(frames, fixture, target)
+        cx, cy, counts = object_centroids(frames)
+        motion, rows = motion_check(cx, cy, counts, fixture, target, primary)
+        diagnostic, diagnostic_rows = motion_check(cx, cy, counts, fixture, target, original)
         entry["motion"] = motion
+        entry["original_time_check"] = {
+            "max_abs_residual_px": diagnostic["max_abs_residual_px"],
+            "T_seconds": diagnostic["model"]["T_seconds"],
+        }
+        for row, diag_row in zip(rows, diagnostic_rows):
+            row["model_x_original_time"] = diag_row["model_x"]
+            row["residual_original_time_px"] = diag_row["residual_px"]
         with (analysis_dir / f"{case['id']}.centroids.csv").open("w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
             writer.writeheader()
@@ -313,18 +427,21 @@ def analyse_case(case: dict, run_dir: Path, analysis_dir: Path, ffmpeg: str, ffp
 
 
 def render_summary(result: dict) -> str:
+    mode = result["timeline"]
     lines = [
         f"# 自由帧率导出验证汇总",
         "",
         f"- 标签: **{result['label']}**",
         f"- 运行目录: `{result['run_dir']}`",
+        f"- 运动时间模型 (`--timeline {mode}`): **{TIMELINE_TITLE[mode]}**",
         f"- 总体结论: **{result['overall']}**",
         "",
         "判定标准:",
         "",
         "- validator: `tools/validate_freefps_output.py`, `--project-fps` = `--target-fps` = 目标帧率, `--project-frames` = 期望输出帧数。",
         f"- 运动检查: 每帧用 luma 与中位数之差 > {MASK_DELTA} 的像素求质心 x。"
-        f"模型 x(t) = W/2 + X_start + (X_end - X_start)·min(t, T)/T, t = n / 目标帧率, T = (末帧 - 首帧) / 源帧率。"
+        f"模型 x(t) = W/2 + X_start + (X_end - X_start)·min(max(t - t_s, 0), T)/T, t = n / 目标帧率; "
+        f"{TIMELINE_FORMULA[mode]}。"
         f"残差上限 {MOTION_TOL_PX} px; 相邻帧 |Δx| < {STEP_EPS_PX} px 记为零步; 要求零反向、零零步、无缺失质心。",
         "",
         "| 用例 | 源 fixture | 目标 FPS | 期望帧 | 期望时长 (s) | 实际帧 | validator | 运动最大残差 (px) | 零步 | 反向 | 结论 |",
@@ -344,6 +461,23 @@ def render_summary(result: dict) -> str:
             f"{validator_text} | {resid_text} | {motion.get('zero_steps', '-')} | "
             f"{motion.get('reversals', '-')} | **{case['status']}** |"
         )
+    lines += ["", "## 终点时间偏差 (诊断)", "", f"{ENDPOINT_NOTE}。", "",
+              "偏差 = T' − T: T 为原工程时间 (末帧 − 首帧)/源帧率, T' 为重定时后 (e' − s')/目标帧率; "
+              "正值表示重定时后运动更长。理论上限 = |1/Rp − 1/Rt| + 1/(2·Rt) (Rp 源帧率, Rt 目标帧率; "
+              "起点为 0 时起点项为 0)。这是诊断项, 不影响 PASS 判定。"
+              "原工程时间模型残差按 `original` 模型单独计算, 不参与判定。", "",
+              "| 用例 | k | 重定时帧 s'..e' | T 原工程 (s) | T' 重定时 (s) | 偏差 T'−T (s) | 偏差 (输出帧) | 理论上限 (s) | 理论上限 (输出帧) | 在上限内 | 原工程时间模型最大残差 (px) |",
+              "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for case in result["cases"]:
+        ep = case["endpoint"]
+        diag = case.get("original_time_check") or {}
+        diag_resid = diag.get("max_abs_residual_px")
+        diag_text = f"{diag_resid:.4f}" if isinstance(diag_resid, float) and math.isfinite(diag_resid) else "-"
+        lines.append(
+            f"| {case['id']} | {ep['k']} | {ep['retimed_first_frame']}..{ep['retimed_last_frame']} | "
+            f"{ep['T_original_s']:.4f} | {ep['T_retimed_s']:.4f} | {ep['delta_s']:+.4f} | "
+            f"{ep['delta_output_frames']:+.2f} | {ep['bound_s']:.5f} | {ep['bound_output_frames']:.2f} | "
+            f"{'是' if ep['within_bound'] else '否'} | {diag_text} |")
     lines += ["", "## 细节", ""]
     for case in result["cases"]:
         lines.append(f"### {case['id']}")
@@ -376,8 +510,11 @@ def render_summary(result: dict) -> str:
     lines += [
         "## 假设与限制",
         "",
-        "- 运动模型假设 AviUtl 的直线移动在 [首帧, 末帧] 之间线性插值, 末值保持到之后。"
-        "T 由 fixture 的 frame 行推出, 不是名义 5 s (例如 frame=0,299 时 T = 299/60 s)。这一点需要宿主实测确认。",
+        "- 运动模型假设 AviUtl 的直线移动在 [起点, 起点 + T] 之间线性插值, 末值保持到之后。"
+        "`retimed` 模式下起点与 T' 由重定时后的帧范围 s', e' 推出 (规则与 tools/aup2_fps_upconvert.py 相同), "
+        "不是名义 5 s。这一点需要宿主实测确认。",
+        "- `original` 模式用原工程 frame= 行推出的 T = (末帧 - 首帧)/源帧率。它只适用于插件 Hook 路径样本 "
+        "(dry_run_simulated), 这些样本没有经过重定时导出。",
         "- x0/x1 取 W/2 + X 值 (AviUtl 画面中心约定), 通过残差与拟合截距检验。",
         "- 结论只覆盖 luma 像素导出的几何位置。不证明颜色、音频或编码器正确性。",
         "",
@@ -400,6 +537,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("run_dir", type=Path, help="directory holding <case_id>.mp4 files")
     parser.add_argument("--label", default="REAL", help="label written into SUMMARY.md and summary.json")
     parser.add_argument("--only", help="comma-separated case ids to check (default: all)")
+    parser.add_argument("--timeline", choices=TIMELINE_MODES, default="retimed",
+                        help="motion model for PASS/FAIL: retimed (Free FPS Export, default) or "
+                             "original (plugin Hook samples, not retimed)")
     parser.add_argument("--ffmpeg", type=Path, help="ffmpeg executable (default: PATH)")
     parser.add_argument("--ffprobe", type=Path, help="ffprobe executable (default: PATH)")
     args = parser.parse_args(argv)
@@ -418,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
         results = [
             analyse_case(by_id[cid], run_dir, analysis_dir, ffmpeg, ffprobe,
                          str(args.ffmpeg) if args.ffmpeg else None,
-                         str(args.ffprobe) if args.ffprobe else None)
+                         str(args.ffprobe) if args.ffprobe else None, args.timeline)
             for cid in selected
         ]
     except (InputError, OSError, json.JSONDecodeError, KeyError) as exc:
@@ -429,6 +569,7 @@ def main(argv: list[str] | None = None) -> int:
     result = {
         "label": args.label,
         "run_dir": str(run_dir),
+        "timeline": args.timeline,
         "overall": "PASS" if all_pass else "FAIL",
         "selected_cases": selected,
         "cases": results,

@@ -32,7 +32,17 @@ validation-tool updates.
 
 - Host-free tests (aup2 up-convert and the FreeRenderFPS scheduler, x64 and x86)
   pass.
-- The in-host FPS matrix on AviUtl2 v2.1.12 is pending.
+- In-host Free FPS Export matrix on AviUtl2 v2.1.12 (2026-10-17, eight cases:
+  60→66, 72→60, 30→60000/1001, 66→24, 66→120, 120→60, 60→50, 72→59). Frame
+  counts, video/audio durations, adjacent near-duplicate frames and motion steps
+  match the targets. The retimed motion check passes all eight, with residuals of
+  0.146–0.192 px against a 1.0 px limit. An earlier run modelled motion on the
+  original project timeline and reported 66→24 and 30→60000/1001 as FAIL; the
+  retimed model is the correct one for Free FPS Export. The largest motion end
+  deviation is 1.30 output frames (30→60000/1001, +21.65 ms), bounded by
+  |1/Rp − 1/Rt| + half an output frame. See
+  `tools/aup2_fps_upconvert.md`. Results: `experiments/free_fps_matrix/run_20261017/`.
+  Long-duration drift and audio-video sync are not yet reported.
 
 ## [1.0.1] — 2026-10-17
 

@@ -59,12 +59,39 @@ Outputs go to `experiments/free_fps_export/build/x64/` (git-ignored). The script
 
 Copy `build/x64/free_fps_export.aux2` into the AviUtl2 plugin folder yourself. The build never does this.
 
+## Measured in AviUtl2 v2.1.12 (2026-10-17)
+
+The 1.1.0 build was run from **Edit > Free FPS Export...** in AviUtl2 v2.1.12 for eight cases:
+60→66, 72→60, 30→60000/1001, 66→24, 66→120, 120→60, 60→50 and 72→59. Results are in
+`experiments/free_fps_matrix/run_20261017/` (`SUMMARY.md`, `summary.json`).
+
+- Frame counts match the targets. Video and audio durations match (`av_duration`). No adjacent
+  near-duplicate frames (`near_duplicates`). No zero-length motion steps and no reversals.
+- The retimed motion check (`experiments/free_fps_matrix/analyze.py`, default `--timeline retimed`) passes all
+  eight, with residuals of 0.146–0.192 px against a 1.0 px limit.
+- The end of a linear motion moves with the retimed frame range. The end deviation is bounded by
+  `|1/Rp − 1/Rt| + half an output frame`. Measured: +21.65 ms (1.30 output frames) for 30→60000/1001, bound
+  about 25.0 ms; −26.5 ms (0.64 output frames) for 66→24, bound about 47 ms. See
+  `tools/aup2_fps_upconvert.md`, "Motion endpoints". An earlier run that modelled motion on the original
+  timeline reported those two as FAIL; that model is no longer used.
+- Every output frame is rendered at its own time; none is a copy.
+- Not yet reported: long-duration cumulative drift and audio-video sync (host-free tests and a 30-minute
+  real-footage run are in progress).
+- A speed-error target of ≤ 0.01% needs the `--precise` mode, which is being implemented and is not in the 1.1.0
+  build. It re-samples linear-move keyframe values from the original curve at the new times (plugin dialog
+  default: on). Its end is extrapolated by at most about one output frame.
+
 ## Not verified without AviUtl2
 
-These need a run in AviUtl2, and the host-stub test cannot show them:
+The 2026-10-17 run of eight cases in AviUtl2 v2.1.12 covered the success path of the items below. All eight
+exports completed and produced the expected output. These items were exercised on success only, not on failure:
 - the menu item, the dialog layout, the Browse dialog and the prompt box;
+- the output file check (exists, not empty, written after the start);
+- the event order of `CHANGE_EDIT_STATE` on success.
+
+These still need a run in AviUtl2, and the host-stub test cannot show them:
 - whether `save_project_file()` leaves the open project's path unchanged, and whether the save callback runs for it;
-- the event order of `CHANGE_EDIT_STATE` and the project load callback in the real host;
+- the event order of the project load callback in the real host;
 - whether the host still holds the retimed file when the temp folder is deleted (a failed delete is logged and the
   file is left behind);
 - a run that times out with the host still busy: the original project cannot be reopened until the host returns
