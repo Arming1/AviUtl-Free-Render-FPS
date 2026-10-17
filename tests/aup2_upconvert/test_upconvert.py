@@ -45,6 +45,19 @@ def write_bytes(path, data):
         fh.write(data)
 
 
+def write_with_eol(path, lf_text, eol):
+    """Write LF-normalised text with `eol` ("\n" or "\r\n") as the line ending of every line."""
+    write_bytes(path, lf_text.replace("\n", eol).encode("utf-8"))
+
+
+def eol_style(data):
+    """'crlf' when every newline is CRLF, 'lf' when none is, 'mixed' otherwise."""
+    crlf = data.count(b"\r\n")
+    if crlf == 0:
+        return "lf"
+    return "crlf" if crlf == data.count(b"\n") else "mixed"
+
+
 def run_tool(*args):
     cmd = [sys.executable, "-I", TOOL] + list(args)
     proc = subprocess.run(cmd, capture_output=True)
@@ -76,7 +89,7 @@ def fixture_variant(name, edit):
     """Write an edited copy of the 30 FPS fixture into a new case dir. Returns (dir, src_path)."""
     d = case_dir(name)
     src = os.path.join(d, "src.aup2")
-    write_bytes(src, edit(read_bytes(FIX_30).decode("utf-8")).encode("utf-8"))
+    write_bytes(src, edit(read_text_lf(FIX_30)).encode("utf-8"))
     return d, src
 
 
@@ -88,19 +101,22 @@ def insert_effect(name, extra_line):
 
 
 def line_number_of(path, needle):
-    lines = read_bytes(path).decode("utf-8").split("\n")
+    lines = read_text_lf(path).split("\n")
     hits = [i + 1 for i, line in enumerate(lines) if needle in line]
     assert len(hits) == 1, "expected one line with %r, got %r" % (needle, hits)
     return hits[0]
 
 
 def line_changes(old_bytes, new_bytes):
-    """Return {line_no: (old, new)} for lines that differ; asserts structure is identical."""
+    """Return {line_no: (old, new)} for lines whose text differs (CR removed); asserts the line count is the same
+    and every line keeps its own line ending (LF stays LF, CRLF stays CRLF)."""
     old_lines = old_bytes.split(b"\n")
     new_lines = new_bytes.split(b"\n")
     assert len(old_lines) == len(new_lines), "line count changed: %d -> %d" % (len(old_lines), len(new_lines))
     changes = {}
     for i, (a, b) in enumerate(zip(old_lines, new_lines), 1):
+        assert a.endswith(b"\r") == b.endswith(b"\r"), "line %d: line ending changed: %r -> %r" % (i, a, b)
+        a, b = a.rstrip(b"\r"), b.rstrip(b"\r")
         if a != b:
             changes[i] = (a.decode("utf-8"), b.decode("utf-8"))
     return changes
@@ -126,20 +142,24 @@ def expect_file_line(out_path):
 # ---------------------------------------------------------------------------
 
 def test_30fps_x2_changes_only_expected_lines():
-    d = case_dir("t30")
-    out = os.path.join(d, "out30.aup2")
-    code, _, err = convert(FIX_30, out, 2)
-    assert code == 0, "exit %d: %s" % (code, err)
-    changes = line_changes(read_bytes(FIX_30), read_bytes(out))
-    expected = {
-        3: ("file=D:\\AviUtl Free Render FPS\\experiments\\66_to_60_validation\\freerenderfps_30fps.aup2",
-            expect_file_line(out)),
-        11: ("video.rate=30", "video.rate=60"),
-        36: ("frame=0,149", "frame=0,299"),
-    }
-    assert changes == expected, "unexpected changed lines: %r" % changes
-    assert b"\r" not in read_bytes(out), "LF input must stay LF"
-    assert read_bytes(out).endswith(b"\n"), "trailing newline must be preserved"
+    # Both newline styles: the git index holds LF, a Windows checkout with core.autocrlf holds CRLF.
+    for eol, style in (("\n", "lf"), ("\r\n", "crlf")):
+        d = case_dir("t30_" + style)
+        src = os.path.join(d, "in.aup2")
+        write_with_eol(src, read_text_lf(FIX_30), eol)
+        out = os.path.join(d, "out30.aup2")
+        code, _, err = convert(src, out, 2)
+        assert code == 0, "%s: exit %d: %s" % (style, code, err)
+        changes = line_changes(read_bytes(src), read_bytes(out))
+        expected = {
+            3: ("file=D:\\AviUtl Free Render FPS\\experiments\\66_to_60_validation\\freerenderfps_30fps.aup2",
+                expect_file_line(out)),
+            11: ("video.rate=30", "video.rate=60"),
+            36: ("frame=0,149", "frame=0,299"),
+        }
+        assert changes == expected, "%s: unexpected changed lines: %r" % (style, changes)
+        assert eol_style(read_bytes(out)) == style, "%s: output must keep the input line endings" % style
+        assert read_bytes(out).endswith(eol.encode("ascii")), "trailing newline must be preserved"
 
 
 def test_2112_file_with_rate_reset_to_30_x2():
@@ -148,9 +168,9 @@ def test_2112_file_with_rate_reset_to_30_x2():
     as_30 = os.path.join(d, "from_30fps.aup2")
     shutil.copyfile(FIX_30, as_30)
     as_2112 = os.path.join(d, "from_2112.aup2")
-    original = read_bytes(FIX_2112)
-    assert b"video.rate=60\r\n" in original, "fixture layout changed"
-    write_bytes(as_2112, original.replace(b"video.rate=60\r\n", b"video.rate=30\r\n", 1))
+    original = read_text_lf(FIX_2112)
+    assert "video.rate=60\n" in original, "fixture layout changed"
+    write_with_eol(as_2112, original.replace("video.rate=60\n", "video.rate=30\n", 1), "\r\n")  # AviUtl2 writes CRLF
 
     out_30 = os.path.join(d, "out_30.aup2")
     out_2112 = os.path.join(d, "out_2112.aup2")
@@ -160,7 +180,7 @@ def test_2112_file_with_rate_reset_to_30_x2():
     assert code == 0, "2.1.12 copy: exit %d: %s" % (code, err)
 
     for out in (out_30, out_2112):
-        text = read_bytes(out).decode("utf-8")
+        text = read_text_lf(out)
         assert "video.rate=60" in text, "video.rate not 60 in %s" % out
         assert "frame=0,299" in text, "frame not 0,299 in %s" % out
 
@@ -198,7 +218,7 @@ def test_66_and_120_fixtures_x2():
 
 def make_intermediate_fixture(path, frame_line, base=FIX_30):
     """Fixture with a 4-point object; every 2-value trackbar gets 4 values."""
-    lines = read_bytes(base).decode("utf-8").split("\n")
+    lines = read_text_lf(base).split("\n")
     out = []
     for line in lines:
         if line.startswith("frame=0,"):
@@ -261,7 +281,7 @@ def test_real_world_read_only_check():
 def test_refuse_unknown_scene_frame_key():
     d = case_dir("ref_scene_key")
     src = os.path.join(d, "src.aup2")
-    text = read_bytes(FIX_30).decode("utf-8").replace("video.rate=30\n", "video.rate=30\nkeyframe_hint=1\n", 1)
+    text = read_text_lf(FIX_30).replace("video.rate=30\n", "video.rate=30\nkeyframe_hint=1\n", 1)
     write_bytes(src, text.encode("utf-8"))
     out = os.path.join(d, "out.aup2")
     code, _, err = convert(src, out, 2)
@@ -273,7 +293,7 @@ def test_refuse_unknown_scene_frame_key():
 def test_refuse_script_effect():
     d = case_dir("ref_script")
     src = os.path.join(d, "src.aup2")
-    text = read_bytes(FIX_30).decode("utf-8").replace("Y=0.00,0.00,直線移動,0", "Y=obj.frame*2", 1)
+    text = read_text_lf(FIX_30).replace("Y=0.00,0.00,直線移動,0", "Y=obj.frame*2", 1)
     write_bytes(src, text.encode("utf-8"))
     out = os.path.join(d, "out.aup2")
     code, _, err = convert(src, out, 2)
@@ -285,7 +305,7 @@ def test_refuse_script_effect():
 def test_refuse_counter_effect():
     d = case_dir("ref_counter")
     src = os.path.join(d, "src.aup2")
-    text = read_bytes(FIX_30).decode("utf-8").replace("effect.name=標準描画", "effect.name=カウンター", 1)
+    text = read_text_lf(FIX_30).replace("effect.name=標準描画", "effect.name=カウンター", 1)
     write_bytes(src, text.encode("utf-8"))
     out = os.path.join(d, "out.aup2")
     code, _, err = convert(src, out, 2)
@@ -297,7 +317,7 @@ def test_refuse_counter_effect():
 def test_refuse_koma_ochi_flag():
     d = case_dir("ref_koma")
     src = os.path.join(d, "src.aup2")
-    text = read_bytes(FIX_30).decode("utf-8").replace("Group=1\n", "Group=1\nコマ落ち=1\n", 1)
+    text = read_text_lf(FIX_30).replace("Group=1\n", "Group=1\nコマ落ち=1\n", 1)
     write_bytes(src, text.encode("utf-8"))
     out = os.path.join(d, "out.aup2")
     code, _, err = convert(src, out, 2)
@@ -309,7 +329,7 @@ def test_refuse_koma_ochi_flag():
 def test_refuse_unknown_trackbar_mode_and_pipe_payload():
     d = case_dir("ref_track")
     src = os.path.join(d, "mode.aup2")
-    text = read_bytes(FIX_30).decode("utf-8").replace("X=-200.00,200.00,直線移動,0", "X=-200.00,200.00,謎移動,0", 1)
+    text = read_text_lf(FIX_30).replace("X=-200.00,200.00,直線移動,0", "X=-200.00,200.00,謎移動,0", 1)
     write_bytes(src, text.encode("utf-8"))
     out = os.path.join(d, "mode_out.aup2")
     code, _, err = convert(src, out, 2)
@@ -317,7 +337,7 @@ def test_refuse_unknown_trackbar_mode_and_pipe_payload():
     assert_no_output(out)
 
     src = os.path.join(d, "pipe.aup2")
-    text = read_bytes(FIX_30).decode("utf-8").replace("X=-200.00,200.00,直線移動,0", "X=-200.00,200.00,直線移動,0|27", 1)
+    text = read_text_lf(FIX_30).replace("X=-200.00,200.00,直線移動,0", "X=-200.00,200.00,直線移動,0|27", 1)
     write_bytes(src, text.encode("utf-8"))
     out = os.path.join(d, "pipe_out.aup2")
     code, _, err = convert(src, out, 2)
@@ -593,7 +613,7 @@ def shortened_lines(notes):
 def synthetic_project(name, base, rate, objects):
     """Write a project into a new case dir: the base fixture header with video.rate=rate, then one minimal
     object section per (layer, start, end). Returns (dir, src_path)."""
-    text = read_bytes(base).decode("utf-8")
+    text = read_text_lf(base)
     header, marker, _ = text.partition("[0]\n")
     assert marker, "fixture layout changed"
     header = re.sub(r"^video\.rate=\d+$", "video.rate=%d" % rate, header, flags=re.M)
@@ -634,8 +654,8 @@ def check_retime_properties(src_path, out_path, report, label):
     Returns (max start error, max end error) in seconds as Fractions. A 1-frame object that was shortened
     (listed in the notes) may have an end error up to 3/(2*Rt); every other boundary is within 1/(2*Rt).
     """
-    src_text = read_bytes(src_path).decode("utf-8")
-    out_text = read_bytes(out_path).decode("utf-8")
+    src_text = read_text_lf(src_path)
+    out_text = read_text_lf(out_path)
     rate_src, rate_dst = parse_rate(src_text), parse_rate(out_text)
     half = Fraction(1, 2) / rate_dst
     src_objs, out_objs = parse_objects(src_text), parse_objects(out_text)
@@ -700,7 +720,7 @@ def test_target_fps_synthetic_60_to_66_and_72_to_60():
     out = os.path.join(d, "out.aup2")
     code, _, err = convert_target(src, out, "66")
     assert code == 0, "60->66: exit %d: %s" % (code, err)
-    text = read_bytes(out).decode("utf-8")
+    text = read_text_lf(out)
     objs = parse_objects(text)
     assert objs[0]["frames"] == [0, 65], objs
     assert objs[1]["frames"] == [66, 131], objs
@@ -710,19 +730,19 @@ def test_target_fps_synthetic_60_to_66_and_72_to_60():
     out = os.path.join(d, "out.aup2")
     code, _, err = convert_target(src, out, "60")
     assert code == 0, "72->60: exit %d: %s" % (code, err)
-    objs = parse_objects(read_bytes(out).decode("utf-8"))
+    objs = parse_objects(read_text_lf(out))
     assert objs[0]["frames"] == [0, 59], objs
 
 
 def test_target_fps_shortens_one_frame_object_and_notes_it():
     d = case_dir("tfps_short_120")
     src = os.path.join(d, "src120.aup2")
-    write_bytes(src, read_bytes(FIX_120).decode("utf-8").replace("frame=0,599", "frame=3,3", 1).encode("utf-8"))
+    write_bytes(src, read_text_lf(FIX_120).replace("frame=0,599", "frame=3,3", 1).encode("utf-8"))
     out = os.path.join(d, "out24.aup2")
     code, _, err = convert_target(src, out, "24")
     assert code == 0, "exit %d: %s" % (code, err)
     line = line_number_of(src, "frame=3,3")
-    assert parse_objects(read_bytes(out).decode("utf-8"))[0]["frames"] == [1, 1]
+    assert parse_objects(read_text_lf(out))[0]["frames"] == [1, 1]
     notes = read_report(out)["notes"]
     assert notes == ["object at line %d shortened to 1 frame" % line], notes
     assert read_report(out)["timing"]["objects"][0]["shortened"] is True
@@ -769,14 +789,14 @@ def test_target_fps_rejections():
 
 
 def test_target_fps_inserts_missing_video_scale():
-    text = read_bytes(FIX_30).decode("utf-8").replace("video.scale=1\n", "", 1)
+    text = read_text_lf(FIX_30).replace("video.scale=1\n", "", 1)
     d = case_dir("tfps_noscale")
     src = os.path.join(d, "noscale.aup2")
     write_bytes(src, text.encode("utf-8"))
     out = os.path.join(d, "out.aup2")
     code, _, err = convert_target(src, out, "60000/1001")
     assert code == 0, "exit %d: %s" % (code, err)
-    out_text = read_bytes(out).decode("utf-8")
+    out_text = read_text_lf(out)
     assert "video.rate=60000\nvideo.scale=1001\n" in out_text, out_text[:400]
     assert parse_rate(out_text) == Fraction(60000, 1001)
     assert any("has no video.scale" in n for n in read_report(out)["notes"]), read_report(out)["notes"]
@@ -825,7 +845,7 @@ def test_target_fps_same_layer_in_two_scenes_is_not_grouped():
     out = os.path.join(d, "out.aup2")
     code, _, err = convert_target(src, out, "66")
     assert code == 0 and "REFUSED" not in err, "exit %d: %s" % (code, err)
-    text = read_bytes(out).decode("utf-8")
+    text = read_text_lf(out)
     objs = parse_objects(text)
     assert objs[0]["frames"] == [0, 65] and objs[1]["frames"] == [0, 65], objs
     assert read_report(out)["notes"] == [], read_report(out)["notes"]
@@ -838,7 +858,7 @@ def test_target_fps_touching_across_scenes_is_not_checked():
     out = os.path.join(d, "out.aup2")
     code, _, err = convert_target(src, out, "24")
     assert code == 0, "exit %d: %s" % (code, err)
-    objs = parse_objects(read_bytes(out).decode("utf-8"))
+    objs = parse_objects(read_text_lf(out))
     assert objs[0]["frames"] == [0, 0] and objs[1]["frames"] == [0, 0], objs
     notes = read_report(out)["notes"]
     assert sorted(notes) == sorted(["object at line %d shortened to 1 frame" % line
@@ -875,12 +895,325 @@ def test_real_world_target_fps_66_and_50():
         kinds = classify_changed_lines(old, changes)
         assert set(kinds) <= set(KIND_BY_SECTION_KEY.values()), kinds
         assert kinds.get("project file=") == 1, kinds
-        assert parse_rate(read_bytes(out).decode("utf-8")) == Fraction(target)
+        assert parse_rate(read_text_lf(out)) == Fraction(target)
         max_start, max_end = check_retime_properties(REAL_WORLD, out, report, "real->%s" % target)
         print("  INFO real-world -> %s: %d changed lines, kinds %s" % (target, len(changes), kinds))
         print("  INFO real-world -> %s: max start %.4f ms, max end %.4f ms (report: %s / %s)" % (
             target, float(max_start) * 1000, float(max_end) * 1000,
             report["timing"]["max_start_error_s"], report["timing"]["max_end_error_s"]))
+
+
+# ---------------------------------------------------------------------------
+# --precise: trackbar values resampled from the exact original curve
+# ---------------------------------------------------------------------------
+
+RE_TRACK_LINE = re.compile(r"^-?\d+(?:\.\d+)?(?:,-?\d+(?:\.\d+)?)+,[^,]+,[^,]*$")
+RE_ANY_SECTION = re.compile(r"^\[(\d+)(?:\.\d+)?\]$")
+PRECISE_TARGETS = ("66", "24", "60000/1001", "50", "59", "120")
+# Multi-point objects whose X keyframes lie on one straight line (no kinks): (name, base, frames, X values).
+COLLINEAR_OBJECTS = (
+    ("syn30", FIX_30, [0, 30, 90, 149], ["-200.00", "-188.00", "-164.00", "-140.40"]),
+    ("syn66", FIX_66, [0, 50, 200, 329], ["-200.00", "-180.00", "-120.00", "-68.40"]),
+    ("syn120", FIX_120, [0, 100, 300, 599], ["-200.00", "-160.00", "-80.00", "39.60"]),
+)
+# Tiny slack on top of the quantization bound (the checks themselves are exact rationals).
+TOLERANCE = Fraction(1, 10 ** 9)
+
+
+def read_text_lf(path):
+    """Fixture text with CRLF turned into LF, so the tests can match whole LF-terminated lines."""
+    return read_bytes(path).decode("utf-8").replace("\r\n", "\n")
+
+
+def without_file_line(data):
+    """Bytes with the [project] file= line removed (it holds the run's own output path)."""
+    return b"\n".join(line for line in data.split(b"\n") if not line.startswith(b"file="))
+
+
+def tracks_by_object(text):
+    """{obj_no: {key: [value texts..., mode, param]}} for the trackbar lines of each object and its effects."""
+    found = {}
+    section = None
+    for raw in text.split("\n"):
+        line = raw.rstrip("\r")
+        if line.startswith("[") and line.endswith("]"):
+            match = RE_ANY_SECTION.match(line)
+            section = int(match.group(1)) if match else None
+            continue
+        if section is None or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if RE_TRACK_LINE.match(value):
+            found.setdefault(section, {})[key] = value.split(",")
+    return found
+
+
+def multi_point_fixture(name, base, frames, x_values):
+    """Copy of `base` where object 0 has one keyframe per entry of `frames`. X takes x_values; Y and Z keep
+    their constant value at every keyframe. Returns (dir, src_path)."""
+    out = []
+    for line in read_text_lf(base).split("\n"):
+        if line.startswith("frame=0,"):
+            line = "frame=" + ",".join(str(f) for f in frames)
+        elif line[:2] in ("X=", "Y=", "Z=") and line.endswith(",直線移動,0"):
+            key = line[0]
+            values = x_values if key == "X" else [line.split("=", 1)[1].split(",")[0]] * len(frames)
+            line = "%s=%s,直線移動,0" % (key, ",".join(values))
+        out.append(line)
+    d = case_dir(name)
+    src = os.path.join(d, "multi.aup2")
+    write_bytes(src, "\n".join(out).encode("utf-8"))
+    return d, src
+
+
+def original_value(frames, values, t):
+    """Original X curve: linear on each segment, held at the last value after the last keyframe."""
+    if t > frames[-1]:
+        return values[-1]
+    i = 0
+    while i < len(frames) - 2 and t > frames[i + 1]:
+        i += 1
+    return values[i] + (values[i + 1] - values[i]) * (t - frames[i]) / (frames[i + 1] - frames[i])
+
+
+def original_slope(frames, values, t):
+    i = 0
+    while i < len(frames) - 2 and t > frames[i + 1]:
+        i += 1
+    return Fraction(values[i + 1] - values[i], frames[i + 1] - frames[i])
+
+
+def new_value_at(frames, values, n):
+    """Value at output frame n on the straight lines between the new keyframes."""
+    for j in range(len(frames) - 1):
+        if frames[j] < frames[j + 1] and frames[j] <= n <= frames[j + 1]:
+            return values[j] + (values[j + 1] - values[j]) * Fraction(n - frames[j], frames[j + 1] - frames[j])
+    raise AssertionError("output frame %d is not covered by the new keyframes" % n)
+
+
+def precise_property_check(src, out, label, extra=0):
+    """Compare the precise output with the original curve at t = n / k for every output frame n.
+
+    Returns (max error for t <= last keyframe, max deviation for t > last keyframe, max relative speed error,
+    max value-change error per segment, bound).
+    """
+    src_text = read_text_lf(src)
+    out_text = read_text_lf(out)
+    rate_src, rate_dst = parse_rate(src_text), parse_rate(out_text)
+    k = rate_dst / rate_src
+    frames = parse_objects(src_text)[0]["frames"]
+    src_parts = tracks_by_object(src_text)[0]["X"]
+    values = [Fraction(x) for x in src_parts[:-2]]
+    places = max(len(x.partition(".")[2]) for x in src_parts[:-2]) + extra
+    new_frames = parse_objects(out_text)[0]["frames"]
+    new_values = [Fraction(x) for x in tracks_by_object(out_text)[0]["X"][:-2]]
+    assert len(new_frames) == len(new_values) == len(frames), "%s: keyframe count changed" % label
+
+    bound = Fraction(1, 2) * Fraction(1, 10 ** places)
+    max_in = max_out = max_seg = Fraction(0)
+    for n in range(new_frames[-1] + 1):
+        t = Fraction(n) / k
+        error = abs(new_value_at(new_frames, new_values, n) - original_value(frames, values, t))
+        if t <= frames[-1]:
+            max_in = max(max_in, error)
+        else:
+            max_out = max(max_out, error)
+    assert max_in <= bound + TOLERANCE, "%s: error %s inside the keyframe range exceeds %s" % (
+        label, float(max_in), float(bound))
+
+    max_rel = Fraction(0)
+    for j in range(len(new_frames) - 1):
+        if new_frames[j] == new_frames[j + 1]:
+            continue
+        t0, t1 = Fraction(new_frames[j]) / k, Fraction(new_frames[j + 1]) / k
+        mid = (t0 + t1) / 2
+        if mid > frames[-1]:
+            continue  # the original is held flat here, so its speed is not compared
+        orig = original_slope(frames, values, mid)
+        assert orig != 0, "%s: test object must move" % label
+        new_slope = (new_values[j + 1] - new_values[j]) / (t1 - t0)
+        max_rel = max(max_rel, abs(new_slope - orig) / abs(orig))
+        # Value change over the segment versus the original line: differs only by the two endpoint errors.
+        max_seg = max(max_seg, abs((new_values[j + 1] - new_values[j]) - orig * (t1 - t0)))
+    return max_in, max_out, max_rel, max_seg, bound
+
+
+def test_precise_worked_examples_end_values():
+    d = case_dir("precise_examples")
+    out = os.path.join(d, "ntsc.aup2")
+    code, _, err = convert_target(FIX_30, out, "60000/1001", extra=["--precise"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    text = read_text_lf(out)
+    assert parse_objects(text)[0]["frames"] == [0, 299], text[:400]
+    assert "X=-200.00,201.74,直線移動,0" in text, "30 -> 60000/1001: end value should be 201.74"
+    precise = read_report(out)["precise"]
+    assert precise["applied"] == 1 and precise["skipped"] == [], precise
+    assert precise["tracks"][0]["end_extrapolation"] == "1.740000", precise["tracks"]
+    assert read_report(out)["notes"] == [], read_report(out)["notes"]
+
+    out = os.path.join(d, "t24.aup2")
+    code, _, err = convert_target(FIX_66, out, "24", extra=["--precise"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    text = read_text_lf(out)
+    assert parse_objects(text)[0]["frames"] == [0, 119], text[:400]
+    assert "X=-200.00,197.87,直線移動,0" in text, "66 -> 24: end value should be 197.87"
+    assert read_report(out)["precise"]["tracks"][0]["end_extrapolation"] == "-2.130000"
+
+
+def test_precise_property_values_and_speed():
+    sources = [("fix30", FIX_30), ("fix66", FIX_66), ("fix120", FIX_120)]
+    for name, base, frames, x_values in COLLINEAR_OBJECTS:
+        _, src = multi_point_fixture(name + "_src", base, frames, x_values)
+        sources.append((name, src))
+    d = case_dir("precise_prop")
+    worst_in = worst_out = worst_rel = worst_seg = Fraction(0)
+    bound = None
+    for label, src in sources:
+        for target in PRECISE_TARGETS:
+            name = "%s_%s" % (label, target.replace("/", "_"))
+            out = os.path.join(d, name + ".aup2")
+            code, _, err = convert_target(src, out, target, extra=["--precise"])
+            assert code == 0, "%s -> %s: exit %d: %s" % (label, target, code, err)
+            precise = read_report(out)["precise"]
+            assert precise["applied"] == 1 and precise["skipped"] == [], "%s -> %s: %r" % (label, target, precise)
+            max_in, max_out, max_rel, max_seg, bound = precise_property_check(src, out, "%s -> %s" % (label, target))
+            # Every segment's value change may differ from the original line only by its two endpoint errors.
+            assert max_seg <= 2 * bound + TOLERANCE, "%s -> %s: segment error %s above 2 x %s" % (
+                label, target, float(max_seg), float(bound))
+            worst_in, worst_out = max(worst_in, max_in), max(worst_out, max_out)
+            worst_rel, worst_seg = max(worst_rel, max_rel), max(worst_seg, max_seg)
+            print("  INFO %s -> %s: in-range error %.6f, beyond-end deviation %.6f, speed error %.6f%%" % (
+                label, target, float(max_in), float(max_out), float(max_rel) * 100))
+    print("  INFO worst over all: in-range error %.6f (bound %s), beyond-end deviation %.6f" % (
+        float(worst_in), float(bound), float(worst_out)))
+    print("  INFO worst segment value error %.6f (2 x bound %s)" % (float(worst_seg), float(2 * bound)))
+    print("  INFO worst speed error %.6f%%; margin to the 0.01%% target: %.6f%%" % (
+        float(worst_rel) * 100, float((Fraction(1, 10000) - worst_rel) * 100)))
+
+
+def test_precise_skips_ineligible_objects_and_ignores_playback_range():
+    d = case_dir("precise_skip")
+    for label, old, new, what in (
+            ("param", "X=-200.00,200.00,直線移動,0", "X=-200.00,200.00,直線移動,1", "parameter 1"),
+            ("mode", "X=-200.00,200.00,直線移動,0", "X=-200.00,200.00,補間移動,0", "mode 補間移動")):
+        src = os.path.join(d, label + ".aup2")
+        write_bytes(src, read_text_lf(FIX_30).replace(old, new, 1).encode("utf-8"))
+        line_x = line_number_of(src, new)
+        out_precise = os.path.join(d, label + "_precise.aup2")
+        out_plain = os.path.join(d, label + "_plain.aup2")
+        code, _, err = convert_target(src, out_precise, "60000/1001", extra=["--precise"])
+        assert code == 0, "%s: exit %d: %s" % (label, code, err)
+        code, _, err = convert_target(src, out_plain, "60000/1001")
+        assert code == 0, "%s plain: exit %d: %s" % (label, code, err)
+        precise = read_report(out_precise)["precise"]
+        assert precise["applied"] == 0, precise
+        assert len(precise["skipped"]) == 1 and precise["skipped"][0]["line"] == 36, precise["skipped"]
+        reason = precise["skipped"][0]["reason"]
+        assert "line %d" % line_x in reason and what in reason, reason
+        # The file= line holds each run's own output path, so it is compared separately.
+        assert without_file_line(read_bytes(out_precise)) == without_file_line(read_bytes(out_plain)), \
+            "%s: skipped object must keep the plain output" % label
+
+    src = os.path.join(d, "range_const.aup2")
+    text = read_text_lf(FIX_30).replace("Y=0.00,0.00,直線移動,0", "Y=0.00,0.00,再生範囲,0", 1)
+    text = text.replace("Z=0.00,0.00,直線移動,0", "Z=5.50,5.50,補間移動,0", 1)
+    write_bytes(src, text.encode("utf-8"))
+    out = os.path.join(d, "range_const_out.aup2")
+    code, _, err = convert_target(src, out, "60000/1001", extra=["--precise"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    out_text = read_text_lf(out)
+    precise = read_report(out)["precise"]
+    assert precise["applied"] == 1 and precise["skipped"] == [], precise
+    assert "X=-200.00,201.74,直線移動,0" in out_text, "X must be resampled"
+    assert "Y=0.00,0.00,再生範囲,0" in out_text, "再生範囲 must be kept as it is"
+    assert "Z=5.50,5.50,補間移動,0" in out_text, "constant track must pass unchanged"
+
+
+def test_precise_extra_decimals_2_meets_speed_target_on_short_segments():
+    name, base, frames, x_values = COLLINEAR_OBJECTS[0]
+    d, src = multi_point_fixture(name + "_extra", base, frames, x_values)
+    out = os.path.join(d, "extra2.aup2")
+    code, _, err = convert_target(src, out, "60000/1001", extra=["--precise", "--precise-extra-decimals", "2"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    text = read_text_lf(out)
+    assert read_report(out)["precise"]["extra_decimals"] == 2, read_report(out)["precise"]
+    for value in tracks_by_object(text)[0]["X"][:-2]:
+        assert len(value.partition(".")[2]) == 4, "X values must have d + 2 = 4 decimals: %r" % value
+    max_in, max_out, max_rel, max_seg, bound = precise_property_check(src, out, "syn30 -> 60000/1001 extra 2", extra=2)
+    assert max_seg <= 2 * bound + TOLERANCE, "segment error %s above 2 x %s" % (float(max_seg), float(bound))
+    assert max_rel <= Fraction(1, 10000), "speed error %.6f%% above 0.01 %%" % (float(max_rel) * 100)
+    print("  INFO syn30 -> 60000/1001 with --precise-extra-decimals 2: in-range error %.6f (bound %s), "
+          "speed error %.6f%%" % (float(max_in), float(bound), float(max_rel) * 100))
+
+
+def test_precise_extra_decimals_0_is_the_default():
+    name, base, frames, x_values = COLLINEAR_OBJECTS[0]
+    d, src = multi_point_fixture(name + "_extra0", base, frames, x_values)
+    out_default = os.path.join(d, "default.aup2")
+    out_zero = os.path.join(d, "zero.aup2")
+    code, _, err = convert_target(src, out_default, "60000/1001", extra=["--precise"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    code, _, err = convert_target(src, out_zero, "60000/1001",
+                                  extra=["--precise", "--precise-extra-decimals", "0"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert without_file_line(read_bytes(out_default)) == without_file_line(read_bytes(out_zero)), \
+        "N=0 output must equal the default output"
+    assert read_report(out_default)["precise"] == read_report(out_zero)["precise"]
+    assert "extra_decimals" not in read_report(out_zero)["precise"], read_report(out_zero)["precise"]
+
+
+def test_precise_extra_decimals_refusals():
+    d = case_dir("precise_extra_refuse")
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(FIX_30, out, "60000/1001", extra=["--precise", "--precise-extra-decimals", "5"])
+    assert code == 2 and "0 to 4" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+    code, _, err = convert_target(FIX_30, out, "60000/1001", extra=["--precise-extra-decimals", "1"])
+    assert code == 2 and "needs --precise" in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_precise_note_when_quantization_error_is_large():
+    d = case_dir("precise_note")
+    src = os.path.join(d, "small.aup2")
+    write_bytes(src, read_text_lf(FIX_30).replace("X=-200.00,200.00,直線移動,0", "X=0.00,1.00,直線移動,0", 1).encode("utf-8"))
+    line_x = line_number_of(src, "X=0.00,1.00")
+    out = os.path.join(d, "small_out.aup2")
+    code, _, err = convert_target(src, out, "60000/1001", extra=["--precise"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    notes = read_report(out)["notes"]
+    assert len(notes) == 1 and notes[0].startswith("precise: trackbar at line %d " % line_x), notes
+    assert "above 0.01%" in notes[0], notes[0]
+    assert read_report(out)["precise"]["tracks"][0]["max_quant_error_pct"] != "0.000000"
+
+
+def test_precise_off_by_default_adds_no_json_fields():
+    d = case_dir("precise_off")
+    out = os.path.join(d, "plain.aup2")
+    code, _, err = convert_target(FIX_30, out, "60000/1001")
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert "X=-200.00,200.00,直線移動,0" in read_text_lf(out), "trackbar must be unchanged"
+    assert "precise" not in read_report(out), sorted(read_report(out))
+
+
+def test_precise_real_world_66_read_only():
+    if not os.path.isfile(REAL_WORLD):
+        print("  SKIP real-world file not present")
+        return
+    before_hash = sha256_of(REAL_WORLD)
+    input_dir = os.path.dirname(REAL_WORLD)
+    before_listing = sorted(os.listdir(input_dir))
+    d = case_dir("real_precise")
+    out = os.path.join(d, "real_precise_66.aup2")
+    code, _, err = convert_target(REAL_WORLD, out, "66", extra=["--precise"])
+    assert sha256_of(REAL_WORLD) == before_hash, "real-world input was modified"
+    assert sorted(os.listdir(input_dir)) == before_listing, "output appeared next to real-world input"
+    assert code == 0, "exit %d: %s" % (code, err)
+    precise = read_report(out)["precise"]
+    print("  INFO real-world -> 66 precise: applied %d, skipped %d, tracks %d, notes %d" % (
+        precise["applied"], len(precise["skipped"]), len(precise["tracks"]), len(read_report(out)["notes"])))
+    for item in precise["skipped"]:
+        print("  INFO skipped line %d: %s" % (item["line"], item["reason"]))
 
 
 TESTS = [
@@ -921,6 +1254,15 @@ TESTS = [
     test_text_escaped_newline_inside_script_is_scanned,
     test_text_math_random_refused_by_default_and_warned_when_allowed,
     test_real_world_changed_lines_by_kind,
+    test_precise_worked_examples_end_values,
+    test_precise_property_values_and_speed,
+    test_precise_skips_ineligible_objects_and_ignores_playback_range,
+    test_precise_note_when_quantization_error_is_large,
+    test_precise_off_by_default_adds_no_json_fields,
+    test_precise_extra_decimals_2_meets_speed_target_on_short_segments,
+    test_precise_extra_decimals_0_is_the_default,
+    test_precise_extra_decimals_refusals,
+    test_precise_real_world_66_read_only,
 ]
 
 

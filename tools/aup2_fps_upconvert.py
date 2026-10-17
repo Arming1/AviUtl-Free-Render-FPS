@@ -48,6 +48,13 @@ TRACK_MODES = frozenset({
 TRACK_PIPE_PAYLOADS = frozenset()
 # Modes exempt from the "value count equals frame count" check (study section 2).
 TRACK_COUNT_EXEMPT_MODES = frozenset({"再生範囲"})
+# --precise: a track is resampled exactly when it is this mode with this parameter, or when its values are constant.
+PRECISE_LINEAR_MODE = "直線移動"
+PRECISE_LINEAR_PARAM = "0"
+# --precise: tracks in these modes are left unchanged and do not make their object ineligible.
+PRECISE_EXEMPT_MODES = frozenset({"再生範囲"})
+# --precise: a track whose quantization error is above this share of its value range gets a note.
+PRECISE_NOTE_RATIO = Fraction(1, 10000)  # 0.01 %
 
 # Effect names that cannot be converted safely. Empty: カウンター is time-based (速度 = counts per second).
 REFUSED_EFFECT_NAMES = frozenset()
@@ -227,6 +234,127 @@ def check_layers(object_frame_lines, object_layer, object_scene, frame_values, n
                               "rescaling; refused" % other)
 
 
+def decimal_places(text):
+    """Digits after the decimal point of a plain number: '-200.00' gives 2, '5' gives 0."""
+    return len(text.partition(".")[2])
+
+
+def round_half_away(value):
+    """Nearest integer to an exact value; halves round away from zero."""
+    magnitude = math.floor(abs(value) + Fraction(1, 2))
+    return -magnitude if value < 0 else magnitude
+
+
+def quantize(value, places):
+    """Round an exact value half away from zero to `places` decimals. Returns (units, text).
+
+    units counts steps of 10**-places; text has exactly `places` decimals and no sign for zero.
+    """
+    units = round_half_away(value * 10 ** places)
+    digits = str(abs(units)).rjust(places + 1, "0")
+    sign = "-" if units < 0 else ""
+    if places == 0:
+        return units, sign + digits
+    return units, sign + digits[:-places] + "." + digits[-places:]
+
+
+def segment_index(frames, t):
+    """Index i of the segment [frames[i], frames[i+1]] that gives the value at frame t.
+
+    Before the first point the first segment is used and after the last point the last one (extrapolation).
+    """
+    if t <= frames[0]:
+        return 0
+    if t >= frames[-1]:
+        return len(frames) - 2
+    return next(i for i in range(len(frames) - 1) if t <= frames[i + 1])
+
+
+def curve_value(frames, values, t):
+    """Exact value at frame t of the piecewise-linear curve through (frames[i], values[i])."""
+    i = segment_index(frames, t)
+    return values[i] + (values[i + 1] - values[i]) * (t - frames[i]) / (frames[i + 1] - frames[i])
+
+
+def precise_track_problem(line_no, mode, param, values):
+    """Reason a trackbar blocks --precise for its object, or None when the track can be resampled exactly."""
+    if "|" in param:
+        return "trackbar at line %d has a '|' payload" % line_no
+    if mode == PRECISE_LINEAR_MODE and param == PRECISE_LINEAR_PARAM:
+        return None
+    if len(set(values)) == 1:
+        return None
+    return ("trackbar at line %d uses mode %s with parameter %s and changing values; only %s,%s or constant "
+            "values can be resampled exactly" % (line_no, mode, param, PRECISE_LINEAR_MODE, PRECISE_LINEAR_PARAM))
+
+
+def precise_resample(lines, effect_lines, section_of, object_frame_lines, frame_values, new_frames, k, notes,
+                     extra_decimals=0):
+    """Resample trackbar values at the new keyframes from the exact original curve (--precise).
+
+    An object is resampled only when every trackbar of it (except PRECISE_EXEMPT_MODES) passes
+    precise_track_problem; otherwise it keeps its old values and is listed as skipped.
+    A resampled track is written with its own decimal count d plus extra_decimals.
+    Returns (bodies, report): bodies maps a trackbar line index to its rewritten text, report is the
+    "precise" object of the JSON (it has "extra_decimals" only when extra_decimals > 0).
+    Tracks above PRECISE_NOTE_RATIO add a note (not a refusal).
+    """
+    tracks = {}
+    for idx in effect_lines:
+        value = lines[idx].partition("=")[2]
+        if not is_trackbar(value) or value.split(",")[-2] in PRECISE_EXEMPT_MODES:
+            continue
+        tracks.setdefault(section_of[idx][1], []).append(idx)
+
+    bodies = {}
+    skipped = []
+    track_reports = []
+    applied = 0
+    for obj_no, frame_idx in object_frame_lines.items():
+        if obj_no not in tracks:
+            continue
+        frames, new = frame_values[obj_no], new_frames[obj_no]
+        problem = None
+        parsed = []
+        for idx in tracks[obj_no]:
+            key, _, value = lines[idx].partition("=")
+            parts = value.split(",")
+            values = [Fraction(x) for x in parts[:-2]]
+            problem = precise_track_problem(idx + 1, parts[-2], parts[-1], values)
+            if problem:
+                break
+            parsed.append((idx, key, parts, values))
+        if problem:
+            skipped.append({"line": frame_idx + 1, "reason": problem})
+            continue
+        applied += 1
+        for idx, key, parts, values in parsed:
+            places = max(decimal_places(x) for x in parts[:-2]) + extra_decimals
+            scale = 10 ** places
+            exact = [curve_value(frames, values, Fraction(f) / k) for f in new]
+            quantized = [quantize(x, places) for x in exact]
+            error = max(abs(Fraction(units, scale) - x) for (units, _), x in zip(quantized, exact))
+            span = max(values) - min(values)
+            ratio = error / span if span else Fraction(0)
+            end_shift = Fraction(quantized[-1][0], scale) - values[-1]
+            bodies[idx] = "%s=%s" % (key, ",".join([text for _, text in quantized] + parts[-2:]))
+            track_reports.append({
+                "object_line": frame_idx + 1,
+                "line": idx + 1,
+                "max_quant_error": quantize(error, 6)[1],
+                "max_quant_error_pct": quantize(ratio * 100, 6)[1],
+                "end_extrapolation": quantize(end_shift, 6)[1],
+            })
+            if ratio > PRECISE_NOTE_RATIO:
+                notes.append("precise: trackbar at line %d (object at line %d) quantization error is %s%% of its "
+                             "range, above 0.01%%" % (idx + 1, frame_idx + 1, quantize(ratio * 100, 6)[1]))
+    report = {"enabled": True}
+    if extra_decimals:
+        report["extra_decimals"] = extra_decimals
+    report.update({"applied": applied, "skipped": skipped, "tracks": track_reports})
+    return bodies, report
+
+
 def unescape_newlines(text):
     """A .aup2 text value may hold newlines as literal backslash escapes; turn them into real newlines."""
     return text.replace("\\r\\n", "\n").replace("\\r", "\n").replace("\\n", "\n")
@@ -241,7 +369,8 @@ def script_text(effect_name, key, value):
     return value
 
 
-def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False):
+def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False, precise=False,
+            precise_extra_decimals=0):
     """Return (output_bytes, changes, notes, warnings, summary).
 
     Give exactly one of:
@@ -250,6 +379,7 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False)
 
     Raises Refusal on any unsupported content. Frame-dependent script is refused unless
     allow_frame_scripts is set; then each occurrence is returned in warnings and notes.
+    precise resamples trackbar values at the new keyframes (see precise_resample); summary then has "precise".
     """
     if (factor is None) == (target is None):
         raise ValueError("convert() needs exactly one of factor or target")
@@ -442,6 +572,11 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False)
             shortened.add(idx + 1)
             notes.append("object at line %d shortened to 1 frame" % (idx + 1))
     check_layers(object_frame_lines, object_layer, object_scene, frame_values, new_frames)
+    precise_bodies, precise_report = {}, None
+    if precise:
+        precise_bodies, precise_report = precise_resample(
+            lines, effect_lines, section_of, object_frame_lines, frame_values, new_frames, k, notes,
+            extra_decimals=precise_extra_decimals)
 
     # Pass 4: build the rewritten lines.
     project_idx = project_file_lines[0]
@@ -482,6 +617,8 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False)
             "end_error_s": str(abs(Fraction(new[-1] + 1) / rate_dst - Fraction(old[-1] + 1) / rate_src)),
             "shortened": idx + 1 in shortened,
         })
+    for idx in sorted(precise_bodies):
+        set_line(idx, precise_bodies[idx])
     start_errors = [Fraction(o["start_error_s"]) for o in timing_objects]
     end_errors = [Fraction(o["end_error_s"]) for o in timing_objects]
 
@@ -506,6 +643,8 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False)
             "objects": timing_objects,
         },
     }
+    if precise_report is not None:
+        summary["precise"] = precise_report
     return bytes(out_bytes), changes, notes, warnings, summary
 
 
@@ -529,6 +668,12 @@ def build_parser():
     parser.add_argument("--force", action="store_true", help="overwrite existing outputs")
     parser.add_argument("--allow-frame-scripts", action="store_true",
                         help="convert despite frame-dependent script (obj.frame, rand(...)); prints a WARNING per occurrence")
+    parser.add_argument("--precise", action="store_true",
+                        help="resample trackbar values at the new keyframes from the exact original curve; "
+                             "adds a 'precise' section to the JSON")
+    parser.add_argument("--precise-extra-decimals", dest="precise_extra_decimals", type=int, default=0,
+                        metavar="N", help="with --precise: write resampled values with N more decimals than the "
+                                          "original (integer 0 to 4, default 0)")
     return parser
 
 
@@ -549,6 +694,11 @@ def main(argv=None):
             target = parse_target_fps(args.target_fps)
         except ValueError as exc:
             return refuse("REFUSED: --target-fps %s" % exc)
+    if not 0 <= args.precise_extra_decimals <= 4:
+        return refuse("REFUSED: --precise-extra-decimals must be an integer from 0 to 4, got %d"
+                      % args.precise_extra_decimals)
+    if args.precise_extra_decimals and not args.precise:
+        return refuse("REFUSED: --precise-extra-decimals needs --precise")
     if not os.path.isfile(args.in_path):
         return refuse("REFUSED: input not found: %s" % args.in_path)
     if same_path(args.in_path, args.out_path):
@@ -568,7 +718,8 @@ def main(argv=None):
     try:
         out_data, changes, notes, warnings, summary = convert(
             in_data, args.out_path, factor=args.factor, target=target,
-            allow_frame_scripts=args.allow_frame_scripts)
+            allow_frame_scripts=args.allow_frame_scripts, precise=args.precise,
+            precise_extra_decimals=args.precise_extra_decimals)
     except Refusal as exc:
         return refuse(exc.message())
 
@@ -590,6 +741,8 @@ def main(argv=None):
         "timing": summary["timing"],
         "notes": notes,
     }
+    if "precise" in summary:
+        report["precise"] = summary["precise"]
     with open(json_path, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=2)
         fh.write("\n")
