@@ -1,4 +1,4 @@
-# Known limitations — v1.3.0
+# Known limitations — v1.3.1
 
 Conversion rules are in [RETIME_RULES.md](RETIME_RULES.md). Only limits that still hold are listed here.
 
@@ -31,6 +31,8 @@ Conversion rules are in [RETIME_RULES.md](RETIME_RULES.md). Only limits that sti
 - AviUtl2's output cache uses an integer frame key. Non-integer ratios such as 30 → 120 or 66 → 120 still pay part of an extra render.
   A one-frame project cannot use the neighbour eviction workaround.
 - FreeFPS mode disables AFS, x264guiEx keyframe pre-scan, and timecode output.
+- **Separate-process export** (Export in a separate process). A second AviUtl2 window opens and may take focus. Do not close it
+  before the export finishes. The plugin ends that window when the export is done, so its settings are not saved.
 - FFmpeg and L-SMASH are source/build-provenance locked, but cross-root byte-for-byte reproducibility is not claimed.
 - The installer is a minimal console EXE rather than a graphical wizard.
 - Side-by-side use must keep the original x264guiEx and FreeRenderFPS in separate directories; the installer refuses the original x264guiEx target.

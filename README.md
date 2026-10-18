@@ -13,7 +13,11 @@
 
 FreeRenderFPS is an x264guiEx-based output plugin that re-evaluates the real scene at output-FPS time points independent of the project FPS, so a 30 FPS project can render genuine 60 FPS states. It does not copy frames or only change FPS metadata.
 
-## v1.3.0 highlights
+## v1.3.1 highlights
+
+- Free FPS Export has an **Export in a separate process** checkbox. The original window keeps its project, which avoids a crash when switching projects with `SceneMotionBlur_K`.
+- The checkbox is checked automatically when a project uses `SceneMotionBlur_K` (`MotionBlur_K.aux2`).
+- If a project uses third-party plugins or scripts, prefer **Export in a separate process** to avoid freezes or crashes when the project is switched.
 
 - `直線移動(時間制御)` (linear move, time control) works on any track; `補間移動(時間制御)` is accepted.
 - Time-control edit curves (the `|` payload) and curved 位置 are kept unchanged.
@@ -29,7 +33,7 @@ FreeRenderFPS is an x264guiEx-based output plugin that re-evaluates the real sce
 
 ## Download and install
 
-- **Recommended:** `AviUtl2-FreeRenderFPS-v1.3.0-setup.zip`. Extract all of it, run `AviUtl2-FreeRenderFPS-v1.3.0-setup.exe` beside its `payload` directory, then restart AviUtl2. Manual: `AviUtl2-FreeRenderFPS-v1.3.0-portable.zip`, extracted over the AviUtl2 root. See [docs/INSTALL.md](docs/INSTALL.md).
+- **Recommended:** `AviUtl2-FreeRenderFPS-v1.3.1-setup.zip`. Extract all of it, run `AviUtl2-FreeRenderFPS-v1.3.1-setup.exe` beside its `payload` directory, then restart AviUtl2. Manual: `AviUtl2-FreeRenderFPS-v1.3.1-portable.zip`, extracted over the AviUtl2 root. See [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Usage
 

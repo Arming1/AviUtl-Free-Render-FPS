@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-10-18
+
+### Added
+
+- **Export in a separate process** checkbox in the Free FPS Export dialog. When it is checked, the original AviUtl2
+  window keeps its project. The plugin opens the re-timed copy in a second AviUtl2 window, exports it, closes that
+  window, and the original window then shows the completion message with the encoder summary.
+- The checkbox is checked automatically when the project uses `SceneMotionBlur_K` (`MotionBlur_K.aux2`), because
+  switching projects crashes AviUtl2 with that filter. It is unchecked otherwise and the flow is the same as 1.3.0.
+
+### Validation
+
+- AviUtl2 v2.1.12: a project with `SceneMotionBlur_K` exported 66 → 132 fps in a separate process, and the original
+  window did not crash.
+- AviUtl2 v2.1.12: a project without that filter exported 66 → 60 with the checkbox unchecked.
+- The conversion rules are unchanged (Python/C++ cross-check 3630/3630 identical).
+
 ## [1.3.0] — 2026-10-18
 
 ### Added

@@ -66,7 +66,7 @@ Duplicating frames only is NOT acceptable.
 
 
 
-Maintenance of the released plugin (v1.3.0, 2026-10-18).
+Maintenance of the released plugin (v1.3.1, 2026-10-18).
 
 New sessions: read `docs/HANDOFF.zh-CN.md` first. It describes the project, the
 current work, the working rules (analysis before edits, subagent policy,

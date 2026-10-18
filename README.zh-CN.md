@@ -6,7 +6,11 @@
 
 FreeRenderFPS 基于 x264guiEx，让场景在独立于工程 FPS 的时间点重新求值。例如 30 FPS 工程输出 60 FPS 时，会真实求值 0.0、0.5、1.0……工程帧坐标，而不是复制帧或只修改元数据。
 
-## v1.3.0 要点
+## v1.3.1 要点
+
+- Free FPS Export 新增“在独立进程中导出”复选框：原窗口不切换工程，另开一个 AviUtl2 窗口导出后自动关闭，避免含 SceneMotionBlur_K 的工程在切换时崩溃。
+- 工程使用 SceneMotionBlur_K（MotionBlur_K.aux2）时，该复选框会自动勾选。
+- 工程用到第三方插件或脚本时，建议尽量勾选“在独立进程中导出”，避免切换工程时卡死或闪退。
 
 - 直線移動(時間制御) 可用于任意轨道；補間移動(時間制御) 放行。
 - 时间控制的编辑曲线（行尾 `|` 参数）和“位置”带曲线的情况均原样保留。
@@ -23,8 +27,8 @@ FreeRenderFPS 基于 x264guiEx，让场景在独立于工程 FPS 的时间点重
 
 ## 下载与安装
 
-- **推荐：** `AviUtl2-FreeRenderFPS-v1.3.0-setup.zip`。完整解压后运行其中与 `payload` 相邻的 `setup` EXE，然后重启 AviUtl2。
-- 手动安装：`AviUtl2-FreeRenderFPS-v1.3.0-portable.zip`，解压到 AviUtl2 根目录。
+- **推荐：** `AviUtl2-FreeRenderFPS-v1.3.1-setup.zip`。完整解压后运行其中与 `payload` 相邻的 `setup` EXE，然后重启 AviUtl2。
+- 手动安装：`AviUtl2-FreeRenderFPS-v1.3.1-portable.zip`，解压到 AviUtl2 根目录。
 
 详细步骤、升级与卸载见 [docs/INSTALL.md](docs/INSTALL.md)。
 

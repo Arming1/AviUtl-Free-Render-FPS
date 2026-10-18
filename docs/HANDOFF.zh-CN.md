@@ -17,11 +17,12 @@
 
 ## 2. 当前状态
 
-- **最新正式版：v1.3.0**（GitHub Release，标签 `v1.3.0`）。仓库：https://github.com/Arming1/AviUtl-Free-Render-FPS
-- 分支：`master`（发布用）、`aviutl1-adapter`（日常开发，比 master 多一个“独立进程导出”提交，未发布）。
+- **最新正式版：v1.3.1**（GitHub Release，标签 `v1.3.1`，新增独立进程导出）。仓库：https://github.com/Arming1/AviUtl-Free-Render-FPS
+- 分支：`master`（发布用）、`aviutl1-adapter`（日常开发）。
 - **CI**：`.github/workflows/ci.yml`，每次推送自动跑：Python 测试、C++ 测试 + Python/C++ 逐字节交叉核对、x64/Win32 插件编译、宿主实测数据复算（host-results）。结果在 Actions 页面的 Summary。用户希望**频繁推送、在 Actions 实时看到进度**。
-- **进行中（未实测）**：独立进程导出（提交在 aviutl1-adapter）。起因：第三方滤镜 `SceneMotionBlur_K`（来自 `MotionBlur_K.aux2`）会让 AviUtl2 在**切换工程**时崩溃，而 Free FPS Export 原流程必须切换工程。新模式：原窗口不切换工程，另启动一个 aviutl2.exe（环境变量 `FREE_FPS_EXPORT_JOB=<job.ini>`），子进程里的插件打开重定时工程、导出、写 `result.ini`、自我结束；工程含该滤镜时对话框自动勾选。测试版在 `test_kit\plugin`（SHA256 开头 FA4DEFCA）。
-  - **下一步**：请用户用 `C:\Users\gaoha\Desktop\神.aup2` 实测（步骤见第 6 节），通过后再考虑发布 1.3.x。
+- **独立进程导出（v1.3.1 已发布）**：起因：第三方滤镜 `SceneMotionBlur_K`（来自 `MotionBlur_K.aux2`）会让 AviUtl2 在**切换工程**时崩溃，而 Free FPS Export 原流程必须切换工程。新模式：原窗口不切换工程，另启动一个 aviutl2.exe（环境变量 `FREE_FPS_EXPORT_JOB=<job.ini>`），子进程里的插件打开重定时工程、导出、写 `result.ini`、自我结束；工程含该滤镜时对话框自动勾选。测试版在 `test_kit\plugin`（SHA256 开头 FA4DEFCA）。
+  - **2026-10-18 实测通过**：`神.aup2` → 132 fps，`D:\tutorial\132.mp4`，ffprobe 为 132/1、2880 帧；逐帧哈希只在开头第 0–167 帧（静止片头）有相同帧，其余相邻帧全部不同；原窗口未崩溃，子进程自行结束。
+  - 不含该滤镜的 `10 3.aup2`（66 fps）→ 60 fps：复选框默认不勾，走旧流程（同窗口切换后重开原工程），`D:\tutorial\10_3_60.mp4` 为 60/1、3490 帧；相同帧只有 6.95–7.18 s 的 3 小段（每段 2–3 帧），对应工程第 459–479 帧每 6 帧一切的子场景快切（用户确认原工程该处本来就短暂静止）。
 
 ## 3. 关键代码位置
 
@@ -59,7 +60,7 @@
 - 发布顺序：改版本 → 文档定稿 → 编译测试 → 提交 → 合进 master → 推送 → 打包核对 → 打标签 → `gh release create`（gh 在 `C:\Program Files\GitHub CLI\gh.exe`，git 代理 `http://127.0.0.1:7892`，需用户开代理）。
 - 文档要短：上次已把 README/限制精简一半，新增内容保持简洁，规则细节放 `docs/RETIME_RULES.md`。
 
-## 6. 下一步：独立进程导出实测步骤（交给用户）
+## 6. 独立进程导出实测步骤（2026-10-18 已通过；回归时照做）
 
 1. 关闭 AviUtl2，运行 `test_kit\plugin\安装.ps1`（会请求管理员权限），确认哈希开头 `FA4DEFCA`。
 2. 打开 `神.aup2` → 编辑 → Free FPS Export...：“在独立进程中导出”应已自动勾选并显示原因。
@@ -70,11 +71,10 @@
 
 ## 7. 待办池（按价值排序，用户决定时机）
 
-1. 独立进程导出实测与修正，然后发布 1.3.x。
-2. GitHub Action 第二期：推版本标签自动打包 + 构建出处证明；升级 Node.js 20 的 Action 组件。
-3. 目标帧率过低（如 66→10）时按真实取样时刻去掉过短对象（目前拒绝）。
-4. `ランダム移動`、`反復移動`、`移動量指定` 的探针实测与放行。
-5. AviUtl 1.x 适配器重新实测。
+1. GitHub Action 第二期：推版本标签自动打包 + 构建出处证明；升级 Node.js 20 的 Action 组件。
+2. 目标帧率过低（如 66→10）时按真实取样时刻去掉过短对象（目前拒绝）。
+3. `ランダム移動`、`反復移動`、`移動量指定` 的探针实测与放行。
+4. AviUtl 1.x 适配器重新实测。
 
 ## 8. 用户环境（2026-10-18）
 
