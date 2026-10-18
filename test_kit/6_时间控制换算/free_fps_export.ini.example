@@ -1,0 +1,23 @@
+; Free FPS Export 调试配置示例
+;
+; 使用方法：把本文件复制（并去掉末尾的 .example）到下面的位置才会生效：
+;   C:\ProgramData\aviutl2\Plugin\x264guiEx-FreeRenderFPS\free_fps_export.ini
+; 恢复默认（普通模式）：删除该 free_fps_export.ini 即可。
+;
+; 普通模式：没有该文件，或 [debug] enabled 不为 1。精确运动复选框隐藏并强制开启，
+; 额外小数位为 0，导出后删除临时文件。
+; 注释以分号 ; 开头。
+
+[debug]
+; 1 = 调试模式：显示“精确运动”复选框，对话框标题加 [Debug]。0 或删除本段 = 普通模式。
+enabled=1
+
+; 精确运动复选框的初值（只在调试模式下可见）。1 = 开启，0 = 关闭。
+precise=1
+
+; 精确运动的额外小数位数，取值 0~4，超出范围会被夹取到该范围内。0 = 不加。
+extra_decimals=0
+
+; 1 = 导出结束后保留临时目录里的 retimed.aup2 与 .convert.json，并在完成提示中显示它们的路径。
+; 0 = 照常删除临时文件。
+keep_temp=0

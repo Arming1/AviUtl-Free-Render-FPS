@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Appended to the MSBuild call as /p:PlatformToolset=<value> when non-empty.
+  # Empty means the project default ($(DefaultPlatformToolset) from the installed VS).
+  PLATFORM_TOOLSET: ""
+
+jobs:
+  python-tests:
+    name: python-tests
+    # The tests only use pathlib-free os/subprocess calls, binary file I/O and explicit utf-8;
+    # Windows runner: the golden hashes assume the CRLF checkout that git uses on Windows.
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: up-convert unit tests
+        run: python -I tests/aup2_upconvert/test_upconvert.py
+
+      - name: long-duration drift test (30/60 min)
+        env:
+          AUP2_TEST_TMP: ${{ runner.temp }}/aup2_long_duration
+        run: python -I tests/aup2_upconvert/test_long_duration.py
+
+  cpp-retime:
+    name: cpp-retime
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # msvc-dev-cmd exports VCINSTALLDIR, so derive the real directory from it and hand it over
+      # through VC_BUILD_DIR, which build_and_run.ps1 reads first (before vswhere and its fixed path).
+      - name: locate vcvarsall.bat
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:VCINSTALLDIR 'Auxiliary\Build'
+          if (-not (Test-Path -LiteralPath (Join-Path $dir 'vcvarsall.bat'))) {
+            throw "vcvarsall.bat not found under $dir"
+          }
+          "VC_BUILD_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: build and run free_fps_export tests
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\experiments\free_fps_export\build_and_run.ps1"
+          exit $LASTEXITCODE
+
+  build-plugin:
+    name: build-plugin (${{ matrix.platform }})
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x64
+            ext: aux2
+          - platform: Win32
+            ext: auo
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      EXT: ${{ matrix.ext }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      # Records which Visual Studio image is installed, so the toolset/version in the log can be matched to it.
+      - name: report Visual Studio and MSBuild versions
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path -LiteralPath $vswhere) {
+            & $vswhere -latest -format text | Where-Object { $_ -match '^installation(Name|Version):' } | Out-Host
+          } else {
+            Write-Output "vswhere not found at $vswhere"
+          }
+          msbuild -version -nologo | Out-Host
+
+      - name: build x264guiEx-FreeRenderFPS
+        shell: pwsh
+        run: |
+          $project = 'src\x264guiEx-FreeFPS\x264guiEx\x264guiEx.vcxproj'
+          $msbuildArgs = @(
+            $project,
+            '/p:Configuration=Release',
+            "/p:Platform=$env:PLATFORM",
+            '/nologo',
+            '/m'
+          )
+          if ($env:PLATFORM_TOOLSET) {
+            $msbuildArgs += "/p:PlatformToolset=$env:PLATFORM_TOOLSET"
+          }
+          msbuild @msbuildArgs
+          exit $LASTEXITCODE
+
+      - name: report SHA256 and ProductVersion
+        shell: pwsh
+        run: |
+          # OutDir is $(SolutionDir)$(Configuration)\$(Platform)\ and SolutionDir defaults to the project folder.
+          $relative = "src\x264guiEx-FreeFPS\x264guiEx\Release\$env:PLATFORM\x264guiEx-FreeRenderFPS.$env:EXT"
+          $path = Join-Path $env:GITHUB_WORKSPACE $relative
+          if (-not (Test-Path -LiteralPath $path)) {
+            throw "build output not found: $path"
+          }
+          $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+          $version = (Get-Item -LiteralPath $path).VersionInfo.ProductVersion
+          Write-Output "file:           $relative"
+          Write-Output "SHA256:         $hash"
+          Write-Output "ProductVersion: $version"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x264guiEx-FreeRenderFPS-${{ matrix.platform }}
+          path: src/x264guiEx-FreeFPS/x264guiEx/Release/${{ matrix.platform }}/x264guiEx-FreeRenderFPS.${{ matrix.ext }}
+          if-no-files-found: error
+          retention-days: 14
