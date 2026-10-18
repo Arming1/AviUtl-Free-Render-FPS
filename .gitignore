@@ -144,3 +144,12 @@ experiments/**/evidence/**/*.aac
 !dist/**/*.exe
 !dist/**/*.auo2
 !dist/**/*.zip
+
+# test_kit: keep projects, scripts and checklists; skip exported media, plugin builds and third-party copies
+test_kit/**/out/
+test_kit/**/截图/
+test_kit/**/*.mp4
+test_kit/**/*.wav
+test_kit/plugin/*.aux2
+test_kit/plugin/*.aux2.old-*
+test_kit/6_时间控制换算/ARZ_15_mer1_模板副本.aup2
