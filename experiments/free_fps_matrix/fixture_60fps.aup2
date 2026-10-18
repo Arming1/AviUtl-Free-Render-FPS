@@ -1,13 +1,11 @@
 [project]
-version=2011200
+version=2010400
 file=D:\AviUtl Free Render FPS\experiments\free_fps_matrix\fixture_60fps.aup2
 display.scene=0
 preview.scene=0
-display.scene.list.label=
 [scene.0]
 scene=0
 name=FreeRenderFPS 66 to 60 validation
-label=
 video.width=640
 video.height=360
 video.rate=60
@@ -62,6 +60,3 @@ Group2=1
 縦横比=0.000
 透明度=0.00
 合成モード=通常
-[plugin.0]
-plugin.name=Output.x264guiEx FreeRenderFPS
-freerenderfps_config={"audio":{"ext":{"aud_temp_dir":0,"audio_encode_timing":0,"bitrate":256,"delay_cut":0,"enc_mode":0,"encoder":15,"faw_check":0,"minimized":0,"priority":0,"use_2pass":0,"use_wav":0},"in":{"aud_temp_dir":0,"audio_encode_timing":0,"bitrate":0,"delay_cut":0,"enc_mode":0,"encoder":1,"faw_check":0,"minimized":0,"priority":0,"use_2pass":0,"use_wav":0},"use_internal":0},"conf_name":"FreeRenderFPS ConfigFile v1","enc":{"auto_npass":2,"cmd":" --crf 23","use_auto_npass":0},"mux":{"apple_mode":0,"disable_mkvext":0,"disable_mp4ext":0,"internal_mode":0,"minimized":0,"mkv_mode":0,"mp4_mode":0,"mp4_temp_dir":0,"priority":0,"use_internal":0},"other":{"batfiles":{"after_audio":"","after_process":"","before_audio":"","before_process":""},"benchmark_mode":0,"disable_guicmd":0,"dont_wait_bat_fin":0,"notes":"","out_audio_only":0,"run_bat":0,"temp_dir":0},"version":"x264guiEx FreeRenderFPS ConfigFile v1 json","video":{"afs":0,"afs_bitrate_correction":0,"amp_check":0,"amp_limit_bitrate_lower":0.0,"amp_limit_bitrate_upper":0.0,"amp_limit_file_size":0.0,"analysis_file":"","auo_tcfile_out":0,"check_keyframe":0,"cmdex":"","cqmfile":"","freefps_enable":1,"freefps_target_rate":66,"freefps_target_scale":1,"input_as_lw48":0,"parallel_div_info":"","priority":0,"stats":"%{savfile}.stats","sync_process_affinity":0,"tcfile_in":"%{savfile}_tc.txt"}}
