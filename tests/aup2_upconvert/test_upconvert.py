@@ -357,7 +357,7 @@ def test_refuse_unknown_trackbar_mode_and_pipe_payload():
     assert_no_output(out)
 
     src = os.path.join(d, "pipe.aup2")
-    text = read_text_lf(FIX_30).replace("X=-200.00,200.00,直線移動,0", "X=-200.00,200.00,直線移動,0|27", 1)
+    text = read_text_lf(FIX_30).replace("X=-200.00,200.00,直線移動,0", "X=-200.00,200.00,瞬間移動,0|27", 1)
     write_bytes(src, text.encode("utf-8"))
     out = os.path.join(d, "pipe_out.aup2")
     code, _, err = convert(src, out, 2)
@@ -2313,7 +2313,7 @@ def test_time_control_position_shapes_are_refused():
                    lambda t: "REFUSED: line %d: %s" % (line_in_section(t, "[0.0]", "位置="), TC_POSITION_REASON))
 
     check("tc_bad_three_points", "0.000,50.000,100.000,%s,0" % TC_MODE)
-    check("tc_bad_payload", "0.000,100.000,%s,0|27" % TC_MODE)
+    check("tc_bad_payload_other_mode", "0.000,100.000,直線移動,0|27")
     check("tc_bad_plain_mode", "0.000,100.000,直線移動,0")
     check("tc_bad_other_mode", "0.000,100.000,補間移動,0")
     check("tc_bad_one_value", "50")
@@ -2327,22 +2327,20 @@ def test_time_control_position_shapes_are_refused():
                lambda t: "REFUSED: line %d: %s" % (line_in_section(t, "[0.0]", "effect.name="), TC_POSITION_REASON))
 
 
-def test_time_control_mode_is_refused_outside_time_control_effect():
+def test_time_control_mode_is_accepted_outside_time_control_effect():
+    # 直線移動(時間制御) on an ordinary track (any effect, any trackbar): frames are rescaled, values are kept.
     d = case_dir("tc_mode_elsewhere")
     src = os.path.join(d, "src.aup2")
     text = read_text_lf(FIX_30).replace("X=-200.00,200.00,直線移動,0", "X=0.000,100.000,%s,0" % TC_MODE, 1)
     write_bytes(src, text.encode("utf-8"))
     out = os.path.join(d, "out.aup2")
     code, _, err = convert(src, out, 2)
-    expected = "REFUSED: line %d: trackbar mode '%s' is not on the whitelist" % (
-        line_number_of(src, "X=0.000,100.000"), TC_MODE)
-    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
-    assert_no_output(out)
-    # The same 位置 line in an effect that is not 時間制御(オブジェクト) is refused the same way.
-    tc_refused("tc_mode_other_effect", 30, 60,
-               [("0,9", tc_effect(TC_FORWARD).replace("effect.name=時間制御(オブジェクト)", "effect.name=標準描画"))],
-               lambda t: "REFUSED: line %d: trackbar mode '%s' is not on the whitelist" % (
-                   line_in_section(t, "[0.0]", "位置="), TC_MODE))
+    assert code == 0, "exit %d: %s" % (code, err)
+    changes = line_changes(read_bytes(src), read_bytes(out))
+    assert set(changes) <= {3, 11, 36}, changes
+    assert changes[36] == ("frame=0,149", "frame=0,299"), changes
+    assert "X=0.000,100.000,%s,0" % TC_MODE in read_text_lf(out).split("\n")
+    assert read_report(out)["notes"] == [], read_report(out)["notes"]
 
 
 def test_time_control_in_kept_scene_is_untouched():
@@ -2638,7 +2636,7 @@ def test_easing_interpolated_version_and_other_payloads_still_refused():
     assert code == 2 and expected in err, "exit %d: %s" % (code, err)
     assert_no_output(out)
     # The payload is kept for the easing mode only: every other mode with a payload is still refused.
-    for n, mode in enumerate(("直線移動", "補間移動", "瞬間移動", "移動無し", "回転", "再生範囲")):
+    for n, mode in enumerate(("補間移動", "瞬間移動", "移動無し", "回転", "再生範囲")):
         d, src, text = easing_variant("easing_payload_%d" % n, [(LINEAR_X, "X=-200.00,200.00,%s,0|27" % mode)])
         out = os.path.join(d, "out.aup2")
         code, _, err = convert(src, out, 2)
@@ -2680,6 +2678,308 @@ def test_easing_precise_skips_the_object_and_keeps_values():
     assert precise["applied"] == 1 and precise["skipped"] == [], precise
     assert "Z=0.00,0.00,0.00,0.00,%s,0" % EASING_MODE in read_text_lf(out).split("\n"), \
         "a constant easing track keeps its mode and repeats its value on every keyframe"
+
+
+# ---------------------------------------------------------------------------
+# v1.2.6: general 直線移動(時間制御) tracks and '|' payload (curve) tracks
+# ---------------------------------------------------------------------------
+
+CURVE = "1,0,1,0"  # the host's normalised curve points; the tool treats the text as opaque
+LINEAR_PAYLOAD = "直線移動,0|" + CURVE
+
+
+def lf_lines(path):
+    return read_text_lf(path).split("\n")
+
+
+def lines_without_file(path):
+    return [line for line in lf_lines(path) if not line.startswith("file=")]
+
+
+def test_tc_mode_ordinary_track_two_and_multi_point():
+    # Two points and three points on an ordinary 標準描画 track: the frames follow the object rules (30 -> 60:
+    # 0,9 -> 0,19 and 0,5,9 -> 0,10,19), the values stay.
+    for n, (frames, values, new_frames) in enumerate((("0,9", "0.000,100.000", "0,19"),
+                                                      ("0,5,9", "0.000,30.000,100.000", "0,10,19"))):
+        track = "X=%s,%s,0" % (values, TC_MODE)
+        d, src, text = tc_project("tc_ordinary_%d" % n, 30, [(frames, "effect.name=標準描画\n%s\n" % track)])
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert_target(src, out, "60")
+        assert code == 0, "exit %d: %s" % (code, err)
+        changes = line_changes(read_bytes(src), read_bytes(out))
+        assert changes == merged(file_edit(text, out), edit_at(text, "[scene.0]", "video.rate=", "video.rate=60"),
+                                 edit_at(text, "[0]", "frame=", "frame=" + new_frames)), changes
+        assert read_report(out)["notes"] == [], read_report(out)["notes"]
+
+
+def test_tc_mode_ordinary_track_count_mismatch_refused():
+    d, src, text = tc_project("tc_ordinary_count", 30, [("0,5,9", "effect.name=標準描画\nX=0.000,100.000,%s,0\n" % TC_MODE)])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    expected = "REFUSED: line %d: trackbar has 2 values but object [0] has 3 frame points" % line_in_section(
+        text, "[0.0]", "X=")
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_payload_kept_for_the_three_modes_and_comma_payloads():
+    # 直線移動, 直線移動(時間制御) and イージング（通常）@イージング keep any '|' payload byte for byte, commas included
+    # (the host writes 'X=-600.00,600.00,直線移動(時間制御),0|1,0,1,0'); the value count is still checked.
+    groups = (["X=-200.00,200.00,直線移動,0|%s" % CURVE,
+               "Y=0.00,0.00,%s,0|%s" % (TC_MODE, CURVE),
+               "Z=0.00,0.00,%s,0|%s" % (EASING_MODE, CURVE)],
+              ["X=-200.00,200.00,直線移動,0|text without meaning",
+               "Y=0.00,0.00,%s,0|" % TC_MODE])
+    for n, mode_lines in enumerate(groups):
+        edits = [(LINEAR_X, mode_lines[0]), ("Y=0.00,0.00,直線移動,0", mode_lines[1])]
+        if len(mode_lines) == 3:
+            edits.append(("Z=0.00,0.00,直線移動,0", mode_lines[2]))
+        d, src, text = easing_variant("payload_three_%d" % n, edits)
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert_target(src, out, "66")
+        assert code == 0, "exit %d: %s" % (code, err)
+        out_lines = lf_lines(out)
+        for line in mode_lines:
+            assert out_lines.count(line) == 1, line
+        changes = line_changes(read_bytes(src), read_bytes(out))
+        assert set(changes) <= {3, 11, 12, 36}, changes
+        assert read_report(out)["notes"] == [], read_report(out)["notes"]
+        # Same lines but with a precise run: the objects are resampled or skipped, never refused.
+        out_p = os.path.join(d, "out_precise.aup2")
+        code, _, err = convert_target(src, out_p, "66", extra=["--precise"])
+        assert code == 0, "precise: exit %d: %s" % (code, err)
+    # The value count is checked also with a comma payload.
+    d, src, text = easing_variant("payload_count", [(LINEAR_X, "X=-200.00,-200.00,200.00,直線移動,0|%s" % CURVE)])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert(src, out, 2)
+    expected = "REFUSED: line %d: trackbar has 3 values but object [0] has 2 frame points" % line_number_of(src, "X=-200.00,-200.00")
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_payload_other_modes_still_refused_with_comma_payload():
+    for n, mode in enumerate(("補間移動", "瞬間移動", "移動無し", "回転", "再生範囲", "加減速移動")):
+        d, src, text = easing_variant("payload_other_%d" % n, [(LINEAR_X, "X=-200.00,200.00,%s,0|%s" % (mode, CURVE))])
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert(src, out, 2)
+        if mode == "加減速移動":  # not a whitelisted mode: the mode text is refused first
+            expected = "REFUSED: line %d: trackbar mode '%s' is not on the whitelist" % (line_number_of(src, "|" + CURVE), mode)
+        else:
+            expected = "REFUSED: line %d: trackbar '|' payload '%s' is not on the whitelist" % (
+                line_number_of(src, "|" + CURVE), CURVE)
+        assert code == 2 and expected in err, "%s: exit %d: %s" % (mode, code, err)
+        assert_no_output(out)
+
+
+def test_precise_linear_payload_is_resampled_and_kept():
+    # 直線移動 with a payload is resampled like one without; the payload is appended after the flag.
+    for target in ("60", "24", "60000/1001"):
+        d, src, _ = easing_variant("prec_payload_" + target.replace("/", "_"), [(LINEAR_X, "X=-200.00,200.00,%s" % LINEAR_PAYLOAD)])
+        _, base, _ = easing_variant("prec_payload_base_" + target.replace("/", "_"), [])
+        out, out_base = os.path.join(d, "out.aup2"), os.path.join(d, "base.aup2")
+        for path, source in ((out, src), (out_base, base)):
+            code, _, err = convert_target(source, path, target, extra=["--precise"])
+            assert code == 0, "%s: exit %d: %s" % (target, code, err)
+        got, want = lines_without_file(out), lines_without_file(out_base)
+        x_lines = [i for i, line in enumerate(want) if line.startswith("X=") and line.endswith(",直線移動,0")]
+        assert len(x_lines) == 1, x_lines
+        want[x_lines[0]] += "|" + CURVE
+        assert got == want, "%s: payload track differs from the track without payload" % target
+        precise, base_precise = read_report(out)["precise"], read_report(out_base)["precise"]
+        assert precise["applied"] == 1 and precise["skipped"] == [], precise
+        assert precise["tracks"] == base_precise["tracks"], precise["tracks"]
+
+
+def test_precise_tc_mode_two_points_resampled_without_extra_keyframes():
+    # 30 -> 24: the new object ends inside the original, so no keyframe is added and the two end values are resampled
+    # exactly like 直線移動 (the mode text stays 直線移動(時間制御)).
+    d, src, _ = easing_variant("prec_tc_two", [(LINEAR_X, "X=-200.00,200.00,%s,0" % TC_MODE)])
+    _, base, _ = easing_variant("prec_tc_two_base", [])
+    out, out_base = os.path.join(d, "out.aup2"), os.path.join(d, "base.aup2")
+    for path, source in ((out, src), (out_base, base)):
+        code, _, err = convert_target(source, path, "24", extra=["--precise"])
+        assert code == 0, "exit %d: %s" % (code, err)
+    got, want = lines_without_file(out), lines_without_file(out_base)
+    index = [i for i, line in enumerate(want) if line.startswith("X=") and line.endswith(",直線移動,0")]
+    assert len(index) == 1
+    want[index[0]] = want[index[0]].replace(",直線移動,0", ",%s,0" % TC_MODE)
+    assert got == want
+    assert "frame=0,119" in got, got
+    precise = read_report(out)["precise"]
+    assert precise["applied"] == 1 and precise["skipped"] == [], precise
+    assert precise["tracks"] == read_report(out_base)["precise"]["tracks"]
+
+
+def test_precise_tc_mode_needing_keyframes_curve_or_multi_point_is_skipped():
+    d = case_dir("prec_tc_skip")
+    multi = os.path.join(d, "multi.aup2")
+    make_intermediate_fixture(multi, "frame=0,10,20,29")
+    multi_text = read_text_lf(multi)
+    x_multi = "X=-200.00,-200.00,200.00,200.00,直線移動,0"
+    assert multi_text.count(x_multi) == 1
+    multi_src = os.path.join(d, "multi_tc.aup2")
+    write_bytes(multi_src, multi_text.replace(x_multi, x_multi.replace("直線移動", TC_MODE)).encode("utf-8"))
+    cases = [
+        # (source, target, reason prefix)
+        ("hold", easing_variant("prec_tc_skip_hold", [(LINEAR_X, "X=-200.00,200.00,%s,0" % TC_MODE)])[1], "60",
+         "uses mode %s; end hold needs keyframes this mode ignores" % TC_MODE),
+        ("curve", easing_variant("prec_tc_skip_curve", [(LINEAR_X, "X=-200.00,200.00,%s,0|%s" % (TC_MODE, CURVE))])[1], "24",
+         "uses mode %s with a curve or keyframes; it is not re-sampled" % TC_MODE),
+        ("curve60", easing_variant("prec_tc_skip_curve60", [(LINEAR_X, "X=-200.00,200.00,%s,0|%s" % (TC_MODE, CURVE))])[1], "60",
+         "uses mode %s with a curve or keyframes; it is not re-sampled" % TC_MODE),
+        ("multi", multi_src, "24", "uses mode %s with a curve or keyframes; it is not re-sampled" % TC_MODE),
+        ("constant_curve", easing_variant("prec_tc_skip_const", [("Y=0.00,0.00,直線移動,0", "Y=0.00,0.00,%s,0|%s" % (TC_MODE, CURVE))])[1],
+         "24", "uses mode %s with a curve or keyframes; it is not re-sampled" % TC_MODE),
+    ]
+    for label, src, target, reason in cases:
+        out_p, out_n = os.path.join(d, label + "_p.aup2"), os.path.join(d, label + "_n.aup2")
+        for path, extra in ((out_p, ["--precise"]), (out_n, [])):
+            code, _, err = convert_target(src, path, target, extra=extra)
+            assert code == 0, "%s: exit %d: %s" % (label, code, err)
+        report = read_report(out_p)["precise"]
+        text = read_text_lf(src)
+        tc_line = [i + 1 for i, line in enumerate(text.split("\n")) if "," + TC_MODE + "," in line]
+        assert len(tc_line) == 1, tc_line
+        frame_line = line_in_section(text, "[0]", "frame=")
+        assert report["applied"] == 0 and report["tracks"] == [], (label, report)
+        assert report["skipped"] == [{"line": frame_line, "reason": "trackbar at line %d %s" % (tc_line[0], reason)}], \
+            (label, report["skipped"])
+        assert lines_without_file(out_p) == lines_without_file(out_n), "%s: skipped object must keep the plain output" % label
+
+
+def tc_curve_effect(position="0.000,100.000", drop="1", curve=CURVE):
+    return tc_effect(position, drop, flag="0|" + curve)
+
+
+def test_time_control_curve_is_kept():
+    # 位置 with a curve: no A/B rewrite (a reversed block would otherwise become a staircase); the line and the curve
+    # stay as written, the frames are rescaled, and one note says so (N = the frame= line of the object).
+    for target, rate in (("60", 30), ("66", 30), ("24", 30)):
+        for position in (TC_FORWARD, TC_REVERSED, "-50.000,150.000", "20.000,80.000"):
+            blocks = [("0,9", tc_curve_effect(position)), ("20,35", tc_curve_effect(position, curve="0,0,1,1"))]
+            d, src, text = tc_project("tc_curve_%s_%s" % (target, position.replace(",", "_")), rate, blocks)
+            out = os.path.join(d, "out.aup2")
+            code, _, err = convert_target(src, out, target)
+            assert code == 0, "%s %s: exit %d: %s" % (target, position, code, err)
+            changes = line_changes(read_bytes(src), read_bytes(out))
+            out_lines = lf_lines(out)
+            for no in (0, 1):
+                section = "[%d.0]" % no
+                assert text.split("\n")[line_in_section(text, section, "位置=") - 1] == \
+                    out_lines[line_in_section(text, section, "位置=") - 1], "位置 line changed"
+                assert line_in_section(text, section, "位置=") not in changes
+                assert line_in_section(text, section, "コマ落ち=") not in changes
+            assert set(changes) == {line_in_section(text, "[project]", "file="),
+                                    line_in_section(text, "[scene.0]", "video.rate="),
+                                    line_in_section(text, "[0]", "frame="), line_in_section(text, "[1]", "frame=")}, changes
+            notes = read_report(out)["notes"]
+            assert notes == ["time control at line %d: 位置 has a curve; kept (object-relative, within one frame)"
+                             % line_in_section(text, "[%d]" % no, "frame=") for no in (0, 1)], notes
+
+
+def test_time_control_curve_frame_drop():
+    # K = 1 stays. K >= 2 becomes K x k when K x k and s x k are integers, else the run is refused (position line N).
+    def convert_blocks(name, rate, target, frames, drop):
+        d, src, text = tc_project(name, rate, [(frames, tc_curve_effect(TC_REVERSED, drop))])
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert_target(src, out, target)
+        return src, text, out, code, err
+
+    # 30 -> 60 (k = 2): K = 2 -> 4, and a start that is not 0 is fine (s x k = 10).
+    for frames in ("0,9", "5,14"):
+        src, text, out, code, err = convert_blocks("tc_curve_drop_ok_" + frames.replace(",", "_"), 30, "60", frames, "2")
+        assert code == 0, "exit %d: %s" % (code, err)
+        assert lf_lines(out)[line_in_section(text, "[0.0]", "コマ落ち=") - 1] == "コマ落ち=4"
+        assert read_report(out)["notes"] == [
+            "time control at line %d: 位置 has a curve; kept (object-relative, within one frame); コマ落ち 2 -> 4"
+            % line_in_section(text, "[0]", "frame=")], read_report(out)["notes"]
+        assert lf_lines(out)[line_in_section(text, "[0.0]", "位置=") - 1] == "位置=100.000,0.000,%s,0|%s" % (TC_MODE, CURVE)
+    # 30 -> 66 (k = 11/5): K = 5 and s = 5 -> K x k = 11, s x k = 11 are integers.
+    src, text, out, code, err = convert_blocks("tc_curve_drop_ok_66", 30, "66", "5,14", "5")
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert lf_lines(out)[line_in_section(text, "[0.0]", "コマ落ち=") - 1] == "コマ落ち=11"
+    # Refused: K x k = 22/5 (K = 2), and s x k = 11/5 (s = 1) with K x k = 11.
+    for n, (frames, drop) in enumerate((("0,9", "2"), ("1,10", "5"))):
+        src, text, out, code, err = convert_blocks("tc_curve_drop_bad_%d" % n, 30, "66", frames, drop)
+        expected = "REFUSED: time control at line %d has a curve and コマ落ち=%s cannot be kept exact" % (
+            line_in_section(text, "[0.0]", "位置="), drop)
+        assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+        assert_no_output(out)
+    # Without a コマ落ち line the drop is 1 and nothing is refused.
+    d, src, text = tc_project("tc_curve_no_drop", 30, [("0,9", "effect.name=時間制御(オブジェクト)\n位置=0.000,100.000,%s,0|%s\n"
+                                                               "繰り返し=1\n対象レイヤー数=1\n" % (TC_MODE, CURVE))])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "66")
+    assert code == 0, "exit %d: %s" % (code, err)
+
+
+def test_time_control_curve_precise_and_same_rate():
+    d, src, text = tc_project("tc_curve_precise", 30, [("0,9", tc_curve_effect(TC_REVERSED, "2")),
+                                                       ("0,9", tc_effect(TC_FORWARD, "1"))])
+    # precise: the curve object is not resampled and not listed, like any time control object.
+    out_p, out_n = os.path.join(d, "p.aup2"), os.path.join(d, "n.aup2")
+    for path, extra in ((out_p, ["--precise"]), (out_n, [])):
+        code, _, err = convert_target(src, path, "60", extra=extra)
+        assert code == 0, "exit %d: %s" % (code, err)
+    assert lines_without_file(out_p) == lines_without_file(out_n)
+    assert read_report(out_p)["precise"]["skipped"] == [] and read_report(out_p)["precise"]["applied"] == 0
+    # Same rate (k = 1): nothing is rewritten and there is no note.
+    out_same = os.path.join(d, "same.aup2")
+    code, _, err = convert_target(src, out_same, "30")
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert read_report(out_same)["notes"] == [], read_report(out_same)["notes"]
+    assert set(line_changes(read_bytes(src), read_bytes(out_same))) == {line_in_section(text, "[project]", "file=")}
+    # A curve that is not a clean two-point 位置 is still refused with the position reason.
+    tc_refused("tc_curve_three_points", 30, 60,
+               [("0,9", tc_effect("0.000,50.000,100.000", "1", flag="0|" + CURVE))],
+               lambda t: "REFUSED: line %d: %s" % (line_in_section(t, "[0.0]", "位置="), TC_POSITION_REASON))
+
+
+INTERP_TC_MODE = "補間移動(時間制御)"
+
+
+def test_interp_tc_mode_passes_keeps_payload_and_multi_point():
+    # 補間移動(時間制御): frames follow the object rules, values and payload are kept (two points, curve, three points).
+    cases = (("0,9", "0.000,100.000", "0", "0,19"),
+             ("0,9", "0.000,100.000", "0|0,0,1,0", "0,19"),
+             ("0,9", "100.000,115.000", "0|", "0,19"),
+             ("0,5,9", "0.000,30.000,100.000", "0|%s" % CURVE, "0,10,19"))
+    for n, (frames, values, flag, new_frames) in enumerate(cases):
+        track = "拡大率=%s,%s,%s" % (values, INTERP_TC_MODE, flag)
+        d, src, text = tc_project("interp_tc_%d" % n, 30, [(frames, "effect.name=標準描画\n%s\n" % track)])
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert_target(src, out, "60")
+        assert code == 0, "exit %d: %s" % (code, err)
+        changes = line_changes(read_bytes(src), read_bytes(out))
+        assert changes == merged(file_edit(text, out), edit_at(text, "[scene.0]", "video.rate=", "video.rate=60"),
+                                 edit_at(text, "[0]", "frame=", "frame=" + new_frames)), changes
+        assert track in lf_lines(out) and read_report(out)["notes"] == [], read_report(out)["notes"]
+    # The value count is checked, also with a comma payload.
+    d, src, text = tc_project("interp_tc_count", 30, [("0,5,9", "effect.name=標準描画\n拡大率=0.000,100.000,%s,0|%s\n" % (INTERP_TC_MODE, CURVE))])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    expected = "REFUSED: line %d: trackbar has 2 values but object [0] has 3 frame points" % line_in_section(text, "[0.0]", "拡大率=")
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_precise_interp_tc_mode_always_skips():
+    d = case_dir("prec_interp_tc")
+    for label, flag, target in (("plain", "0", "24"), ("plain60", "0", "60"), ("payload", "0|%s" % CURVE, "24"),
+                                ("constant", "0", "24")):
+        values = "-200.00,-200.00" if label == "constant" else "-200.00,200.00"
+        _, src, text = easing_variant("prec_interp_tc_" + label, [(LINEAR_X, "X=%s,%s,%s" % (values, INTERP_TC_MODE, flag))])
+        out_p, out_n = os.path.join(d, label + "_p.aup2"), os.path.join(d, label + "_n.aup2")
+        for path, extra in ((out_p, ["--precise"]), (out_n, [])):
+            code, _, err = convert_target(src, path, target, extra=extra)
+            assert code == 0, "%s: exit %d: %s" % (label, code, err)
+        report = read_report(out_p)["precise"]
+        x_line = line_number_of(src, INTERP_TC_MODE)
+        assert report["applied"] == 0 and report["tracks"] == [], (label, report)
+        assert report["skipped"] == [{"line": line_in_section(text, "[0]", "frame="), "reason":
+                                      "trackbar at line %d uses mode %s; it is not re-sampled" % (x_line, INTERP_TC_MODE)}], \
+            (label, report["skipped"])
+        assert lines_without_file(out_p) == lines_without_file(out_n), "%s: skipped object must keep the plain output" % label
 
 
 TESTS = [
@@ -2760,7 +3060,7 @@ TESTS = [
     test_time_control_frame_drop_invalid_values_refused,
     test_frame_drop_above_one_outside_time_control_is_refused,
     test_time_control_position_shapes_are_refused,
-    test_time_control_mode_is_refused_outside_time_control_effect,
+    test_time_control_mode_is_accepted_outside_time_control_effect,
     test_time_control_in_kept_scene_is_untouched,
     test_time_control_uses_the_ratio_of_its_own_scene,
     test_time_control_precise_leaves_time_control_alone,
@@ -2774,6 +3074,18 @@ TESTS = [
     test_easing_multi_point_frames_rescaled_values_kept,
     test_easing_interpolated_version_and_other_payloads_still_refused,
     test_easing_precise_skips_the_object_and_keeps_values,
+    test_tc_mode_ordinary_track_two_and_multi_point,
+    test_tc_mode_ordinary_track_count_mismatch_refused,
+    test_payload_kept_for_the_three_modes_and_comma_payloads,
+    test_payload_other_modes_still_refused_with_comma_payload,
+    test_precise_linear_payload_is_resampled_and_kept,
+    test_precise_tc_mode_two_points_resampled_without_extra_keyframes,
+    test_precise_tc_mode_needing_keyframes_curve_or_multi_point_is_skipped,
+    test_time_control_curve_is_kept,
+    test_time_control_curve_frame_drop,
+    test_time_control_curve_precise_and_same_rate,
+    test_interp_tc_mode_passes_keeps_payload_and_multi_point,
+    test_precise_interp_tc_mode_always_skips,
 ]
 
 
