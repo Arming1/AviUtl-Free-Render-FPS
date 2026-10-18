@@ -2,36 +2,43 @@
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-10-18
+
 ### Added
 
-- `直線移動(時間制御)` (linear move, time control) is accepted on any effect track, not only the
-  時間制御(オブジェクト) `位置`. Frame positions are converted the same way as for `直線移動`, and values are unchanged.
-  Multi-point tracks are accepted too. The host ignores the times of the middle points and moves at a constant speed over
-  the whole path, so the converter does the same.
-- The `|` curve payload written by 時間制御編集 is kept byte for byte on `直線移動`, `直線移動(時間制御)` and
-  `イージング（通常）@イージング` tracks. The payload is not checked.
+- `直線移動(時間制御)` and `補間移動(時間制御)` are accepted on any effect track, with two or more points. Values and
+  `|` curve payloads are kept byte for byte. Frames are converted like `直線移動`.
+- 時間制御(オブジェクト) `位置` with a curve keeps its curve and values; only the frames are converted.
+- `test_kit` (host test projects, probes, scripts and checklists) is in the repository.
 
 ### Changed
 
-- Precise motion handles `直線移動(時間制御)` as follows:
-  - Two points with no payload and no end hold needed: re-sampled like `直線移動`, and the mode text stays `直線移動(時間制御)`.
-  - Two points that need an end hold: the object is skipped, because the extra keyframes would be ignored by this mode.
-  - A payload or more than two points: the object is skipped and listed in `precise.skipped`.
-  - `直線移動` with a payload is re-sampled and the payload is kept after the flag.
-- 時間制御(オブジェクト) `位置` with a curve payload keeps its curve and values unchanged. The position is object-relative,
-  so its error stays within one frame. With a curve, a drop (`コマ落ち=K`, K ≥ 2) is kept only when K × k and
-  the controlled seconds are both integers. Otherwise the conversion is refused with a message naming the line.
-  `コマ落ち=1` is unchanged, and `コマ落ち=0` is still refused.
+- Precise motion handles the time-control modes: a two-point `直線移動(時間制御)` with no payload is re-sampled
+  when no end hold is needed; `直線移動` with a payload is re-sampled and keeps the payload. Other time-control
+  tracks, and objects with a curve or more than two points, are skipped and listed in `precise.skipped`.
+- 時間制御 `位置` with a curve: `コマ落ち=K` (K ≥ 2) is kept only when `K × k` and the controlled seconds are integers.
+  Otherwise the conversion is refused with a message naming the line.
 
-### Validation status
+### Fixed
 
-- Probes R1 and R2 in AviUtl2 v2.1.12 (`test_kit/7_轨迹移動方式/`):
-  - R1a (`直線移動`) and R1b (`直線移動(時間制御)`, no curve, two points) give identical frames (0.000 px).
-  - R1d (`直線移動(時間制御)` with middle points) ignores the middle-point times and moves at a constant speed over the
-    whole path. The maximum error is 0.19 px.
-  - R2 (curve edited in 時間制御編集) is stored as the payload `|1,0,1,0`.
-- Local corpus of 138 projects: 121 convert before this change. After it, 9 + 1 of the 17 remaining are expected to
-  convert. This is pending: not yet confirmed by an in-host conversion.
+- C++ retimer: the time-control staircase looks up objects per object. A 35 MB project went from minutes to 2.7 s.
+- C++ retimer matches the Python rules for time-control modes and curve payloads (cross-check 3630/3630, plus 56 real
+  projects byte-identical).
+
+### Validation
+
+- Probes R1–R3 in AviUtl2 v2.1.12 (`test_kit/7_轨迹移动方式/`, `test_kit/8_補間移動時間制御/`):
+  - R1a and R1b (`直線移動` and `直線移動(時間制御)`, two points, no curve) give identical frames (160 of 160, 0.000 px).
+  - R1d: middle-point times are ignored and the move runs at constant speed over the path (max error 0.19 px).
+  - R2: a curve edited in 時間制御編集 is stored as the payload `|1,0,1,0`.
+  - R3: `補間移動(時間制御)` follows the progress inside the object, with residual ≤ 0.38 px at 30 and 60 fps
+    (figure from `tools/aup2_fps_upconvert.md`; the result table in `test_kit/8_補間移動時間制御/` is not yet filled in).
+- CI runs the Python and C++ tests, the cross-check and the plugin build. Actions writes run summaries, and the R1/R2
+  host results are recomputed from the committed per-frame data (`tests/host_results/`).
+- Local corpus of 138 projects: 121 converted before this release, and about 10 of the remaining 17 are expected to
+  convert now. Not yet confirmed in AviUtl2.
+- Known limit: at very low targets (for example 66 → 10) an object shorter than one output frame can overlap its
+  neighbour after rounding, and the conversion is refused. See `docs/KNOWN_LIMITATIONS.md`.
 
 ## [1.2.5] — 2026-10-18
 
