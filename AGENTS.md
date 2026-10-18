@@ -66,11 +66,12 @@ Duplicating frames only is NOT acceptable.
 
 
 
-Phase 1: Render pipeline investigation.
+Maintenance of the released plugin (v1.3.0, 2026-10-18).
 
-
-
-Do not build the full FreeRenderFPS plugin yet.
+New sessions: read `docs/HANDOFF.zh-CN.md` first. It describes the project, the
+current work, the working rules (analysis before edits, subagent policy,
+Python/C++ byte-identical retimer, host probes before allowing new behaviour)
+and what must not be touched.
 
 
 
