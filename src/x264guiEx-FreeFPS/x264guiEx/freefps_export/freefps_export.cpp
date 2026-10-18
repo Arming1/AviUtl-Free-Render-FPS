@@ -10,8 +10,11 @@
 //   1. Project path: taken from the project load and save callbacks (PROJECT_FILE::get_project_file_path,
 //      plugin2.h). A project with no path is refused: save it first.
 //   2. Dialog: target FPS (exact rational: 66, 60000/1001; decimals refused), output file, and the precise motion
-//      option (on by default: linear trackbars are re-sampled exactly; see retime.h). The encoder settings button
-//      opens the x264guiEx settings window (the output settings, edited in place); a read-only summary shows them.
+//      option (always on; shown only in debug mode, see DebugConfig; linear trackbars are re-sampled exactly, see
+//      retime.h), and the sub-scene rate policy
+//      (auto by default; SubsceneRatePolicy in retime.h). A read-only scene plan shows what each scene will become: a
+//      dry run of retime() on the saved project file, nothing written. The encoder settings button opens the
+//      x264guiEx settings window (the output settings, edited in place); a read-only summary shows them.
 //   3. Confirm: the SDK has no unsaved-changes flag, so the user is always asked whether to save the project to its
 //      own path first. No (or closing the prompt) aborts with no side effects.
 //   4. save_project_file(original) once confirmed, then copy the saved original to
@@ -21,7 +24,8 @@
 //   7. Wait for CHANGE_EDIT_STATE (SAVE, then EDIT) and check the output file.
 //   8. open_project_file(original, false) on every outcome once the user has confirmed. The original project is
 //      the one reopened, never the temp copy.
-//   9. Delete the temp folder. FREE_FPS_EXPORT_KEEP_TEMP=1 keeps it for debugging.
+//   9. Delete the temp folder. FREE_FPS_EXPORT_KEEP_TEMP=1 keeps it for debugging. The debug ini (keep_temp=1) keeps
+//      retimed.aup2 and its sidecar only.
 //
 // Threading: as in experiments/auto_export. SDK calls run on the main thread (menu callback and timer). The
 // CHANGE_EDIT_STATE listener only sets an atomic flag. The project load and save handlers only store the path.
@@ -96,13 +100,18 @@ constexpr int kIdRateLabel = 105;
 constexpr int kIdOutputLabel = 106;
 constexpr int kIdSummary = 107;
 constexpr int kIdEncSettings = 108;
+constexpr int kIdSubsceneLabel = 109;
+constexpr int kIdSubsceneCombo = 110;
+constexpr int kIdScenePlan = 111;
 
 // Dialog metrics in dialog units. The content width is kBaseContentWidth, or wider when a text needs it (layout_dialog).
 constexpr int kMargin = 7;
 constexpr int kBaseContentWidth = 248;
-constexpr int kDialogHeight = 140;
+constexpr int kDialogHeight = 140;  // initial size of the template; layout_dialog sets the real one
 constexpr int kButtonPadding = 12;  // added to a button's text width
 constexpr int kCheckPadding = 14;   // check box square and spacing
+// A combo box's height is the height of its drop-down list, so the box reserves room for the three policy items.
+constexpr int kSubsceneComboHeight = 38;
 
 LOG_HANDLE* g_logger = nullptr;
 EDIT_HANDLE* g_edit = nullptr;
@@ -203,6 +212,52 @@ bool keep_temp_requested() {
     return length == 1 && value[0] == L'1';
 }
 
+// Debug settings from free_fps_export.ini, in the folder of this DLL (see the .example in test_kit). Without the file,
+// or without [debug] enabled=1, the normal mode applies: precise motion on and hidden, no extra decimals, temp files
+// removed.
+constexpr wchar_t kDebugIniName[] = L"free_fps_export.ini";
+constexpr wchar_t kDebugSection[] = L"debug";
+constexpr int kMaxExtraDecimals = 4;
+
+struct DebugConfig {
+    bool enabled = false;
+    bool precise = true;     // [debug] precise, default 1; the dialog shows the check box only in debug mode
+    int extra_decimals = 0;  // [debug] extra_decimals, clamped to 0..4
+    bool keep_temp = false;  // [debug] keep_temp = 1 keeps retimed.aup2 and its sidecar after the export
+};
+
+// Path of free_fps_export.ini beside this DLL. g_instance is set by RegisterPlugin. Empty on failure.
+std::wstring debug_ini_path() {
+    if (g_instance == nullptr) {
+        return std::wstring();
+    }
+    std::vector<wchar_t> module(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(g_instance, module.data(), static_cast<DWORD>(module.size()));
+    if (length == 0 || length >= module.size()) {
+        return std::wstring();
+    }
+    const std::wstring path(module.data(), length);
+    const std::size_t slash = path.find_last_of(L'\\');
+    if (slash == std::wstring::npos) {
+        return std::wstring();
+    }
+    return path.substr(0, slash + 1) + kDebugIniName;
+}
+
+DebugConfig load_debug_config() {
+    DebugConfig config;
+    const std::wstring path = debug_ini_path();
+    if (path.empty() || GetPrivateProfileIntW(kDebugSection, L"enabled", 0, path.c_str()) != 1) {
+        return config;
+    }
+    config.enabled = true;
+    config.precise = GetPrivateProfileIntW(kDebugSection, L"precise", 1, path.c_str()) != 0;
+    const int decimals = GetPrivateProfileIntW(kDebugSection, L"extra_decimals", 0, path.c_str());
+    config.extra_decimals = (std::min)(kMaxExtraDecimals, (std::max)(0, decimals));
+    config.keep_temp = GetPrivateProfileIntW(kDebugSection, L"keep_temp", 0, path.c_str()) == 1;
+    return config;
+}
+
 // Creates <root><yyyymmdd-hhmmss-mmm>[-n]\ and returns its path with a trailing backslash. Root defaults to
 // %TEMP%\FreeFpsExport\. Empty string on failure.
 std::wstring make_work_dir() {
@@ -235,19 +290,29 @@ std::wstring make_work_dir() {
     return std::wstring();
 }
 
+bool file_exists(const std::wstring& path) {
+    return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
 // Deletes only the files this plugin writes, then the folder. Files that cannot be deleted (for example a file the
-// host still holds) are logged and left in place.
-void remove_work_dir(const std::wstring& dir) {
+// host still holds) are logged and left in place. With keep_outputs (debug keep_temp), retimed.aup2 and its sidecar
+// stay, so the folder stays too; only the source copy is deleted.
+void remove_work_dir(const std::wstring& dir, bool keep_outputs) {
     if (dir.empty()) {
         return;
     }
-    for (const std::wstring name : {std::wstring(kSrcName), std::wstring(kRetimedName),
-                                    std::wstring(kRetimedName) + kSidecarName}) {
+    std::vector<std::wstring> names = {kSrcName};
+    if (!keep_outputs) {
+        names.push_back(kRetimedName);
+        names.push_back(std::wstring(kRetimedName) + kSidecarName);
+    }
+    for (const std::wstring& name : names) {
         if (!DeleteFileW((dir + name).c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND) {
             log(true, L"cannot delete temp file " + dir + name);
         }
     }
-    if (!RemoveDirectoryW(dir.c_str())) {
+    // With keep_outputs the folder is not empty when files were kept; that failure is expected and not logged.
+    if (!RemoveDirectoryW(dir.c_str()) && !keep_outputs) {
         log(true, L"cannot remove temp folder " + dir);
     }
 }
@@ -289,7 +354,10 @@ bool output_written(const std::wstring& path, const FILETIME& since, long long& 
 
 struct ExportRequest {
     Rational target;
-    bool precise = true;
+    bool precise = true;  // always true outside debug mode
+    free_fps::SubsceneRatePolicy policy = free_fps::SubsceneRatePolicy::Auto;
+    std::size_t extra_decimals = 0;  // precise mode only; 0 outside debug mode
+    bool keep_outputs = false;       // debug keep_temp: keep retimed.aup2 and its sidecar
     std::wstring output;
     std::wstring plugin;
     std::wstring original;  // the project file path, set by begin_export()
@@ -358,8 +426,19 @@ void finish_run() {
     const bool keep = keep_temp_requested();
     if (keep) {
         text += L"\n\nTemp files kept (" + std::wstring(kKeepTempEnv) + L"=1): " + run->work_dir;
+    } else if (run->request.keep_outputs) {
+        remove_work_dir(run->work_dir, true);
+        std::wstring kept;
+        for (const std::wstring& path : {run->retimed_path, run->json_path}) {
+            if (file_exists(path)) {
+                kept += L"\n" + path;
+            }
+        }
+        if (!kept.empty()) {
+            text += L"\n\nDebug keep_temp=1, kept:" + kept;
+        }
     } else {
-        remove_work_dir(run->work_dir);
+        remove_work_dir(run->work_dir, false);
     }
     log(!ok, L"run finished: " + std::wstring(ok ? L"OK" : L"FAILED"));
     g_notify(ok, text);
@@ -394,8 +473,9 @@ void tick(Run& run) {
             fail(run, L"cannot read the temp copy: " + run.src_path);
             return;
         }
-        const RetimeResult result =
-            free_fps::retime(src_bytes, run.request.target, run.retimed_path, run.request.precise);
+        const RetimeResult result = free_fps::retime(src_bytes, run.request.target, run.retimed_path,
+                                                     run.request.precise, run.request.extra_decimals,
+                                                     run.request.policy);
         if (!result.ok) {
             fail(run, to_wide(free_fps::refusal_message(result)));
             return;
@@ -585,6 +665,13 @@ struct DialogValues {
     std::wstring rate;
     std::wstring output;
     bool precise = true;
+    free_fps::SubsceneRatePolicy policy = free_fps::SubsceneRatePolicy::Auto;
+    DebugConfig debug;
+    // The scene plan reads the saved project. It is read once when the dialog opens: the path and the bytes, or no
+    // path when the project has no file yet.
+    std::wstring project_path;
+    std::string project_bytes;
+    bool project_read = false;
 };
 
 class TemplateBuilder {
@@ -689,12 +776,37 @@ void place_item(HWND dlg, int id, int x, int y, int w, int h) {
                  SWP_NOZORDER);
 }
 
+bool is_shown(HWND dlg, int id) {
+    return (GetWindowLongPtrW(GetDlgItem(dlg, id), GWL_STYLE) & WS_VISIBLE) != 0;
+}
+
+// Height in dialog units of a static text wrapped to width_dlu, measured with the control's own font. The text is
+// wrapped at spaces, as the static control wraps it.
+int wrapped_height_dlu(HWND dlg, int id, int width_dlu) {
+    HWND ctl = GetDlgItem(dlg, id);
+    const std::wstring text = get_text(dlg, id);
+    RECT unit{0, 0, 4, 8};  // 4 x 8 dialog units in pixels
+    MapDialogRect(dlg, &unit);
+    HDC dc = GetDC(ctl);
+    HFONT font = reinterpret_cast<HFONT>(SendMessageW(ctl, WM_GETFONT, 0, 0));
+    HGDIOBJ old_font = SelectObject(dc, font != nullptr ? font : GetStockObject(DEFAULT_GUI_FONT));
+    RECT measured{0, 0, unit.right * width_dlu / 4, 0};
+    DrawTextW(dc, text.c_str(), -1, &measured, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+    SelectObject(dc, old_font);
+    ReleaseDC(ctl, dc);
+    const double pixels_per_unit_y = unit.bottom / 8.0;
+    return static_cast<int>(std::ceil((measured.bottom - measured.top) / pixels_per_unit_y)) + 1;
+}
+
 // Places every control in dialog units, in pixels of the dialog's own font, and sizes the dialog. The content width is
 // kBaseContentWidth, or wider when a label, check box or the summary needs more, so no text is cut off in any language.
+// The rows follow each other from the top. A hidden row (the scene plan with one scene) takes no space.
 void layout_dialog(HWND dlg) {
+    const bool precise_shown = is_shown(dlg, kIdPrecise);
     int content = kBaseContentWidth;
     for (const int need : {text_width_dlu(dlg, kIdRateLabel, 0), text_width_dlu(dlg, kIdOutputLabel, 0),
-                           text_width_dlu(dlg, kIdPrecise, kCheckPadding), text_width_dlu(dlg, kIdSummary, 0)}) {
+                           precise_shown ? text_width_dlu(dlg, kIdPrecise, kCheckPadding) : 0,
+                           text_width_dlu(dlg, kIdSubsceneLabel, 0), text_width_dlu(dlg, kIdSummary, 0)}) {
         content = (std::max)(content, need);
     }
     const int browse_w = (std::max)(44, text_width_dlu(dlg, kIdBrowse, kButtonPadding));
@@ -708,13 +820,27 @@ void layout_dialog(HWND dlg) {
     place_item(dlg, kIdOutputLabel, kMargin, 38, content, 10);
     place_item(dlg, kIdOutput, kMargin, 48, content - browse_w - 4, 14);
     place_item(dlg, kIdBrowse, right - browse_w, 48, browse_w, 14);
-    place_item(dlg, kIdPrecise, kMargin, 66, content, 12);
-    place_item(dlg, kIdSummary, kMargin, 84, content, 10);
-    place_item(dlg, kIdEncSettings, kMargin, 100, enc_w, 14);
-    place_item(dlg, IDCANCEL, right - cancel_w, 120, cancel_w, 14);
-    place_item(dlg, IDOK, right - cancel_w - 4 - ok_w, 120, ok_w, 14);
+    int row_y = 66;
+    if (precise_shown) {
+        place_item(dlg, kIdPrecise, kMargin, row_y, content, 12);
+        row_y += 18;
+    }
+    place_item(dlg, kIdSubsceneLabel, kMargin, row_y, content, 10);
+    place_item(dlg, kIdSubsceneCombo, kMargin, row_y + 11, content, kSubsceneComboHeight);
+    row_y += 11 + kSubsceneComboHeight + 6;
+    if (is_shown(dlg, kIdScenePlan)) {
+        const int plan_h = wrapped_height_dlu(dlg, kIdScenePlan, content);
+        place_item(dlg, kIdScenePlan, kMargin, row_y, content, plan_h);
+        row_y += plan_h + 6;
+    }
+    place_item(dlg, kIdSummary, kMargin, row_y, content, 10);
+    place_item(dlg, kIdEncSettings, kMargin, row_y + 16, enc_w, 14);
+    const int buttons_y = row_y + 36;
+    place_item(dlg, IDCANCEL, right - cancel_w, buttons_y, cancel_w, 14);
+    place_item(dlg, IDOK, right - cancel_w - 4 - ok_w, buttons_y, ok_w, 14);
 
-    RECT frame{0, 0, 2 * kMargin + content, kDialogHeight};
+    const int dialog_h = buttons_y + 14 + 6;  // 6 dialog units below the buttons
+    RECT frame{0, 0, 2 * kMargin + content, dialog_h};
     MapDialogRect(dlg, &frame);  // client size in pixels
     AdjustWindowRectEx(&frame, static_cast<DWORD>(GetWindowLongPtrW(dlg, GWL_STYLE)), FALSE,
                        static_cast<DWORD>(GetWindowLongPtrW(dlg, GWL_EXSTYLE)));
@@ -753,11 +879,111 @@ void refresh_summary(HWND dlg) {
     layout_dialog(dlg);
 }
 
+// The policy the sub-scene rate combo box shows: 0 auto, 1 follow, 2 keep (the order of the items in WM_INITDIALOG).
+free_fps::SubsceneRatePolicy selected_policy(HWND dlg) {
+    switch (static_cast<int>(SendMessageW(GetDlgItem(dlg, kIdSubsceneCombo), CB_GETCURSEL, 0, 0))) {
+    case 1:
+        return free_fps::SubsceneRatePolicy::Follow;
+    case 2:
+        return free_fps::SubsceneRatePolicy::Keep;
+    default:
+        return free_fps::SubsceneRatePolicy::Auto;
+    }
+}
+
+// A rate as the plan shows it: "60/1" is "60", a fraction such as "60000/1001" stays as it is.
+std::wstring display_rate(const std::string& rate) {
+    std::string shown = rate;
+    const std::string whole_suffix = "/1";
+    if (shown.size() > whole_suffix.size() &&
+        shown.compare(shown.size() - whole_suffix.size(), whole_suffix.size(), whole_suffix) == 0) {
+        shown.erase(shown.size() - whole_suffix.size());
+    }
+    return to_wide(shown);
+}
+
+// One line per scene, e.g. "Main 30->60 (follow) | Sub-scene1 60->60 (follow) | Sub-scene2 15->15 (keep)". A scene's
+// name is shown when it has one; otherwise the exported scene is the main one and the others are numbered.
+std::wstring scene_plan_text(const RetimeResult& result) {
+    std::wstring text;
+    for (const free_fps::ScenePlan& scene : result.scenes) {
+        std::wstring label = to_wide(scene.name);
+        if (label.empty()) {
+            if (scene.exported) {
+                label = mes(AuoFreeFpsExportScenePlanMain, L"Main");
+            } else {
+                label = mes(AuoFreeFpsExportScenePlanSub, L"Sub-scene") + std::to_wstring(scene.scene);
+            }
+        }
+        const std::wstring word = scene.follow ? mes(AuoFreeFpsExportScenePlanFollow, L"follow")
+                                               : mes(AuoFreeFpsExportScenePlanKeep, L"keep");
+        if (!text.empty()) {
+            text += L" | ";
+        }
+        text += label + L" " + display_rate(scene.source_rate) + L"\u2192" + display_rate(scene.target_rate) +
+                L" \uFF08" + word + L"\uFF09";
+    }
+    return text;
+}
+
+// Fills the sub-scene rate combo box in the order selected_policy() reads it, and selects the first item (auto).
+void init_policy_combo(HWND dlg) {
+    HWND policy = GetDlgItem(dlg, kIdSubsceneCombo);
+    const std::wstring items[] = {
+        mes(AuoFreeFpsExportSubsceneAuto, L"Auto (recommended)"),
+        mes(AuoFreeFpsExportSubsceneFollow, L"Follow the target rate for all scenes"),
+        mes(AuoFreeFpsExportSubsceneKeep, L"Keep the original rate for all scenes"),
+    };
+    for (const std::wstring& item : items) {
+        SendMessageW(policy, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(item.c_str()));
+    }
+    SendMessageW(policy, CB_SETCURSEL, 0, 0);
+}
+
+// Re-runs the plan for the target rate, sub-scene policy and precise setting in the dialog. retime() never writes, so
+// the output path is only the placeholder it needs. Hidden when the target rate is not valid yet, and for a single
+// scene (the policy has nothing to decide there). Shown as the message when the project is unsaved or refused.
+void refresh_scene_plan(HWND dlg) {
+    DialogValues* values = reinterpret_cast<DialogValues*>(GetWindowLongPtrW(dlg, DWLP_USER));
+    std::wstring text;
+    bool show = false;
+    Rational target;
+    std::string error;
+    const std::wstring rate = trim(get_text(dlg, kIdRate));
+    if (values != nullptr && free_fps::parse_target_rate(free_fps::wide_to_utf8(rate), target, error)) {
+        if (values->project_path.empty()) {
+            text = mes(AuoFreeFpsExportScenePlanUnsaved, L"Save the project to preview");
+            show = true;
+        } else if (values->project_read) {
+            const bool precise = IsDlgButtonChecked(dlg, kIdPrecise) == BST_CHECKED;
+            const RetimeResult result =
+                free_fps::retime(values->project_bytes, target, values->project_path, precise,
+                                 static_cast<std::size_t>(values->debug.extra_decimals), selected_policy(dlg));
+            if (!result.ok) {
+                text = to_wide(free_fps::refusal_message(result));
+                show = true;
+            } else if (result.scenes.size() > 1) {
+                text = mes(AuoFreeFpsExportScenePlanPrefix, L"Preview from the saved project: ") +
+                       scene_plan_text(result);
+                show = true;
+            }
+        }
+    }
+    ShowWindow(GetDlgItem(dlg, kIdScenePlan), show ? SW_SHOW : SW_HIDE);
+    SetDlgItemTextW(dlg, kIdScenePlan, text.c_str());
+    layout_dialog(dlg);
+}
+
 INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
-    case WM_INITDIALOG:
+    case WM_INITDIALOG: {
         SetWindowLongPtrW(dlg, DWLP_USER, lparam);
-        SetWindowTextW(dlg, mes(AuoFreeFpsExportTitle, kTitle));
+        DialogValues* init = reinterpret_cast<DialogValues*>(lparam);
+        std::wstring title = mes(AuoFreeFpsExportTitle, kTitle);
+        if (init->debug.enabled) {
+            title += L" [Debug]";
+        }
+        SetWindowTextW(dlg, title.c_str());
         SetDlgItemTextW(dlg, kIdRateLabel,
                         mes(AuoFreeFpsExportTargetFps, L"Target FPS (exact: 66, 60000/1001; decimals are refused)"));
         SetDlgItemTextW(dlg, kIdOutputLabel, mes(AuoFreeFpsExportOutputFile, L"Output file"));
@@ -767,10 +993,17 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
         SetDlgItemTextW(dlg, kIdEncSettings, mes(AuoFreeFpsExportEncSettings, L"Encoder settings..."));
         SetDlgItemTextW(dlg, IDOK, mes(AuoFreeFpsExportOK, L"OK"));
         SetDlgItemTextW(dlg, IDCANCEL, mes(AuoFreeFpsExportCancel, L"Cancel"));
-        CheckDlgButton(dlg, kIdPrecise,
-                       reinterpret_cast<DialogValues*>(lparam)->precise ? BST_CHECKED : BST_UNCHECKED);
+        SetDlgItemTextW(dlg, kIdSubsceneLabel, mes(AuoFreeFpsExportSubsceneRate, L"Sub-scene frame rate:"));
+        init_policy_combo(dlg);
+        CheckDlgButton(dlg, kIdPrecise, init->precise ? BST_CHECKED : BST_UNCHECKED);
+        if (!init->debug.enabled) {
+            // Normal mode: precise motion is forced on, and the check box is hidden. Hidden rows take no space.
+            ShowWindow(GetDlgItem(dlg, kIdPrecise), SW_HIDE);
+        }
         refresh_summary(dlg);
+        refresh_scene_plan(dlg);
         return TRUE;
+    }
 
     case WM_COMMAND:
         if (LOWORD(wparam) == kIdBrowse) {
@@ -805,6 +1038,12 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
         }
         if (LOWORD(wparam) == kIdOutput && HIWORD(wparam) == EN_CHANGE) {
             refresh_summary(dlg);  // the container shown follows the output file name
+            return TRUE;
+        }
+        if ((LOWORD(wparam) == kIdRate && HIWORD(wparam) == EN_CHANGE) ||
+            (LOWORD(wparam) == kIdSubsceneCombo && HIWORD(wparam) == CBN_SELCHANGE) ||
+            (LOWORD(wparam) == kIdPrecise && HIWORD(wparam) == BN_CLICKED)) {
+            refresh_scene_plan(dlg);
             return TRUE;
         }
         if (LOWORD(wparam) == kIdEncSettings) {
@@ -856,7 +1095,8 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
             }
             values->rate = rate;
             values->output = output;
-            values->precise = IsDlgButtonChecked(dlg, kIdPrecise) == BST_CHECKED;
+            values->precise = values->debug.enabled ? IsDlgButtonChecked(dlg, kIdPrecise) == BST_CHECKED : true;
+            values->policy = selected_policy(dlg);
             EndDialog(dlg, IDOK);
             return TRUE;
         }
@@ -872,7 +1112,7 @@ bool ask_for_request(HWND owner, DialogValues& values) {
     const DWORD style = DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU;
     t.dword(style);
     t.dword(0);
-    t.word(10);  // item count
+    t.word(13);  // item count
     t.word(0);
     t.word(0);
     t.word(static_cast<WORD>(2 * kMargin + kBaseContentWidth));
@@ -887,12 +1127,16 @@ bool ask_for_request(HWND owner, DialogValues& values) {
     const DWORD static_style = WS_CHILD | WS_VISIBLE | SS_LEFT;
     const DWORD edit_style = WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL;
     const DWORD button_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP;
+    const DWORD combo_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST;
     add_item(t, static_style, 7, 7, 248, 10, kIdRateLabel, 0x0082, L"");
     add_item(t, edit_style, 7, 18, 248, 14, kIdRate, 0x0081, L"");
     add_item(t, static_style, 7, 38, 248, 10, kIdOutputLabel, 0x0082, L"");
     add_item(t, edit_style, 7, 48, 200, 14, kIdOutput, 0x0081, L"");
     add_item(t, button_style, 211, 48, 44, 14, kIdBrowse, 0x0080, L"");
     add_item(t, button_style | BS_AUTOCHECKBOX, 7, 66, 248, 12, kIdPrecise, 0x0080, L"");
+    add_item(t, static_style, 7, 84, 248, 10, kIdSubsceneLabel, 0x0082, L"");
+    add_item(t, combo_style, 7, 95, 248, kSubsceneComboHeight, kIdSubsceneCombo, 0x0085, L"");
+    add_item(t, static_style, 7, 139, 248, 10, kIdScenePlan, 0x0082, L"");
     add_item(t, static_style, 7, 84, 248, 10, kIdSummary, 0x0082, L"");
     add_item(t, button_style, 7, 100, 90, 14, kIdEncSettings, 0x0080, L"");
     add_item(t, button_style | BS_DEFPUSHBUTTON, 146, 120, 50, 14, IDOK, 0x0080, L"");
@@ -916,6 +1160,12 @@ void on_menu(void*) {
         return;
     }
     DialogValues values;
+    values.debug = load_debug_config();
+    values.precise = values.debug.precise;
+    values.project_path = current_project_path();
+    if (!values.project_path.empty()) {
+        values.project_read = read_file_bytes(values.project_path, values.project_bytes);
+    }
     if (!ask_for_request(g_edit->get_host_app_window(), values)) {
         return;
     }
@@ -928,6 +1178,9 @@ void on_menu(void*) {
     ExportRequest request;
     request.target = target;
     request.precise = values.precise;
+    request.policy = values.policy;
+    request.extra_decimals = static_cast<std::size_t>(values.debug.extra_decimals);
+    request.keep_outputs = values.debug.keep_temp;
     request.output = values.output;
     request.plugin = g_output_name;
     begin_export(request);

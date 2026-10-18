@@ -17,6 +17,17 @@ independent from the project FPS. A 30 FPS project can therefore render genuine
 60 FPS states at coordinates 0.0, 0.5, 1.0, 1.5… It does not copy frames or
 merely change FPS metadata.
 
+## v1.2.5
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list:
+
+- Sub-scene rate: in a multi-scene project, a sub-scene whose source rate is lower than the exported scene's keeps its own rate (A/B/C cases run in AviUtl2).
+- Time control (時間制御(オブジェクト)): 位置 and `コマ落ち` are recomputed exactly in seconds. When the new end values leave 0..100, or a drop is not an integer multiple, the block becomes a `瞬間移動` staircase with one point per step.
+- Precise motion holds the end value after the original end instead of extrapolating. The P6 export (66 → 132, end hold on) ran in AviUtl2 with a per-frame error of at most 0.27 px.
+- The Precise motion checkbox is hidden in the dialog. Precise motion is always on in normal mode. A `free_fps_export.ini` next to the plugin DLL with `[debug] enabled=1` shows the checkbox and the `[debug]` settings (`precise`, `extra_decimals` 0 to 4, `keep_temp`).
+- Easing tracks `イージング（通常）@イージング` are accepted.
+- Known limits (last frame of a low-rate staircase, last frame of a two-point line, 3-decimal 位置) are in [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
+
 ## v1.2.1
 
 v1.2.1 is a patch release on v1.2.0; see [CHANGELOG.md](CHANGELOG.md).
@@ -76,6 +87,15 @@ provides the x264guiEx FreeRenderFPS output plugin and the Edit menu item
 built-in FreeRenderFPS hook supports only AviUtl2 v2.1.4 x64; unknown host
 signatures fail closed. Upgrade notes (old `.auo2`, `free_fps_export.aux2`, and
 backup folders) are in [docs/INSTALL.md](docs/INSTALL.md).
+
+Multiple scenes (from 1.2.5): scenes may have different frame rates. The exported
+scene (`display.scene`, default 0) always follows the target FPS. With **Sub-scene
+frame rate: Auto (recommended)** (the default), another scene follows the target FPS
+when its source rate is at least the exported scene's rate. A slower scene keeps its
+own rate, so its frame-hold steps stay visible. **Follow the target rate for all
+scenes** and **Keep the original rate for all scenes** are the other choices.
+Scene (`シーン`) playback position in seconds and playback speed in percent are not
+rescaled. Version 1.2.1 refuses such projects.
 
 The AviUtl 1.x adapter supports official AviUtl 1.10 + ExEdit 0.92 only and is
 distributed as an x86 `.auo` manual-install package at

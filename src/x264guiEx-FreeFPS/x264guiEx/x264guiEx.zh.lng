@@ -598,6 +598,16 @@ AuoFreeFpsExportEncSummary=编码：
 AuoFreeFpsExportExtMismatch=输出文件的扩展名与编码设置中的容器（%s）不一致。仍要继续吗？
 AuoFreeFpsExportOK=确定
 AuoFreeFpsExportCancel=取消
+AuoFreeFpsExportSubsceneRate=次合成帧率：
+AuoFreeFpsExportSubsceneAuto=自动（推荐）
+AuoFreeFpsExportSubsceneFollow=全部跟随目标帧率
+AuoFreeFpsExportSubsceneKeep=全部保留原帧率
+AuoFreeFpsExportScenePlanFollow=跟随
+AuoFreeFpsExportScenePlanKeep=保留
+AuoFreeFpsExportScenePlanUnsaved=保存工程后可预览
+AuoFreeFpsExportScenePlanMain=主合成
+AuoFreeFpsExportScenePlanSub=次合成
+AuoFreeFpsExportScenePlanPrefix=按已保存的工程预览：
 
 [AUO_CONFIG_CX]
 AUO_CONFIG_CX_X264_ENCMODE_SINGLE_CBR=单通道编码 - 指定码率

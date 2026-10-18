@@ -13,6 +13,17 @@ FPS. For example, a 30 FPS project rendered at 60 FPS is evaluated at 0.0,
 0.5, 1.0, 1.5... project-frame coordinates. It is not frame duplication and
 not an FPS-metadata trick.
 
+## v1.2.5
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list:
+
+- Sub-scene rate: in a multi-scene project, a sub-scene whose source rate is lower than the exported scene's keeps its own rate (A/B/C cases run in AviUtl2).
+- Time control (時間制御(オブジェクト)): 位置 and `コマ落ち` are recomputed exactly in seconds. When the new end values leave 0..100, or a drop is not an integer multiple, the block becomes a `瞬間移動` staircase with one point per step.
+- Precise motion holds the end value after the original end instead of extrapolating. The P6 export (66 → 132, end hold on) ran in AviUtl2 with a per-frame error of at most 0.27 px.
+- The Precise motion checkbox is hidden in the dialog. Precise motion is always on in normal mode. A `free_fps_export.ini` next to the plugin DLL with `[debug] enabled=1` shows the checkbox and the `[debug]` settings (`precise`, `extra_decimals` 0 to 4, `keep_temp`).
+- Easing tracks `イージング（通常）@イージング` are accepted.
+- Known limits (last frame of a low-rate staircase, last frame of a two-point line, 3-decimal 位置) are in [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
+
 ## v1.2.1
 
 v1.2.1 is a patch release on v1.2.0; see [CHANGELOG.md](CHANGELOG.md).
@@ -68,8 +79,8 @@ portable ZIP; the AviUtl host itself is not included.
 
 ## One-click installation
 
-1. Extract the complete `AviUtl2-FreeRenderFPS-v1.2.1-setup.zip`.
-2. Run its adjacent `AviUtl2-FreeRenderFPS-v1.2.1-setup.exe`.
+1. Extract the complete `AviUtl2-FreeRenderFPS-v1.2.5-setup.zip`.
+2. Run its adjacent `AviUtl2-FreeRenderFPS-v1.2.5-setup.exe`.
 3. Restart AviUtl2.
 4. Select `x264guiEx FreeRenderFPS`.
 
@@ -81,7 +92,7 @@ advanced options. The extracted `payload` directory must stay beside the EXE.
 
 ## Manual installation
 
-Extract `AviUtl2-FreeRenderFPS-v1.2.1-portable.zip` directly over the AviUtl2 root. It already
+Extract `AviUtl2-FreeRenderFPS-v1.2.5-portable.zip` directly over the AviUtl2 root. It already
 contains `data\Plugin\x264guiEx-FreeRenderFPS`. Keep
 `x264guiEx-FreeRenderFPS.aux2` and its three adjacent INI files together. Do not
 copy Debug, PDB, probe, watcher, or breakpoint artifacts.
@@ -131,6 +142,15 @@ The same `x264guiEx-FreeRenderFPS.aux2` adds **Free FPS Export...** to the
 AviUtl2 **Edit** menu. On AviUtl2 v2.1.12, use it for free render FPS: it
 re-times the project with public SDK APIs and exports at any rational FPS. Save
 the project to a file before exporting.
+
+Multiple scenes (from 1.2.5): scenes may have different frame rates. The exported
+scene (`display.scene`, default 0) always follows the target FPS. With **Sub-scene
+frame rate: Auto (recommended)** (the default), another scene follows the target FPS
+when its source rate is at least the exported scene's rate. A slower scene keeps its
+own rate, so its frame-hold steps stay visible. **Follow the target rate for all
+scenes** and **Keep the original rate for all scenes** are the other choices.
+Scene (`シーン`) playback position in seconds and playback speed in percent are not
+rescaled. Version 1.2.1 refuses such projects.
 
 ## FPS presets
 

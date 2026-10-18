@@ -454,11 +454,23 @@ const std::set<std::string> kSceneKnownKeys = {
 };
 const std::set<std::string> kSceneFrameKeys = {"cursor.frame", "preview.frame", "display.frame"};
 const std::string kSceneRefuseMarkers[] = {"frame", "mark", "range"};
-const std::set<std::string> kTrackModes = {"直線移動", "補間移動", "瞬間移動", "移動無し", "回転", "再生範囲"};
+// イージング（通常）@イージング (full-width parentheses) is script-defined easing: its value depends only on the progress inside
+// the object, the parameter and the two end values, so frames are rescaled and values are kept like 直線移動.
+// イージング（補間移動）@イージング reads obj.getpoint("time") and is not listed.
+const std::string kEasingMode = "イージング（通常）@イージング";
+const std::set<std::string> kTrackModes = {"直線移動", "補間移動", "瞬間移動", "移動無し", "回転", "再生範囲", kEasingMode};
+// Modes that may carry a '|' payload after the parameter (kept as written, not checked); every other mode refuses it.
+const std::set<std::string> kTrackPayloadModes = {kEasingMode};
 const std::set<std::string> kTrackCountExempt = {"再生範囲"};
 const std::string kCounterEffect = "カウンター";
 const std::string kSpeedKey = "速度";
-const std::string kColumnKey = "コマ落ち";
+const std::string kColumnKey = "コマ落ち";  // a positive integer; converted only inside a time control effect
+const std::string kColumnNoDrop = "1";
+// 時間制御(オブジェクト): 位置=a,b,直線移動(時間制御),flag maps the object's range to the controlled layers.
+const std::string kTimeControlEffect = "時間制御(オブジェクト)";
+const std::string kTimeControlPosition = "位置";
+const std::string kTimeControlMode = "直線移動(時間制御)";
+const std::string kTimeControlRefusal = "time control 位置 must be a two-point 直線移動(時間制御) track";
 
 // ---------------------------------------------------------------------------
 // Line structure
@@ -624,9 +636,16 @@ struct Section {
     i64 b = 0;
 };
 
+// One [scene.N] section: where its rate lines are, its own rate, and what the re-timer does with it.
 struct SceneRate {
     std::size_t rate_idx = 0;
     std::optional<std::size_t> scale_idx;
+    i64 rate_value = 0;      // video.rate as written
+    i64 scale_value = 1;     // video.scale as written (1 when absent)
+    Rational rate;           // rate_value / scale_value in lowest terms
+    std::string name;        // name= of the section (the last one), empty when absent
+    bool follow = true;      // false: the scene is kept as it is
+    Rational k{1, 1};        // target rate / rate for a followed scene, 1 for a kept one
 };
 
 struct Mode {
@@ -635,7 +654,20 @@ struct Mode {
     Rational target;
     bool precise = false;
     std::size_t precise_extra_decimals = 0;
+    SubsceneRatePolicy subscene_rate = SubsceneRatePolicy::Auto;
 };
+
+const char* policy_name(SubsceneRatePolicy policy) {
+    switch (policy) {
+    case SubsceneRatePolicy::Follow:
+        return "follow";
+    case SubsceneRatePolicy::Keep:
+        return "keep";
+    case SubsceneRatePolicy::Auto:
+        break;
+    }
+    return "auto";
+}
 
 // Python check_layers(): objects are grouped by (scene, layer=). Within a group, sorted by start, a pair that
 // touched before must still touch and a pair that did not overlap must not overlap after rescaling.
@@ -703,6 +735,24 @@ Rational rat_add(const Rational& a, const Rational& b) {
 
 bool rat_equal(const Rational& a, const Rational& b) {
     return a.num == b.num && a.den == b.den;  // both reduced
+}
+
+i64 rat_floor(const Rational& r) {
+    return floor_div(r.num, r.den);
+}
+
+i64 rat_ceil(const Rational& r) {
+    return -floor_div(-r.num, r.den);  // num is never INT64_MIN (make_rational)
+}
+
+Rational rat_clamp(const Rational& x, const Rational& low, const Rational& high) {
+    if (rat_less(x, low)) {
+        return low;
+    }
+    if (rat_less(high, x)) {
+        return high;
+    }
+    return x;
 }
 
 i64 pow10_checked(std::size_t d) {
@@ -777,6 +827,49 @@ Rational track_value(const std::vector<i64>& pts, const std::vector<Rational>& v
     return rat_add(vals[seg], rat_mul(rat_sub(vals[seg + 1], vals[seg]), ratio));
 }
 
+// The same curve held at both ends: before the first keyframe the first value, after the last keyframe the last value
+// (an object keeps its last value after its last frame, the track does not continue its line).
+Rational track_value_held(const std::vector<i64>& pts, const std::vector<Rational>& vals, const Rational& t) {
+    return track_value(pts, vals, rat_clamp(t, Rational{pts.front(), 1}, Rational{pts.back(), 1}));
+}
+
+// The keyframes written for a held object: the rescaled keyframes (nf) plus the points where the target
+// v(clamp(n / k, s, e)) bends because of the clamp, so that the value stops at the original end value (and starts at the
+// original start value) instead of continuing the line. n / k is the original frame of the new frame n; s and e are the
+// first and last original keyframe, s' and e' the first and last new one.
+//   End, when e' / k > e: m = floor(e k) (at least s'). m gets v(m / k) and, when e k is not an integer, m + 1 gets v(e);
+//   every later frame up to e' is v(e) as well.
+//   Start, when s' / k < s: s' is v(s); with n0 = ceil(s k) <= e', n0 gets v(n0 / k) and n0 - 1 (when it is after s')
+//   gets v(s).
+// An object that was shortened to one frame (equal frames) has no segment and is returned as it is.
+std::vector<i64> hold_keyframes(const std::vector<i64>& pts, const std::vector<i64>& nf, const Rational& k) {
+    const i64 s2 = nf.front();
+    const i64 e2 = nf.back();
+    if (e2 <= s2) {
+        return nf;
+    }
+    std::set<i64> keys(nf.begin(), nf.end());
+    const Rational start_scaled = rat_mul(Rational{pts.front(), 1}, k);  // s k
+    const Rational end_scaled = rat_mul(Rational{pts.back(), 1}, k);     // e k
+    if (rat_less(end_scaled, Rational{e2, 1})) {
+        const i64 m = (std::max)(rat_floor(end_scaled), s2);
+        keys.insert(m);
+        if (end_scaled.den != 1 && m + 1 <= e2) {
+            keys.insert(m + 1);
+        }
+    }
+    if (rat_less(Rational{s2, 1}, start_scaled)) {
+        const i64 n0 = rat_ceil(start_scaled);
+        if (n0 <= e2) {
+            keys.insert(n0);
+            if (n0 - 1 > s2) {
+                keys.insert(n0 - 1);
+            }
+        }
+    }
+    return std::vector<i64>(keys.begin(), keys.end());
+}
+
 // One trackbar row of an object: 'name=v0,...,vn,mode,param'.
 struct TrackLine {
     std::size_t idx = 0;
@@ -811,19 +904,31 @@ std::string precise_problem(const TrackLine& track, const std::vector<Rational>&
 // Precise mode. Objects are visited in frame= order and tracks in file order. An object with no trackbar rows
 // (other than '再生範囲') is neither applied nor skipped. An object is skipped when one of its rows has a problem
 // (its frame= line is recorded); otherwise each row is re-sampled at the new keyframes: t = f'/k, value from the
-// exact curve through the old keyframes. Values are rounded to the largest decimal count of the row plus
+// exact curve through the old keyframes (k is the object's own scene factor). Values are rounded to the largest decimal count of the row plus
 // extra_decimals. The report figures are 6-decimal strings, the range is max - min of the old values.
-void apply_precise(const std::vector<std::string>& lines, const std::vector<std::size_t>& effect_lines,
-                   const std::vector<Section>& section_of, const std::vector<std::pair<i64, std::size_t>>& frame_lines,
-                   const std::map<i64, std::vector<i64>>& frame_values,
-                   const std::map<i64, std::vector<i64>>& new_frames, const Rational& k,
-                   std::size_t extra_decimals, std::vector<std::string>& new_bodies, RetimeResult& res) {
+// The value shown is the original one at the same moment: the original curve held at its end values (an object keeps
+// its last value after its last frame). The keyframes are the rescaled ones plus the points where the clamp bends the
+// target (hold_keyframes); an applied object's frame= list is then the longer list (written_frames, by object). An
+// object that has a 時間制御(オブジェクト) effect is left alone (neither applied nor skipped): plan_time_control owns its
+// frame= list.
+// Returns the rewritten rows by line index; the caller writes them (res.changes) after the frame= rows.
+std::map<std::size_t, std::string> apply_precise(
+    const std::vector<std::string>& lines, const std::vector<std::size_t>& effect_lines,
+    const std::vector<Section>& section_of, const std::vector<std::pair<i64, std::size_t>>& frame_lines,
+    const std::map<i64, std::vector<i64>>& frame_values, const std::map<i64, std::vector<i64>>& new_frames,
+    const std::map<i64, Rational>& k_of, const std::set<std::pair<i64, i64>>& time_control_sections,
+    std::size_t extra_decimals, std::map<i64, std::vector<i64>>& written_frames, RetimeResult& res) {
     res.precise.emplace();
     PreciseReport& report = *res.precise;
     report.extra_decimals = extra_decimals;
 
     std::map<i64, std::vector<TrackLine>> tracks_of;  // object -> its trackbar rows, file order
     for (std::size_t idx : effect_lines) {
+        // The 位置 row of a time control effect is already exact (plan_time_control); it is neither re-sampled nor
+        // reported as skipped.
+        if (time_control_sections.count(std::make_pair(section_of[idx].a, section_of[idx].b)) != 0) {
+            continue;
+        }
         const std::string value = value_of(lines[idx]);
         if (!is_trackbar(value)) {
             continue;
@@ -841,14 +946,23 @@ void apply_precise(const std::vector<std::string>& lines, const std::vector<std:
         tracks_of[section_of[idx].a].push_back(std::move(track));
     }
 
+    std::set<i64> time_control_objects;
+    for (const auto& section : time_control_sections) {
+        time_control_objects.insert(section.first);
+    }
+
     std::map<std::size_t, std::string> bodies;  // rewritten rows by line index
     for (const auto& [obj, frame_idx] : frame_lines) {
         const auto found = tracks_of.find(obj);
         if (found == tracks_of.end()) {
             continue;
         }
+        if (time_control_objects.count(obj) != 0) {
+            continue;
+        }
         const std::vector<i64>& pts = frame_values.at(obj);
         const std::vector<i64>& nf = new_frames.at(obj);
+        const Rational& k = k_of.at(obj);
 
         std::vector<std::vector<Rational>> parsed;
         std::vector<std::size_t> decimals;
@@ -873,6 +987,10 @@ void apply_precise(const std::vector<std::string>& lines, const std::vector<std:
             continue;
         }
         report.applied += 1;
+        const std::vector<i64> keys = hold_keyframes(pts, nf, k);
+        if (keys != nf) {
+            written_frames[obj] = keys;
+        }
 
         for (std::size_t t = 0; t < found->second.size(); ++t) {
             const TrackLine& track = found->second[t];
@@ -886,8 +1004,9 @@ void apply_precise(const std::vector<std::string>& lines, const std::vector<std:
             Rational max_error{0, 1};
             std::vector<std::string> texts;
             i64 last_units = 0;
-            for (i64 f : nf) {
-                const Rational x = constant ? vals.front() : track_value(pts, vals, rat_div(Rational{f, 1}, k));
+            for (i64 f : keys) {
+                const Rational x =
+                    constant ? vals.front() : track_value_held(pts, vals, rat_div(Rational{f, 1}, k));
                 last_units = quantize_scaled(x, places);
                 const Rational error = rat_abs(rat_sub(make_rational(last_units, pow10_checked(places)), x));
                 if (rat_less(max_error, error)) {
@@ -933,12 +1052,266 @@ void apply_precise(const std::vector<std::string>& lines, const std::vector<std:
         }
     }
 
-    for (const auto& [idx, body] : bodies) {
-        if (body != lines[idx]) {
-            res.changes.push_back(RetimeChange{idx + 1, lines[idx], body, false});
-            new_bodies[idx] = body;
+    return bodies;
+}
+
+// ---------------------------------------------------------------------------
+// Time control (時間制御(オブジェクト)) and コマ落ち, exact rationals
+// The effect sits on a lower layer than the layers it controls. With the object range s..e (L = e - s + 1) and
+// 位置=a,b, the host clamps a and b to 0..100 (the end values only, not each frame), maps a timeline frame f of the
+// range to p(f) = a + (b - a) (f - s) / (L - 1) percent of the object's own range and shows the controlled layers at
+// tau(f) = s + p(f) / 100 (L - 1). コマ落ち=K shows tau of the first frame of each K-frame segment (g(f) = s +
+// floor((f - s) / K) K). The re-timer keeps the controlled time, in seconds, equal to the original at every output
+// frame n: the target is T(n) = tau(g(clamp(n / k, s, e))) and the new 位置 must give s' + p'(n) / 100 (L' - 1) = k T(n).
+//   Route A (a straight 直線移動(時間制御) track): when K is 1, or K x k and s x k are integers, and the plain line
+//   p'(n) = 100 (k tau(n / k) - s') / (L' - 1) stays in 0..100 at s' and e', only 位置 (and K x k) is rewritten.
+//   Route B (steps): otherwise 位置 becomes a 瞬間移動 track with one point where the clamped, rounded p'(n) changes;
+//   the object's frame= list holds those frames and コマ落ち becomes 1. The host never shows the last point, so the
+//   last frame shows the value of the point before it.
+// ---------------------------------------------------------------------------
+
+constexpr std::size_t kMaxTimeControlSteps = 4096;
+const std::string kStepMode = "瞬間移動";
+
+struct TimeControl {
+    i64 obj = 0;
+    i64 effect = 0;
+    std::size_t pos_idx = 0;  // the 位置 line
+    std::string a_text;
+    std::string b_text;
+    std::string flag;
+};
+
+// One time control object: the original range s..e, the new range s'..e', the end values of 位置 clamped to 0..100,
+// the factor k of its scene and the number of frames per コマ落ち segment (1: none).
+struct TcGeometry {
+    i64 s = 0;
+    i64 e = 0;
+    i64 s2 = 0;
+    i64 e2 = 0;
+    Rational a;
+    Rational b;
+    Rational k;
+    i64 drop = 1;
+};
+
+// 位置 of the original line at the (real) timeline frame f.
+Rational tc_line_percent(const TcGeometry& g, const Rational& f) {
+    if (g.e == g.s) {
+        return g.a;
+    }
+    const i64 span = checked_sub(g.e, g.s);
+    return rat_add(g.a, rat_mul(rat_sub(g.b, g.a), rat_div(rat_sub(f, Rational{g.s, 1}), Rational{span, 1})));
+}
+
+// tau: the controlled timeline frame for a 位置 value p (L = 1: always s).
+Rational tc_controlled_frame(const TcGeometry& g, const Rational& p) {
+    const i64 span = checked_sub(g.e, g.s);
+    return rat_add(Rational{g.s, 1}, rat_mul(rat_div(p, Rational{100, 1}), Rational{span, 1}));
+}
+
+// The new 位置 that shows the controlled frame k tau on the new range (L' >= 2).
+Rational tc_percent_for(const TcGeometry& g, const Rational& tau) {
+    const Rational shift = rat_sub(rat_mul(g.k, tau), Rational{g.s2, 1});
+    return rat_div(rat_mul(shift, Rational{100, 1}), Rational{checked_sub(g.e2, g.s2), 1});
+}
+
+// Route A: 位置 (unclamped) at the new frame n from the plain line, s' + p'(n) / 100 (L' - 1) = k tau(n / k). A 1-frame
+// new range ignores p' in the host (the controlled time is s'); p of the original line at the same moment (the line
+// continued past s..e) is written then.
+Rational tc_linear_percent(const TcGeometry& g, i64 n) {
+    const Rational f = rat_div(Rational{n, 1}, g.k);  // the original frame at the same moment (not an integer)
+    if (g.e2 == g.s2) {
+        return tc_line_percent(g, f);
+    }
+    return tc_percent_for(g, tc_controlled_frame(g, tc_line_percent(g, f)));
+}
+
+// Route B: 位置 the host needs at the new frame n (L' >= 2), clamped to 0..100.
+Rational tc_step_percent(const TcGeometry& g, i64 n) {
+    Rational f = rat_clamp(rat_div(Rational{n, 1}, g.k), Rational{g.s, 1}, Rational{g.e, 1});
+    if (g.drop > 1) {
+        const i64 segment = rat_floor(rat_div(rat_sub(f, Rational{g.s, 1}), Rational{g.drop, 1}));
+        f = rat_add(Rational{g.s, 1}, Rational{checked_mul(segment, g.drop), 1});
+    }
+    const Rational p = tc_percent_for(g, tc_controlled_frame(g, tc_line_percent(g, f)));
+    return rat_clamp(p, Rational{0, 1}, Rational{100, 1});
+}
+
+bool percent_in_range(const Rational& p) {
+    return !rat_less(p, Rational{0, 1}) && !rat_less(Rational{100, 1}, p);
+}
+
+// A trackbar row next to the 位置 row of an object that gets steps (its frame= list gets more points).
+struct RepeatedTrack {
+    std::size_t idx = 0;
+    std::string first_value;  // the first value as written; every value of the row is equal to it
+    std::string tail;         // ",mode,param"
+};
+
+// The other trackbar rows of the object (the 位置 row at pos_idx and 再生範囲 rows excepted; a 再生範囲 row has no value per
+// frame point and stays): a row with changing values cannot follow the new frame= list and refuses; a row whose values
+// are all equal is repeated at every point (see repeated_row).
+std::vector<RepeatedTrack> other_trackbars(const std::vector<std::string>& lines,
+                                           const std::vector<std::size_t>& effect_lines,
+                                           const std::vector<Section>& section_of, i64 obj, std::size_t pos_idx) {
+    std::vector<RepeatedTrack> rows;
+    for (std::size_t idx : effect_lines) {
+        if (section_of[idx].a != obj || idx == pos_idx) {
+            continue;
+        }
+        const std::string value = value_of(lines[idx]);
+        if (!is_trackbar(value)) {
+            continue;
+        }
+        const auto parts = split_on(value, ',');
+        if (kTrackCountExempt.count(parts[parts.size() - 2]) != 0) {
+            continue;
+        }
+        std::size_t digits = 0;
+        const Rational first = parse_decimal(parts[0], digits);
+        for (std::size_t i = 1; i + 2 < parts.size(); ++i) {
+            if (!rat_equal(parse_decimal(parts[i], digits), first)) {
+                refuse(0, "time control at line " + std::to_string(pos_idx + 1) +
+                              ": the object has other animated trackbars");
+            }
+        }
+        rows.push_back(RepeatedTrack{idx, parts[0], "," + parts[parts.size() - 2] + "," + parts.back()});
+    }
+    return rows;
+}
+
+// The new text of each 位置 row (every time control effect of a followed scene, in file order), the new コマ落ち rows
+// and one note per effect that changes. A route B effect also gets the longer frame= list of its object
+// (written_frames). Returns the rewritten rows by line index; the caller writes them (res.changes) after precise mode.
+std::map<std::size_t, std::string> plan_time_control(
+    const std::vector<std::string>& lines, std::vector<TimeControl> controls,
+    const std::vector<std::size_t>& effect_lines, const std::vector<Section>& section_of,
+    const std::map<std::pair<i64, i64>, std::map<std::string, Prop>>& effect_props,
+    const std::map<i64, std::size_t>& frame_line_of, const std::map<i64, std::vector<i64>>& frame_values,
+    const std::map<i64, std::vector<i64>>& new_frames, const std::map<i64, Rational>& k_of,
+    std::map<i64, std::vector<i64>>& written_frames, RetimeResult& res) {
+    std::map<std::size_t, std::string> bodies;
+    std::sort(controls.begin(), controls.end(),
+              [](const TimeControl& x, const TimeControl& y) { return x.pos_idx < y.pos_idx; });
+    for (const TimeControl& tc : controls) {
+        const std::vector<i64>& old = frame_values.at(tc.obj);
+        const std::vector<i64>& nw = new_frames.at(tc.obj);
+        std::size_t a_digits = 0;
+        std::size_t b_digits = 0;
+        const Rational a = parse_decimal(tc.a_text, a_digits);
+        const Rational b = parse_decimal(tc.b_text, b_digits);
+        const std::size_t places = (std::max)(a_digits, b_digits);
+
+        TcGeometry g;
+        g.s = old.front();
+        g.e = old.back();
+        g.s2 = nw.front();
+        g.e2 = nw.back();
+        g.a = rat_clamp(a, Rational{0, 1}, Rational{100, 1});
+        g.b = rat_clamp(b, Rational{0, 1}, Rational{100, 1});
+        g.k = k_of.at(tc.obj);
+        if (g.k.num == 1 && g.k.den == 1) {
+            continue;  // a scene that keeps its rate is not touched
+        }
+
+        const auto props = effect_props.find(std::make_pair(tc.obj, tc.effect));
+        const auto drop_prop = props->second.find(kColumnKey);
+        if (drop_prop != props->second.end()) {
+            g.drop = parse_digits(drop_prop->second.value, drop_prop->second.idx + 1, kColumnKey + "= value");
+        }
+        const Rational scaled_drop = rat_mul(Rational{g.drop, 1}, g.k);  // K x k
+        const Rational scaled_start = rat_mul(Rational{g.s, 1}, g.k);    // s x k
+        const bool one_frame = g.s2 == g.e2;
+        const bool drop_exact = g.drop == 1 || (scaled_drop.den == 1 && scaled_start.den == 1);
+
+        const Rational first = tc_linear_percent(g, g.s2);
+        const Rational last = tc_linear_percent(g, g.e2);
+        const bool route_a = one_frame || (drop_exact && percent_in_range(first) && percent_in_range(last));
+        const std::string key = key_of(lines[tc.pos_idx]);
+        const std::string position_line = std::to_string(tc.pos_idx + 1);
+
+        std::string note = "time control at line " + std::to_string(frame_line_of.at(tc.obj) + 1) + ": " +
+                           kTimeControlPosition + " " + tc.a_text + "," + tc.b_text + " -> ";
+        std::string last_frame_hint;
+        std::optional<i64> new_drop;  // the new コマ落ち value, when the row changes
+        bool changed = false;
+        if (route_a) {
+            const std::string first_text = format_fixed(quantize_scaled(first, places), places);
+            const std::string last_text = format_fixed(quantize_scaled(last, places), places);
+            const std::string new_body =
+                key + "=" + first_text + "," + last_text + "," + kTimeControlMode + "," + tc.flag;
+            changed = new_body != lines[tc.pos_idx];
+            if (changed) {
+                bodies[tc.pos_idx] = new_body;
+            }
+            note += first_text + "," + last_text;
+            if (g.drop > 1) {
+                // A single new frame shows its first frame whatever the segment length is; any other range needs K x k.
+                const i64 wanted = scaled_drop.den == 1 ? scaled_drop.num : 1;
+                if (wanted != g.drop) {
+                    new_drop = wanted;
+                }
+            }
+        } else {
+            const std::string too_many = "time control at line " + position_line + " needs more than " +
+                                         std::to_string(kMaxTimeControlSteps) + " steps";
+            const std::vector<RepeatedTrack> others = other_trackbars(lines, effect_lines, section_of, tc.obj, tc.pos_idx);
+            std::vector<i64> points;
+            std::vector<std::string> texts;
+            std::string previous;
+            std::string text;
+            for (i64 n = g.s2; n <= g.e2; ++n) {
+                text = format_fixed(quantize_scaled(tc_step_percent(g, n), places), places);
+                if (n == g.s2 || text != previous) {
+                    points.push_back(n);
+                    texts.push_back(text);
+                    if (points.size() > kMaxTimeControlSteps) {
+                        refuse(0, too_many);
+                    }
+                }
+                previous = text;
+            }
+            const bool last_is_step = points.back() == g.e2;
+            if (!last_is_step) {
+                points.push_back(g.e2);
+                texts.push_back(text);
+            }
+            if (points.size() > kMaxTimeControlSteps) {
+                refuse(0, too_many);
+            }
+            for (const RepeatedTrack& other : others) {
+                std::string row = key_of(lines[other.idx]) + "=";
+                for (std::size_t i = 0; i < points.size(); ++i) {
+                    row += other.first_value + (i + 1 < points.size() ? "," : "");
+                }
+                bodies[other.idx] = row + other.tail;
+            }
+            std::string joined;
+            for (std::size_t i = 0; i < texts.size(); ++i) {
+                joined += (i > 0 ? "," : "") + texts[i];
+            }
+            bodies[tc.pos_idx] = key + "=" + joined + "," + kStepMode + ",0";
+            written_frames[tc.obj] = points;
+            changed = true;
+            note += std::to_string(points.size()) + " steps (" + kStepMode + ")";
+            if (g.drop > 1) {
+                new_drop = 1;
+            }
+            if (last_is_step) {
+                last_frame_hint = "; last frame shows the previous step";
+            }
+        }
+        if (new_drop) {
+            bodies[drop_prop->second.idx] = kColumnKey + "=" + std::to_string(*new_drop);
+            note += "; " + kColumnKey + " " + std::to_string(g.drop) + " -> " + std::to_string(*new_drop);
+            changed = true;
+        }
+        if (changed) {
+            res.notes.push_back(note + last_frame_hint);
         }
     }
+    return bodies;
 }
 
 // Python convert(). Writes into res and returns the output bytes. Throws Refused or Overflow.
@@ -964,6 +1337,10 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
     std::vector<Section> section_of(lines.size());
     Section section;
     std::vector<std::size_t> project_file_lines;
+    std::optional<std::pair<std::string, std::size_t>> display_scene;  // [project] display.scene= (the first one)
+    // Lines with コマ落ち other than 1, and their sections. The check waits for the scene plan: a line inside a kept
+    // scene is left alone.
+    std::vector<std::pair<std::size_t, Section>> column_lines;
     bool project_seen = false;
     std::map<i64, std::vector<std::size_t>> scene_lines;
     std::vector<i64> scene_order;
@@ -1021,6 +1398,8 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         case Kind::kProject:
             if (key == "file") {
                 project_file_lines.push_back(idx);
+            } else if (key == "display.scene" && !display_scene) {
+                display_scene = std::make_pair(value, idx);
             }
             break;
         case Kind::kScene:
@@ -1046,8 +1425,8 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         default:
             break;
         }
-        if (key == kColumnKey && value == "1") {
-            refuse(idx + 1, kColumnKey + "=1 is not supported");
+        if (key == kColumnKey && value != kColumnNoDrop) {
+            column_lines.emplace_back(idx, section);
         }
     }
 
@@ -1073,12 +1452,15 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         }
     }
 
-    // Pass 2: scene checks. All scenes must share one rate/scale.
-    std::set<std::pair<i64, i64>> rates;
+    // Pass 2: scene checks. Scenes may have different rates; the exported scene (display.scene) decides the
+    // target rate, and each other scene follows it or is kept as it is (subscene_rate).
+    res.subscene_rate = policy_name(mode.subscene_rate);
     std::map<i64, SceneRate> scene_rate_lines;
     for (const auto& [scene_no, idxs] : scene_lines) {
         std::optional<std::pair<i64, std::size_t>> rate_v;
         std::optional<std::pair<i64, std::size_t>> scale_v;
+        std::string scene_name;  // the first name= line
+        bool name_seen = false;
         for (std::size_t idx : idxs) {
             const std::string key = key_of(lines[idx]);
             const std::string value = value_of(lines[idx]);
@@ -1091,6 +1473,10 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
             } else if (kSceneKnownKeys.count(key) != 0) {
                 if (kSceneFrameKeys.count(key) != 0 && !all_digits(value)) {
                     refuse(idx + 1, key + " must be an integer, got '" + value + "'");
+                }
+                if (key == "name" && !name_seen) {
+                    scene_name = value;
+                    name_seen = true;
                 }
             } else {
                 for (const auto& marker : kSceneRefuseMarkers) {
@@ -1108,25 +1494,33 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         if (scale_v) {
             scale_value = scale_v->first;
             scale_idx = scale_v->second;
-        } else {
-            res.notes.push_back("[scene." + std::to_string(scene_no) +
-                                "] has no video.scale; read as 1 and written after video.rate");
         }
-        scene_rate_lines[scene_no] = SceneRate{rate_v->second, scale_idx};
-        rates.insert(std::make_pair(rate_v->first, scale_value));
+        SceneRate sr;
+        sr.rate_idx = rate_v->second;
+        sr.scale_idx = scale_idx;
+        sr.rate_value = rate_v->first;
+        sr.scale_value = scale_value;
+        sr.rate = make_rational(sr.rate_value, sr.scale_value);
+        sr.name = scene_name;
+        scene_rate_lines[scene_no] = sr;
     }
-    if (rates.size() != 1) {
-        std::string list = "[";
-        for (auto it = rates.begin(); it != rates.end(); ++it) {
-            if (it != rates.begin()) {
-                list += ", ";
-            }
-            list += "(" + std::to_string(it->first) + ", " + std::to_string(it->second) + ")";
+
+    // The exported scene: display.scene, 0 when absent.
+    i64 export_scene = 0;
+    if (display_scene) {
+        if (!all_digits(display_scene->first)) {
+            refuse(display_scene->second + 1,
+                   "display.scene must be a non-negative integer, got '" + display_scene->first + "'");
         }
-        refuse(0, "scenes do not share one video.rate/video.scale: " + list + "]");
+        export_scene = parse_digits(display_scene->first, display_scene->second + 1, "display.scene");
     }
-    const i64 src_rate = rates.begin()->first;
-    const i64 src_scale = rates.begin()->second;
+    const auto export_found = scene_rate_lines.find(export_scene);
+    if (export_found == scene_rate_lines.end()) {
+        refuse(0, "display.scene " + std::to_string(export_scene) + " does not exist");
+    }
+    const SceneRate& export_rate = export_found->second;
+    const i64 src_rate = export_rate.rate_value;
+    const i64 src_scale = export_rate.scale_value;
 
     // Target rate: factor mode keeps video.scale (not reduced); target mode writes the reduced fraction.
     i64 target_num = mode.target.num;
@@ -1135,20 +1529,103 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         target_num = checked_mul(src_rate, mode.factor_k);
         target_den = src_scale;
     }
-    const Rational rate_src = make_rational(src_rate, src_scale);
+    const Rational rate_src = export_rate.rate;
     const Rational rate_dst = make_rational(target_num, target_den);
     const Rational k = rat_div(rate_dst, rate_src);
 
-    // Pass 3: object frame lists, and trackbars that depend on them.
+    // Which scenes follow, and by how much each is re-timed. The exported scene always follows.
+    for (auto& [scene_no, sr] : scene_rate_lines) {
+        switch (mode.subscene_rate) {
+        case SubsceneRatePolicy::Follow:
+            sr.follow = true;
+            break;
+        case SubsceneRatePolicy::Keep:
+            sr.follow = scene_no == export_scene;
+            break;
+        case SubsceneRatePolicy::Auto:
+            sr.follow = scene_no == export_scene || !rat_less(sr.rate, rate_src);
+            break;
+        }
+        sr.k = sr.follow ? rat_div(rate_dst, sr.rate) : Rational{1, 1};
+    }
+    // The plan and its notes, by scene number.
+    for (const auto& [scene_no, sr] : scene_rate_lines) {
+        ScenePlan plan;
+        plan.scene = static_cast<int>(scene_no);
+        plan.name = sr.name;
+        plan.source_rate = fraction_text(sr.rate);
+        plan.target_rate = sr.follow ? fraction_text(rate_dst) : plan.source_rate;
+        plan.k = fraction_text(sr.k);
+        plan.follow = sr.follow;
+        plan.exported = scene_no == export_scene;
+        res.scenes.push_back(plan);
+        if (!sr.follow) {
+            res.notes.push_back("scene " + std::to_string(scene_no) + " kept at its own rate " + plan.source_rate);
+        } else if (!sr.scale_idx) {
+            res.notes.push_back("[scene." + std::to_string(scene_no) +
+                                "] has no video.scale; read as 1 and written after video.rate");
+        }
+    }
+
+    // The scene an object belongs to (an object on a scene that has no section follows the exported scene).
+    auto scene_of_object = [&](i64 obj) -> const SceneRate& {
+        const auto owner = object_scene.find(obj);
+        if (owner != object_scene.end()) {
+            const auto found = scene_rate_lines.find(owner->second);
+            if (found != scene_rate_lines.end()) {
+                return found->second;
+            }
+        }
+        return export_rate;
+    };
+
+    // コマ落ち: 1 stays. K >= 2 is converted (plan_time_control) inside a time control effect; any other value, and
+    // K >= 2 elsewhere, is refused. Lines of kept scenes are not looked at; lines outside objects, effects and scenes
+    // are (the exported scene always follows). The first line in file order that is refused is reported.
+    auto is_time_control_effect = [&](const Section& sec) {
+        if (sec.kind != Kind::kEffect) {
+            return false;
+        }
+        const auto& props = effect_props.at(std::make_pair(sec.a, sec.b));
+        const auto name = props.find("effect.name");
+        return name != props.end() && name->second.value == kTimeControlEffect;
+    };
+    for (const auto& [idx, sec] : column_lines) {
+        const SceneRate* owner = &export_rate;
+        if (sec.kind == Kind::kScene) {
+            owner = &scene_rate_lines.at(sec.a);
+        } else if (sec.kind == Kind::kObject || sec.kind == Kind::kEffect) {
+            owner = &scene_of_object(sec.a);
+        }
+        if (!owner->follow) {
+            continue;
+        }
+        const std::string value = value_of(lines[idx]);
+        if (!all_digits(value) || parse_digits(value, idx + 1, kColumnKey + "= value") == 0) {
+            refuse(idx + 1, kColumnKey + "=" + value + " (frame drop) must be a positive integer");
+        }
+        const i64 drop = parse_digits(value, idx + 1, kColumnKey + "= value");
+        if (drop == 1) {
+            continue;
+        }
+        if (!is_time_control_effect(sec)) {
+            refuse(idx + 1, kColumnKey + "=" + value + " (frame drop) is only converted inside a " +
+                                kTimeControlEffect + " effect");
+        }
+    }
+
+    // Pass 3: object frame lists, and trackbars that depend on them. Objects of a kept scene are not looked at.
     std::map<i64, std::vector<i64>> frame_values;
     for (const auto& [obj, idx] : frame_lines) {
-        frame_values[obj] = parse_frames(value_of(lines[idx]), idx + 1);
+        if (scene_of_object(obj).follow) {
+            frame_values[obj] = parse_frames(value_of(lines[idx]), idx + 1);
+        }
     }
     std::vector<std::size_t> counter_lines;
     for (const auto& entry : effect_props) {
         const auto& props = entry.second;
         const auto name = props.find("effect.name");
-        if (name == props.end() || name->second.value != kCounterEffect) {
+        if (name == props.end() || name->second.value != kCounterEffect || !scene_of_object(entry.first.first).follow) {
             continue;
         }
         const auto speed = props.find(kSpeedKey);
@@ -1173,8 +1650,49 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
                             " = counts per second), passed through unchanged (lines " + list + ")");
     }
 
+    // 時間制御(オブジェクト) of followed scenes: 位置 must be exactly two numbers, the time control mode and a flag
+    // without '|', on an object with two frame= points (a missing 位置 is reported at the effect.name line). Effects
+    // are visited in (object, effect) order; the last 位置 line of an effect counts.
+    std::vector<TimeControl> time_controls;
+    std::set<std::size_t> time_control_positions;
+    std::set<std::pair<i64, i64>> time_control_sections;  // every time control effect, also in kept scenes
+    for (const auto& entry : effect_props) {
+        const auto name = entry.second.find("effect.name");
+        if (name == entry.second.end() || name->second.value != kTimeControlEffect) {
+            continue;
+        }
+        time_control_sections.insert(entry.first);
+        if (!scene_of_object(entry.first.first).follow) {
+            continue;
+        }
+        const auto position = entry.second.find(kTimeControlPosition);
+        const std::size_t refusal_idx = position == entry.second.end() ? name->second.idx : position->second.idx;
+        const auto fv = frame_values.find(entry.first.first);
+        std::vector<std::string> parts;
+        if (position != entry.second.end()) {
+            parts = split_on(position->second.value, ',');
+        }
+        if (position == entry.second.end() || parts.size() != 4 || !is_number(parts[0]) || !is_number(parts[1]) ||
+            parts[2] != kTimeControlMode || parts[3].find('|') != std::string::npos || fv == frame_values.end() ||
+            fv->second.size() != 2) {
+            refuse(refusal_idx + 1, kTimeControlRefusal);
+        }
+        TimeControl tc;
+        tc.obj = entry.first.first;
+        tc.effect = entry.first.second;
+        tc.pos_idx = position->second.idx;
+        tc.a_text = parts[0];
+        tc.b_text = parts[1];
+        tc.flag = parts[3];
+        time_controls.push_back(tc);
+        time_control_positions.insert(tc.pos_idx);
+    }
+
     for (std::size_t idx : effect_lines) {
         const Section sec = section_of[idx];
+        if (!scene_of_object(sec.a).follow) {
+            continue;
+        }
         const std::string key = key_of(lines[idx]);
         const std::string value = value_of(lines[idx]);
         const auto& props = effect_props.at(std::make_pair(sec.a, sec.b));
@@ -1189,6 +1707,9 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
                                 effect_name.value_or(std::string("None")) + " effect (" + key +
                                 "); refused (pass --allow-frame-scripts to convert anyway)");
         }
+        if (time_control_positions.count(idx) != 0) {
+            continue;  // the validated 位置 row of a time control effect: rewritten below
+        }
         if (!is_trackbar(value)) {
             continue;
         }
@@ -1199,7 +1720,7 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
             refuse(idx + 1, "trackbar mode '" + mode_name + "' is not on the whitelist");
         }
         const std::size_t bar = param.find('|');
-        if (bar != std::string::npos) {
+        if (bar != std::string::npos && kTrackPayloadModes.count(mode_name) == 0) {
             refuse(idx + 1, "trackbar '|' payload '" + param.substr(bar + 1) + "' is not on the whitelist");
         }
         const i64 obj = sec.a;
@@ -1213,19 +1734,42 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
             }
         }
     }
-
-    // Rescale every object, then check the layers.
+    // Rescale every object of a followed scene (each by its own scene's k), then check the layers. Objects of a
+    // kept scene are not touched and are not part of the layer check, the timing report or precise mode.
+    std::vector<std::pair<i64, std::size_t>> followed_frame_lines;  // (object, line index), file order
+    std::map<i64, Rational> object_k;
     std::map<i64, std::vector<i64>> new_frames;
     std::set<std::size_t> shortened;
-    for (const auto& [obj, idx] : frame_lines) {
+    for (const auto& entry : frame_lines) {
+        const i64 obj = entry.first;
+        const std::size_t idx = entry.second;
+        const SceneRate& owner = scene_of_object(obj);
+        if (!owner.follow) {
+            continue;
+        }
+        followed_frame_lines.push_back(entry);
+        object_k[obj] = owner.k;
         bool was_short = false;
-        new_frames[obj] = rescale_frames(frame_values[obj], k, idx + 1, was_short);
+        new_frames[obj] = rescale_frames(frame_values[obj], owner.k, idx + 1, was_short);
         if (was_short) {
             shortened.insert(idx + 1);
             res.notes.push_back("object at line " + std::to_string(idx + 1) + " shortened to 1 frame");
         }
     }
-    check_layers(frame_lines, object_layer, object_scene, frame_values, new_frames);
+    check_layers(followed_frame_lines, object_layer, object_scene, frame_values, new_frames);
+
+    // The rows of 時間制御 and, in precise mode, of the trackbars are worked out before anything is written: both can give
+    // an object a longer frame= list (written_frames). The notes of the time control come before the precise notes.
+    std::map<i64, std::vector<i64>> written_frames = new_frames;
+    const std::map<std::size_t, std::string> time_control_bodies =
+        plan_time_control(lines, time_controls, effect_lines, section_of, effect_props, frame_line_of, frame_values,
+                          new_frames, object_k, written_frames, res);
+    std::map<std::size_t, std::string> precise_bodies;
+    if (mode.precise) {
+        precise_bodies = apply_precise(lines, effect_lines, section_of, followed_frame_lines, frame_values, new_frames,
+                                       object_k, time_control_sections, mode.precise_extra_decimals, written_frames,
+                                       res);
+    }
 
     // Pass 4: build the rewritten lines.
     std::vector<std::string> new_bodies = lines;
@@ -1241,6 +1785,9 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
 
     for (i64 scene_no : scene_order) {
         const SceneRate& sr = scene_rate_lines[scene_no];
+        if (!sr.follow) {
+            continue;  // a kept scene: its section is written byte for byte
+        }
         for (std::size_t idx : scene_lines[scene_no]) {
             const std::string key = key_of(lines[idx]);
             const std::string value = value_of(lines[idx]);
@@ -1256,30 +1803,31 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
                     set_line(idx, "video.scale=" + std::to_string(target_den));
                 }
             } else if (kSceneFrameKeys.count(key) != 0) {
-                set_line(idx, key + "=" + std::to_string(round_scaled(parse_digits(value, idx + 1, key), k)));
+                set_line(idx, key + "=" + std::to_string(round_scaled(parse_digits(value, idx + 1, key), sr.k)));
             }
         }
     }
 
     std::vector<Rational> start_errors;
     std::vector<Rational> end_errors;
-    for (const auto& [obj, idx] : frame_lines) {
+    for (const auto& [obj, idx] : followed_frame_lines) {
+        const Rational& obj_rate_src = scene_of_object(obj).rate;
         const auto& old = frame_values[obj];
         const auto& nw = new_frames[obj];
-        set_line(idx, "frame=" + [&nw] {
+        set_line(idx, "frame=" + [&written = written_frames.at(obj)] {
             std::string s;
-            for (std::size_t i = 0; i < nw.size(); ++i) {
+            for (std::size_t i = 0; i < written.size(); ++i) {
                 if (i > 0) {
                     s += ",";
                 }
-                s += std::to_string(nw[i]);
+                s += std::to_string(written[i]);
             }
             return s;
         }());
         const Rational start_err = rat_abs(rat_sub(rat_div(Rational{nw.front(), 1}, rate_dst),
-                                                   rat_div(Rational{old.front(), 1}, rate_src)));
+                                                   rat_div(Rational{old.front(), 1}, obj_rate_src)));
         const Rational end_err = rat_abs(rat_sub(rat_div(Rational{checked_add(nw.back(), 1), 1}, rate_dst),
-                                                 rat_div(Rational{checked_add(old.back(), 1), 1}, rate_src)));
+                                                 rat_div(Rational{checked_add(old.back(), 1), 1}, obj_rate_src)));
         start_errors.push_back(start_err);
         end_errors.push_back(end_err);
         RetimeObjectTiming timing;
@@ -1305,9 +1853,12 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
     res.max_start_error_s = fraction_str(max_start);
     res.max_end_error_s = fraction_str(max_end);
 
-    if (mode.precise) {
-        apply_precise(lines, effect_lines, section_of, frame_lines, frame_values, new_frames, k,
-                      mode.precise_extra_decimals, new_bodies, res);
+    // The precise rows, then the 時間制御 rows (位置 and コマ落ち), each in line order.
+    for (const auto& entry : precise_bodies) {
+        set_line(entry.first, entry.second);
+    }
+    for (const auto& entry : time_control_bodies) {
+        set_line(entry.first, entry.second);
     }
 
     res.source_rate = fraction_text(rate_src);
@@ -1473,11 +2024,15 @@ RetimeResult run(std::string_view in_utf8, const Mode& mode, std::wstring out_pa
         failed.input_sha256 = res.input_sha256;
         failed.refusal_line = refused.line;
         failed.refusal_reason = refused.reason;
+        failed.subscene_rate = res.subscene_rate;  // the scene plan, when it was already worked out (for previews)
+        failed.scenes = res.scenes;
         return failed;
     } catch (const Overflow&) {
         RetimeResult failed;
         failed.input_sha256 = res.input_sha256;
         failed.refusal_reason = "arithmetic overflow: rate or frame numbers are too large for exact 64-bit arithmetic";
+        failed.subscene_rate = res.subscene_rate;
+        failed.scenes = res.scenes;
         return failed;
     }
     return res;
@@ -1486,21 +2041,23 @@ RetimeResult run(std::string_view in_utf8, const Mode& mode, std::wstring out_pa
 }  // namespace
 
 RetimeResult retime(std::string_view in_utf8, Rational target, std::wstring out_path, bool precise,
-                    std::size_t precise_extra_decimals) {
+                    std::size_t precise_extra_decimals, SubsceneRatePolicy subscene_rate) {
     Mode mode;
     mode.target = target;
     mode.precise = precise;
     mode.precise_extra_decimals = precise_extra_decimals;
+    mode.subscene_rate = subscene_rate;
     return run(in_utf8, mode, std::move(out_path));
 }
 
 RetimeResult retime_factor(std::string_view in_utf8, std::int64_t factor, std::wstring out_path, bool precise,
-                           std::size_t precise_extra_decimals) {
+                           std::size_t precise_extra_decimals, SubsceneRatePolicy subscene_rate) {
     Mode mode;
     mode.factor = true;
     mode.factor_k = factor;
     mode.precise = precise;
     mode.precise_extra_decimals = precise_extra_decimals;
+    mode.subscene_rate = subscene_rate;
     return run(in_utf8, mode, std::move(out_path));
 }
 
@@ -1512,6 +2069,25 @@ std::string sidecar_json(const RetimeResult& r, const std::wstring& in_path, con
     lines.push_back("  \"source_rate\": " + json_str(r.source_rate) + ",");
     lines.push_back("  \"target_rate\": " + json_str(r.target_rate) + ",");
     lines.push_back("  \"k\": " + json_str(r.k) + ",");
+    lines.push_back("  \"subscene_rate\": " + json_str(r.subscene_rate) + ",");
+    if (r.scenes.empty()) {
+        lines.push_back("  \"scenes\": [],");
+    } else {
+        lines.push_back("  \"scenes\": [");
+        for (std::size_t i = 0; i < r.scenes.size(); ++i) {
+            const ScenePlan& p = r.scenes[i];
+            lines.push_back("    {");
+            lines.push_back("      \"scene\": " + std::to_string(p.scene) + ",");
+            lines.push_back("      \"name\": " + json_str(p.name) + ",");
+            lines.push_back("      \"source_rate\": " + json_str(p.source_rate) + ",");
+            lines.push_back("      \"target_rate\": " + json_str(p.target_rate) + ",");
+            lines.push_back("      \"k\": " + json_str(p.k) + ",");
+            lines.push_back("      \"policy\": " + json_str(p.follow ? "follow" : "keep") + ",");
+            lines.push_back(std::string("      \"exported\": ") + (p.exported ? "true" : "false"));
+            lines.push_back(i + 1 < r.scenes.size() ? "    }," : "    }");
+        }
+        lines.push_back("  ],");
+    }
     lines.push_back("  \"input\": {");
     lines.push_back("    \"path\": " + json_str(wide_to_utf8(in_path)) + ",");
     lines.push_back("    \"sha256\": " + json_str(r.input_sha256));

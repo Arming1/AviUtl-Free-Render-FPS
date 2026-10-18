@@ -597,6 +597,16 @@ AuoFreeFpsExportEncSummary=エンコード：
 AuoFreeFpsExportExtMismatch=出力ファイルの拡張子が、エンコード設定のコンテナ（%s）と一致しません。このまま続行しますか？
 AuoFreeFpsExportOK=OK
 AuoFreeFpsExportCancel=キャンセル
+AuoFreeFpsExportSubsceneRate=サブシーンのFPS：
+AuoFreeFpsExportSubsceneAuto=自動（推奨）
+AuoFreeFpsExportSubsceneFollow=すべてのシーンを出力FPSに追従
+AuoFreeFpsExportSubsceneKeep=すべてのシーンを元のFPSのまま維持
+AuoFreeFpsExportScenePlanFollow=追従
+AuoFreeFpsExportScenePlanKeep=維持
+AuoFreeFpsExportScenePlanUnsaved=保存後にプレビューできます
+AuoFreeFpsExportScenePlanMain=メインシーン
+AuoFreeFpsExportScenePlanSub=サブシーン
+AuoFreeFpsExportScenePlanPrefix=保存済みのプロジェクトでのプレビュー：
 
 [AUO_CONFIG_CX]
 AUO_CONFIG_CX_X264_ENCMODE_SINGLE_CBR=シングルパス - ビットレート指定
