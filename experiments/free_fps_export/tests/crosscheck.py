@@ -548,10 +548,12 @@ def compare_case(in_path, args, case_dir, exe):
 
 
 def subscene_cases(real_copy, work, synthetic_dir):
-    """The (label, path, arguments) cases of --subscene-rate; see the module docstring."""
+    """The (label, path, arguments) cases of --subscene-rate; see the module docstring.
+    real_copy is None when the real project is absent."""
     cases = []
+    real_inputs = [("real ARZv2.0.1 project", real_copy)] if real_copy else []
     # Single-scene inputs: the policy changes nothing in the .aup2; the sidecar keys must still match.
-    for label, path in convert_inputs() + [("real ARZv2.0.1 project", real_copy)]:
+    for label, path in convert_inputs() + real_inputs:
         for policy in SUBSCENE_POLICIES:
             for target in POLICY_SINGLE_TARGETS:
                 for precise in ([], ["--precise"]):
@@ -600,9 +602,9 @@ def main(argv=None):
     if not os.path.isfile(PY_TOOL):
         print("SKIP: Python tool missing at %s" % PY_TOOL)
         return 2
-    if not os.path.isfile(REAL_PROJECT):
-        print("SKIP: real project missing at %s" % REAL_PROJECT)
-        return 2
+    have_real = os.path.isfile(REAL_PROJECT)
+    if not have_real:
+        print("SKIP real project (not found)")
     if not python_tool_supports_target_fps():
         print("SKIP: tools/aup2_fps_upconvert.py has no --target-fps; the lead must rerun this check later")
         return 2
@@ -612,11 +614,13 @@ def main(argv=None):
     os.makedirs(synthetic_dir)
     real_copy = os.path.join(work, "real_project.aup2")
     try:
-        shutil.copyfile(REAL_PROJECT, real_copy)
+        if have_real:
+            shutil.copyfile(REAL_PROJECT, real_copy)
+        real_inputs = [("real ARZv2.0.1 project", real_copy)] if have_real else []
 
         # (case label, input path, extra arguments, kind) for the cross product, then the refusal cases.
         cases = []
-        for label, path in convert_inputs() + [("real ARZv2.0.1 project", real_copy)]:
+        for label, path in convert_inputs() + real_inputs:
             for target in TARGETS:
                 cases.append((label, path, target))
         refusal_cases_extra = []
@@ -624,12 +628,14 @@ def main(argv=None):
             for label, path in convert_inputs():
                 for target in PRECISE_TARGETS:
                     cases.append((label, path, target + ["--precise"]))
-            cases.append(("real ARZv2.0.1 project", real_copy, PRECISE_REAL_TARGET + ["--precise"]))
+            if have_real:
+                cases.append(("real ARZv2.0.1 project", real_copy, PRECISE_REAL_TARGET + ["--precise"]))
             if python_tool_has_option("--precise-extra-decimals"):
                 for label, path in convert_inputs():
                     cases.append((label, path, ["--target-fps", "66", "--precise", "--precise-extra-decimals", "2"]))
-                cases.append(("real ARZv2.0.1 project", real_copy,
-                              ["--target-fps", "66", "--precise", "--precise-extra-decimals", "2"]))
+                if have_real:
+                    cases.append(("real ARZv2.0.1 project", real_copy,
+                                  ["--target-fps", "66", "--precise", "--precise-extra-decimals", "2"]))
                 extra_refusals = [
                     ("extra_decimals_without_precise", ["--target-fps", "66", "--precise-extra-decimals", "2"]),
                     ("extra_decimals_above_4", ["--target-fps", "66", "--precise", "--precise-extra-decimals", "5"]),
@@ -640,7 +646,7 @@ def main(argv=None):
         else:
             print("SKIP precise cases: tools/aup2_fps_upconvert.py has no --precise yet; rerun this check later")
         if python_tool_has_option("--subscene-rate"):
-            cases.extend(subscene_cases(real_copy, work, synthetic_dir))
+            cases.extend(subscene_cases(real_copy if have_real else None, work, synthetic_dir))
         else:
             print("SKIP subscene-rate cases: tools/aup2_fps_upconvert.py has no --subscene-rate yet; rerun this check later")
         template_copy = None

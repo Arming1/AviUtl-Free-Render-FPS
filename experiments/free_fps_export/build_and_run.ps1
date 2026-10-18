@@ -10,12 +10,33 @@ $ErrorActionPreference = 'Continue'
 $exportDir = $PSScriptRoot
 $sdkDir = Join-Path $exportDir 'sdk'
 $outDir = Join-Path $exportDir 'build\x64'
-$vcBuildDir = 'C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build'
+# vcvarsall.bat directory, first match wins: VC_BUILD_DIR, then vswhere (latest VS with the x64 VC tools), then the old fixed path.
+$vcCandidates = @()
+if ($env:VC_BUILD_DIR) {
+    $vcCandidates += [pscustomobject]@{ Source = 'VC_BUILD_DIR'; Dir = $env:VC_BUILD_DIR }
+}
+$vswhere = $null
+if (${env:ProgramFiles(x86)}) {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+}
+if ($vswhere -and (Test-Path -LiteralPath $vswhere)) {
+    $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+    if ($vsInstall) {
+        $vcCandidates += [pscustomobject]@{ Source = 'vswhere'; Dir = (Join-Path $vsInstall 'VC\Auxiliary\Build') }
+    }
+}
+$vcCandidates += [pscustomobject]@{ Source = 'fixed path'; Dir = 'C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build' }
 
-if (-not (Test-Path (Join-Path $vcBuildDir 'vcvarsall.bat'))) {
-    Write-Output "vcvarsall.bat not found under $vcBuildDir"
+$vcChosen = $vcCandidates | Where-Object { Test-Path -LiteralPath (Join-Path $_.Dir 'vcvarsall.bat') } | Select-Object -First 1
+if (-not $vcChosen) {
+    Write-Output 'vcvarsall.bat not found. Tried:'
+    foreach ($candidate in $vcCandidates) {
+        Write-Output ("  [{0}] {1}" -f $candidate.Source, $candidate.Dir)
+    }
     exit 1
 }
+$vcBuildDir = $vcChosen.Dir
+Write-Output ("vcvarsall.bat: {0} (from {1})" -f $vcBuildDir, $vcChosen.Source)
 
 $python = $null
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
