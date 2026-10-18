@@ -30,6 +30,24 @@
   The `|` payload (for example `27`) is kept byte for byte. Precise motion skips an object that has such a track and
   lists it in `precise.skipped`. `イージング（補間移動）@イージング` is still refused: it reads `obj.getpoint("time")`,
   which is not verified.
+- `直線移動(時間制御)` (linear move, time control) is accepted on any effect track, not only 時間制御(オブジェクト)
+  `位置`. Two points and multi-point tracks convert with values unchanged. The host ignores the times of the middle
+  points and moves at a constant speed over the whole path, and the converter does the same (probe R1d: the maximum
+  error is 0.19 px). Measured: R1a (`直線移動`) and R1b (`直線移動(時間制御)`, no curve) give identical frames (0.000 px).
+- The `|` curve payload (for example `|1,0,1,0`, the normalised control points written by 時間制御編集) is kept byte for
+  byte on `直線移動`, `直線移動(時間制御)` and `イージング（通常）@イージング` tracks. The payload is not checked. Other
+  modes that carry a payload are still refused.
+  - Curves are not re-sampled. The curve only depends on progress inside the object, so the converter keeps the
+    payload as is.
+  - Precise motion skips a `直線移動(時間制御)` track that has a payload or more than two points, and lists it in
+    `precise.skipped`. A two-point `直線移動(時間制御)` with no payload is re-sampled, unless it needs an end hold: then
+    the object is skipped, because this mode ignores the extra keyframes.
+- 時間制御(オブジェクト) `位置` with a curve is not rewritten: the value and payload are kept and the object frames are
+  converted. The position is object-relative and the error is within one frame. With a curve, `コマ落ち=K` (K ≥ 2) is kept
+  only when K × k and the controlled seconds are integers. Otherwise the block is refused.
+  `コマ落ち=0` is still refused, because a hand-typed `0` crashed the host.
+- Still refused, not verified in AviUtl2: 補間移動, ランダム移動, 反復移動, 移動量指定 and other track modes that are not
+  listed above.
 - Not verified in AviUtl2: at which sub-scene frame a kept lower-rate scene is shown at a given
   main-scene time (rounded down or nearest). This only decides where the hold steps start in Keep
   mode. It does not change the frame count or the step size. The check is in

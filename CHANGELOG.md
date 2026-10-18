@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Added
+
+- `直線移動(時間制御)` (linear move, time control) is accepted on any effect track, not only the
+  時間制御(オブジェクト) `位置`. Frame positions are converted the same way as for `直線移動`, and values are unchanged.
+  Multi-point tracks are accepted too. The host ignores the times of the middle points and moves at a constant speed over
+  the whole path, so the converter does the same.
+- The `|` curve payload written by 時間制御編集 is kept byte for byte on `直線移動`, `直線移動(時間制御)` and
+  `イージング（通常）@イージング` tracks. The payload is not checked.
+
+### Changed
+
+- Precise motion handles `直線移動(時間制御)` as follows:
+  - Two points with no payload and no end hold needed: re-sampled like `直線移動`, and the mode text stays `直線移動(時間制御)`.
+  - Two points that need an end hold: the object is skipped, because the extra keyframes would be ignored by this mode.
+  - A payload or more than two points: the object is skipped and listed in `precise.skipped`.
+  - `直線移動` with a payload is re-sampled and the payload is kept after the flag.
+- 時間制御(オブジェクト) `位置` with a curve payload keeps its curve and values unchanged. The position is object-relative,
+  so its error stays within one frame. With a curve, a drop (`コマ落ち=K`, K ≥ 2) is kept only when K × k and
+  the controlled seconds are both integers. Otherwise the conversion is refused with a message naming the line.
+  `コマ落ち=1` is unchanged, and `コマ落ち=0` is still refused.
+
+### Validation status
+
+- Probes R1 and R2 in AviUtl2 v2.1.12 (`test_kit/7_轨迹移動方式/`):
+  - R1a (`直線移動`) and R1b (`直線移動(時間制御)`, no curve, two points) give identical frames (0.000 px).
+  - R1d (`直線移動(時間制御)` with middle points) ignores the middle-point times and moves at a constant speed over the
+    whole path. The maximum error is 0.19 px.
+  - R2 (curve edited in 時間制御編集) is stored as the payload `|1,0,1,0`.
+- Local corpus of 138 projects: 121 convert before this change. After it, 9 + 1 of the 17 remaining are expected to
+  convert. This is pending: not yet confirmed by an in-host conversion.
+
 ## [1.2.5] — 2026-10-18
 
 > 1.2.2 was an internal test version number and was never publicly released.
