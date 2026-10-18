@@ -385,8 +385,15 @@ void test_refusals() {
               r.ok ? std::string() : refusal_message(r));
     }
     {
+        const std::string text = base + "X=0,100,補間移動,0|27\n";
+        expect_refused("refuses trackbar | payload on another mode", text, rate(60), line_of(text, "X=0,100"),
+                       "'|' payload");
+    }
+    {
         const std::string text = base + "X=0,100,直線移動,0|27\n";
-        expect_refused("refuses trackbar | payload", text, rate(60), line_of(text, "X=0,100"), "'|' payload");
+        const RetimeResult r = retime_target(text, rate(60));
+        check(r.ok && contains(r.output, "\nX=0,100,直線移動,0|27\n"), "accepts a | payload on 直線移動 and keeps it",
+              r.ok ? std::string() : refusal_message(r));
     }
     {
         const std::string text = base + "X=0,100,謎移動,0\n";
@@ -2115,10 +2122,12 @@ void test_time_control_refusals() {
                        kTcRefusal);
     }
     {
+        // A | payload is a saved curve now: kept (see test_tcmode_and_payload), not refused.
         const std::string text =
             tc_project(30, tc_object(0, 0, "0,59", tc_row("0.000", "100.000", "0|27")) + plain_object(1, 1, "0,59"));
-        expect_refused("time control with a | payload is refused", text, rate(60), line_of_first(text, "位置="),
-                       kTcRefusal);
+        const RetimeResult r = retime_target(text, rate(60));
+        check(r.ok && first_row(r, "位置=") == std::string("位置=0.000,100.000,") + kTcMode + ",0|27",
+              "time control with a | payload is kept", refusal_or_converted(r));
     }
     {
         const std::string text =
@@ -2138,17 +2147,11 @@ void test_time_control_refusals() {
                        line_of_first(text, "effect.name=時間制御"), kTcRefusal);
     }
     {
-        // The mode is allowed only on the 位置 row of a time control effect.
-        const std::string text = tc_project(30, "[0]\nlayer=0\nframe=0,59\n[0.0]\neffect.name=標準描画\nX=0.000,100.000," +
-                                                    std::string(kTcMode) + ",0\n");
-        expect_refused("直線移動(時間制御) elsewhere stays off the whitelist", text, rate(60), line_of_first(text, "X="),
-                       "trackbar mode '直線移動(時間制御)' is not on the whitelist");
-    }
-    {
-        const std::string text = tc_project(30, "[0]\nlayer=0\nframe=0,59\n[0.0]\neffect.name=時間制御(オブジェクト)\n位置=" +
-                                                    tc_row("0.000", "100.000") + "\nY=0.000,1.000," + kTcMode + ",0\n");
-        expect_refused("a second 直線移動(時間制御) row in a time control effect stays off the whitelist", text, rate(60),
-                       line_of_first(text, "Y="), "trackbar mode '直線移動(時間制御)' is not on the whitelist");
+        // The mode is on the whitelist for every track now (test_tcmode_and_payload); an unknown mode still is not.
+        const std::string text = tc_project(30, "[0]\nlayer=0\nframe=0,59\n[0.0]\neffect.name=標準描画\nX=0.000,100.000,"
+                                                "直線移動(時間制御謎),0\n");
+        expect_refused("a mode that only starts with 直線移動(時間制御 is not on the whitelist", text, rate(60),
+                       line_of_first(text, "X="), "trackbar mode '直線移動(時間制御謎)' is not on the whitelist");
     }
     {
         // A コマ落ち beyond 64 bits cannot be held exactly: refused at its line (the Python tool uses big integers).
@@ -2310,6 +2313,219 @@ void test_time_control_kept_scene() {
           "time control in a sub scene under keep: unchanged", refusal_or_converted(keep));
 }
 
+
+// ---------------------------------------------------------------------------
+// 直線移動(時間制御) on any track, '|' payloads, curves in the time control 位置 row
+// ---------------------------------------------------------------------------
+
+std::string replace_mode(const std::string& row, const std::string& from, const std::string& to) {
+    const std::size_t pos = row.find("," + from + ",");
+    return pos == std::string::npos ? row : row.substr(0, pos + 1) + to + row.substr(pos + 1 + from.size());
+}
+
+void test_tcmode_and_payload() {
+    const std::string tc = kTcMode;
+    const std::string easing = "イージング（通常）@イージング";
+    auto object = [](const std::string& frames, const std::string& rows) {
+        return "[0]\nlayer=0\nframe=" + frames + "\n[0.0]\neffect.name=標準描画\n" + rows;
+    };
+    auto precise = [](const std::string& text, Rational target) {
+        return free_fps::retime(text, target, L"D:\\out\\retimed.aup2", true);
+    };
+    auto first_skip = [](const RetimeResult& p) {
+        return p.precise && !p.precise->skipped.empty() ? p.precise->skipped[0].reason : refusal_message(p);
+    };
+
+    // 1. The mode on an ordinary track: two points and several points, frames rescaled, values kept, equal to 直線移動.
+    {
+        const std::string two = project(scene30(), object("0,29", "X=-600.00,600.00," + tc + ",0\n"));
+        const RetimeResult r = retime_target(two, rate(60));
+        check(r.ok && first_row(r, "frame=") == "frame=0,59" && first_row(r, "X=") == "X=-600.00,600.00," + tc + ",0",
+              "tcmode: a two-point track on any effect is accepted, values kept", refusal_or_converted(r));
+        const RetimeResult line = retime_target(project(scene30(), object("0,29", "X=-600.00,600.00,直線移動,0\n")),
+                                                rate(60));
+        check(line.ok && r.changes.size() == line.changes.size(),
+              "tcmode: the output has the same shape as with 直線移動", refusal_or_converted(line));
+        const std::string many = project(scene30(), object("0,10,29", "X=0.00,50.00,100.00," + tc + ",0\n"));
+        const RetimeResult m = retime_target(many, rate(60));
+        check(m.ok && first_row(m, "frame=") == "frame=0,20,59" && first_row(m, "X=") == "X=0.00,50.00,100.00," + tc + ",0",
+              "tcmode: several points are accepted, frames rescaled, values kept", refusal_or_converted(m));
+        expect_refused("tcmode: the value count must equal the frame points",
+                       project(scene30(), object("0,29", "X=0.00,50.00,100.00," + tc + ",0\n")), rate(60),
+                       line_of_first(project(scene30(), object("0,29", "X=0.00,50.00,100.00," + tc + ",0\n")), "X="),
+                       "trackbar has 3 values");
+    }
+    // 2. A '|' payload (which holds commas) is kept as written in 直線移動, 直線移動(時間制御) and the easing mode, and
+    //    refused in every other mode with the existing text.
+    {
+        for (const std::string& mode : {std::string("直線移動"), tc, easing}) {
+            const std::string row = "X=-600.00,600.00," + mode + ",0|1,0,1,0";
+            const RetimeResult r = retime_target(project(scene30(), object("0,29", row + "\n")), rate(66));
+            check(r.ok && first_row(r, "X=") == row && first_row(r, "frame=") == "frame=0,65",
+                  "payload: kept as written in " + mode, refusal_or_converted(r));
+        }
+        const std::string flat = "Y=0.00,0.00,直線移動,0|1,0,1,0";
+        const RetimeResult r = retime_target(project(scene30(), object("0,29", flat + "\n")), rate(60));
+        check(r.ok && first_row(r, "Y=") == flat, "payload: an unused curve on a 直線移動 row is kept",
+              refusal_or_converted(r));
+        const std::string bad = project(scene30(), object("0,29", "X=0.00,100.00,補間移動,0|1,0,1,0\n"));
+        expect_refused("payload: another mode with a payload is still refused", bad, rate(60), line_of_first(bad, "X="),
+                       "trackbar '|' payload '1,0,1,0' is not on the whitelist");
+        const std::string bad2 = project(scene30(), object("0,29", "X=0.00,100.00,瞬間移動,0|3\n"));
+        expect_refused("payload: 瞬間移動 with a payload is still refused", bad2, rate(60), line_of_first(bad2, "X="),
+                       "trackbar '|' payload '3' is not on the whitelist");
+    }
+    // 3. Precise: 直線移動 with a payload is re-sampled and the payload is appended after the flag.
+    {
+        const std::string text = project(scene30(), object("0,29", "X=0.00,100.00,直線移動,0|1,0,1,0\n"));
+        const RetimeResult p = precise(text, rate(66));
+        const std::string row = first_row(p, "X=");
+        check(p.ok && p.precise && p.precise->applied == 1 && p.precise->skipped.empty() &&
+                  contains(row, ",直線移動,0|1,0,1,0") && row.compare(0, 7, "X=0.00,") == 0 &&
+                  first_row(p, "frame=").compare(0, 9, "frame=0,6") == 0 && first_row(p, "frame=").back() == '5',
+              "precise payload: 直線移動 with a payload is re-sampled and keeps the payload", row);
+        const RetimeResult same = precise(project(scene30(), object("0,29", "X=0.00,100.00,直線移動,0\n")), rate(66));
+        const std::string plain_row = first_row(same, "X=");
+        check(same.ok && row == plain_row + "|1,0,1,0", "precise payload: the values equal those without a payload",
+              row + " / " + plain_row);
+        const std::string constant = project(scene30(), object("0,29", "Y=0.00,0.00,直線移動,0|1,0,1,0\n"));
+        const RetimeResult c = precise(constant, rate(60));
+        check(c.ok && c.precise && c.precise->applied == 1 && contains(first_row(c, "Y="), ",直線移動,0|1,0,1,0"),
+              "precise payload: a constant row with a payload is re-sampled and keeps the payload", first_row(c, "Y="));
+    }
+    // 4. Precise: 直線移動(時間制御). A curve or intermediate points are skipped; two points are re-sampled when the rescaled
+    //    keyframes need no extra points for the end hold, and skipped when they do.
+    {
+        const std::string curve = project(scene30(), object("0,29", "X=0.00,100.00," + tc + ",0|1,0,1,0\n"));
+        const RetimeResult p = precise(curve, rate(66));
+        check(p.ok && p.precise && p.precise->applied == 0 && p.precise->skipped.size() == 1 &&
+                  p.precise->skipped[0].line == line_of_first(curve, "frame=0,29") &&
+                  p.precise->skipped[0].reason == "trackbar at line " + std::to_string(line_of_first(curve, "X=")) +
+                                                      " uses mode " + tc + " with a curve or keyframes; it is not re-sampled" &&
+                  first_row(p, "X=") == "X=0.00,100.00," + tc + ",0|1,0,1,0",
+              "precise tcmode: a payload skips the object, row unchanged", first_skip(p));
+        const std::string many = project(scene30(), object("0,10,29", "X=0.00,50.00,100.00," + tc + ",0\n"));
+        const RetimeResult m = precise(many, rate(60));
+        check(m.ok && m.precise && m.precise->applied == 0 && m.precise->skipped.size() == 1 &&
+                  m.precise->skipped[0].reason == "trackbar at line " + std::to_string(line_of_first(many, "X=")) +
+                                                      " uses mode " + tc + " with a curve or keyframes; it is not re-sampled",
+              "precise tcmode: intermediate points skip the object", first_skip(m));
+        // 30 -> 60: the rescaled end 59 is after the held end 58, so a keyframe would be added: skipped.
+        const std::string up = project(scene30(), object("0,29", "X=0.00,100.00," + tc + ",0\n"));
+        const RetimeResult u = precise(up, rate(60));
+        check(u.ok && u.precise && u.precise->applied == 0 && u.precise->skipped.size() == 1 &&
+                  u.precise->skipped[0].reason == "trackbar at line " + std::to_string(line_of_first(up, "X=")) +
+                                                      " uses mode " + tc + "; end hold needs keyframes this mode ignores" &&
+                  first_row(u, "X=") == "X=0.00,100.00," + tc + ",0" && first_row(u, "frame=") == "frame=0,59",
+              "precise tcmode: an end hold that needs extra keyframes skips the object", first_skip(u));
+        // 66 -> 60: no extra keyframes are needed: re-sampled exactly like 直線移動, the mode text is kept.
+        const std::string rate66 = "video.rate=66\nvideo.scale=1\n";
+        const RetimeResult d = precise(project(rate66, object("0,65", "X=0.00,100.00," + tc + ",0\n")), rate(60));
+        const RetimeResult dl = precise(project(rate66, object("0,65", "X=0.00,100.00,直線移動,0\n")), rate(60));
+        const std::string expected = replace_mode(first_row(dl, "X="), "直線移動", tc);
+        check(d.ok && d.precise && d.precise->applied == 1 && d.precise->skipped.empty() && dl.ok &&
+                  first_row(d, "X=") == expected && contains(first_row(d, "X="), "," + tc + ",0") &&
+                  first_row(d, "frame=") == first_row(dl, "frame="),
+              "precise tcmode: no extra keyframes needed: re-sampled like 直線移動, mode kept",
+              first_row(d, "X=") + " / " + expected);
+        // One bad row skips the whole object, also next to a good 直線移動 row.
+        const std::string mixed =
+            project(scene30(), object("0,29", "X=0.00,100.00,直線移動,0\nY=0.00,100.00," + tc + ",0\n"));
+        const RetimeResult x = precise(mixed, rate(60));
+        check(x.ok && x.precise && x.precise->applied == 0 && x.precise->skipped.size() == 1 &&
+                  first_row(x, "X=") == "X=0.00,100.00,直線移動,0",
+              "precise tcmode: one such row skips the whole object", first_skip(x));
+    }
+    // 4b. 補間移動(時間制御): accepted on any track, with or without a payload, kept as written; precise never re-samples it.
+    {
+        const std::string im = "補間移動(時間制御)";
+        const std::string row = "X=0.00,50.00,100.00," + im + ",0|1,0,1,0";
+        const RetimeResult r = retime_target(project(scene30(), object("0,10,29", row + "\n")), rate(60));
+        check(r.ok && first_row(r, "X=") == row && first_row(r, "frame=") == "frame=0,20,59",
+              "interp tcmode: accepted with a payload and middle points, kept", refusal_or_converted(r));
+        const std::string plain = project(scene30(), object("0,29", "X=0.00,100.00," + im + ",0\n"));
+        const RetimeResult p = precise(plain, rate(66));
+        check(p.ok && p.precise && p.precise->applied == 0 && p.precise->skipped.size() == 1 &&
+                  p.precise->skipped[0].reason ==
+                      "trackbar at line " + std::to_string(line_of_first(plain, "X=")) + " uses mode " + im +
+                          "; it is not re-sampled",
+              "interp tcmode: precise skips the object", first_skip(p));
+        const std::string constant = project(scene30(), object("0,29", "X=5.00,5.00," + im + ",0|1,0,1,0\n"));
+        const RetimeResult c = precise(constant, rate(66));
+        check(c.ok && c.precise && c.precise->applied == 0 && c.precise->skipped.size() == 1 &&
+                  contains(c.precise->skipped[0].reason, "; it is not re-sampled"),
+              "interp tcmode: a constant row with a payload is skipped as well", first_skip(c));
+    }
+    // 4c. Order of the precise checks: a problem of a later row (zero length, payload on another mode is refused
+    //     earlier) comes before the end hold check of an earlier 直線移動(時間制御) row.
+    {
+        const std::string text = project(scene30(), object("5,5", "X=0.00,100.00," + tc + ",0\n"));
+        const RetimeResult p = precise(text, rate(60));
+        check(p.ok && p.precise && p.precise->skipped.size() == 1 &&
+                  p.precise->skipped[0].reason == "frame= start equals end; there is no segment to resample",
+              "precise tcmode: the zero-length reason comes before the end hold reason", first_skip(p));
+    }
+    // 5. The time control 位置 row with a curve: kept as written, frames converted, no A/B rewrite.
+    {
+        const std::string row = tc_row("0.000", "100.000", "0|0,0,1,0");
+        const std::string text = tc_project(30, tc_object(0, 0, "0,59", row) + plain_object(1, 1, "0,59"));
+        const RetimeResult r = retime_target(text, rate(60));
+        check(r.ok && first_row(r, "位置=") == "位置=" + row && first_row(r, "frame=") == "frame=0,119" &&
+                  first_row(r, "コマ落ち=") == "コマ落ち=1" && r.notes.size() == 1 &&
+                  r.notes[0] == "time control at line " + std::to_string(line_of_first(text, "frame=0,59")) +
+                                    ": 位置 has a curve; kept (object-relative, within one frame)",
+              "time control curve: 位置 row kept, frames converted, one note", refusal_or_converted(r) + " / " + first_note(r));
+        const RetimeResult p = precise(text, rate(60));
+        check(p.ok && p.precise && p.precise->applied == 0 && p.precise->skipped.empty() &&
+                  first_row(p, "位置=") == "位置=" + row,
+              "time control curve: precise leaves the row alone and does not report it", refusal_or_converted(p));
+        // 位置 with a curve, other values: also at a rate that is not an integer multiple.
+        const RetimeResult q = retime_target(text, rate(66));
+        check(q.ok && first_row(q, "位置=") == "位置=" + row && first_row(q, "frame=") == "frame=0,131",
+              "time control curve: 30 -> 66", refusal_or_converted(q));
+        // k = 1 leaves the effect alone, with no note.
+        const RetimeResult same = retime_target(text, rate(30));
+        check(same.ok && same.notes.empty() && first_row(same, "位置=") == "位置=" + row, "time control curve: k = 1 is untouched",
+              refusal_or_converted(same));
+    }
+    // 6. コマ落ち with a curve: K x k and s x k must be integers, then K x k is written; otherwise REFUSED.
+    {
+        const std::string row = tc_row("0.000", "100.000", "0|0,0,1,0");
+        const std::string text = tc_project(30, tc_object(0, 0, "0,59", row, "2") + plain_object(1, 1, "0,59"));
+        const RetimeResult r = retime_target(text, rate(60));
+        check(r.ok && first_row(r, "コマ落ち=") == "コマ落ち=4" && first_row(r, "位置=") == "位置=" + row &&
+                  r.notes.size() == 1 && contains(r.notes[0], "位置 has a curve; kept (object-relative, within one frame)") &&
+                  contains(r.notes[0], "コマ落ち 2 -> 4"),
+              "time control curve: コマ落ち=2 at 30 -> 60 becomes 4", refusal_or_converted(r) + " / " + first_note(r));
+        const RetimeResult f = retime_target(text, rate(66));
+        check(!f.ok && f.refusal_line == 0 &&
+                  refusal_message(f) == "REFUSED: time control at line " + std::to_string(line_of_first(text, "位置=")) +
+                                            " has a curve and コマ落ち=2 cannot be kept exact",
+              "time control curve: コマ落ち=2 at 30 -> 66 (K x k = 4.4) is refused", refusal_or_converted(f));
+        // k = 3/2: K x k = 3 for K = 2. s x k must be an integer as well: s = 2 passes, s = 1 does not.
+        const std::string ok_s = tc_project(30, tc_object(0, 0, "2,59", row, "2") + plain_object(1, 1, "0,59"));
+        const RetimeResult o = retime_target(ok_s, rate(45));
+        check(o.ok && first_row(o, "コマ落ち=") == "コマ落ち=3", "time control curve: s x k and K x k integers: コマ落ち=3",
+              refusal_or_converted(o));
+        const std::string bad_s = tc_project(30, tc_object(0, 0, "1,59", row, "2") + plain_object(1, 1, "0,59"));
+        const RetimeResult b = retime_target(bad_s, rate(45));
+        check(!b.ok && contains(b.refusal_reason, "has a curve and コマ落ち=2 cannot be kept exact"),
+              "time control curve: a non-integer s x k is refused", refusal_or_converted(b));
+        // A kept scene (sub scene at its own rate) is not looked at.
+        const RetimeResult k1 = retime_target(text, rate(30));
+        check(k1.ok, "time control curve: k = 1 with コマ落ち=2 converts untouched", refusal_or_converted(k1));
+    }
+    // 7. A 直線移動(時間制御) row next to a straight time control 位置 row (route A) is kept; in route B it follows the
+    //    existing rule (changing values refuse).
+    {
+        const std::string text = tc_project(30, "[0]\nlayer=0\nframe=0,59\n[0.0]\neffect.name=時間制御(オブジェクト)\n位置=" +
+                                                    tc_row("0.000", "100.000") + "\nY=0.000,1.000," + tc + ",0\n");
+        const RetimeResult r = retime_target(text, rate(60));
+        check(r.ok && first_row(r, "Y=") == "Y=0.000,1.000," + tc + ",0", "tcmode: a second row inside a time control effect",
+              refusal_or_converted(r));
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -2361,6 +2577,7 @@ int main(int argc, char** argv) {
     test_time_control_refusals();
     test_time_control_precise();
     test_time_control_kept_scene();
+    test_tcmode_and_payload();
     std::printf("%s (%d failure%s)\n", g_failures == 0 ? "ALL PASS" : "FAILED", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures == 0 ? 0 : 1;

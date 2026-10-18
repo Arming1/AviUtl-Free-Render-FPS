@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-10-18
+
+### Added
+
+- `直線移動(時間制御)` and `補間移動(時間制御)` are accepted on any effect track, with two or more points. Values and
+  `|` curve payloads are kept byte for byte. Frames are converted like `直線移動`.
+- 時間制御(オブジェクト) `位置` with a curve keeps its curve and values; only the frames are converted.
+- `test_kit` (host test projects, probes, scripts and checklists) is in the repository.
+
+### Changed
+
+- Precise motion handles the time-control modes: a two-point `直線移動(時間制御)` with no payload is re-sampled
+  when no end hold is needed; `直線移動` with a payload is re-sampled and keeps the payload. Other time-control
+  tracks, and objects with a curve or more than two points, are skipped and listed in `precise.skipped`.
+- 時間制御 `位置` with a curve: `コマ落ち=K` (K ≥ 2) is kept only when `K × k` and the controlled seconds are integers.
+  Otherwise the conversion is refused with a message naming the line.
+
+### Fixed
+
+- C++ retimer: the time-control staircase looks up objects per object. A 35 MB project went from minutes to 2.7 s.
+- C++ retimer matches the Python rules for time-control modes and curve payloads (cross-check 3630/3630, plus 56 real
+  projects byte-identical).
+
+### Validation
+
+- Probes R1–R3 in AviUtl2 v2.1.12 (`test_kit/7_轨迹移动方式/`, `test_kit/8_補間移動時間制御/`):
+  - R1a and R1b (`直線移動` and `直線移動(時間制御)`, two points, no curve) give identical frames (160 of 160, 0.000 px).
+  - R1d: middle-point times are ignored and the move runs at constant speed over the path (max error 0.19 px).
+  - R2: a curve edited in 時間制御編集 is stored as the payload `|1,0,1,0`.
+  - R3: `補間移動(時間制御)` follows the progress inside the object, with residual ≤ 0.38 px at 30 and 60 fps
+    (figure from `tools/aup2_fps_upconvert.md`; the result table in `test_kit/8_補間移動時間制御/` is not yet filled in).
+- CI runs the Python and C++ tests, the cross-check and the plugin build. Actions writes run summaries, and the R1/R2
+  host results are recomputed from the committed per-frame data (`tests/host_results/`).
+- Local corpus of 138 projects: 121 converted before this release, and about 10 of the remaining 17 are expected to
+  convert now. Not yet confirmed in AviUtl2.
+- Known limit: at very low targets (for example 66 → 10) an object shorter than one output frame can overlap its
+  neighbour after rounding, and the conversion is refused. See `docs/KNOWN_LIMITATIONS.md`.
+
 ## [1.2.5] — 2026-10-18
 
 > 1.2.2 was an internal test version number and was never publicly released.

@@ -11,98 +11,44 @@
 > the early stages, then Anthropic Claude / Claude Code). The author planned and
 > reviewed the work and tested it on real AviUtl2 installations.
 
-FreeRenderFPS is an x264guiEx-based output plugin with AviUtl2 and legacy
-AviUtl 1.x host adapters. It evaluates the real scene timeline at an output FPS
-independent from the project FPS. A 30 FPS project can therefore render genuine
-60 FPS states at coordinates 0.0, 0.5, 1.0, 1.5… It does not copy frames or
-merely change FPS metadata.
+FreeRenderFPS is an x264guiEx-based output plugin that re-evaluates the real scene at output-FPS time points independent of the project FPS, so a 30 FPS project can render genuine 60 FPS states. It does not copy frames or only change FPS metadata.
 
-## v1.2.5
+## v1.3.0 highlights
 
-See [CHANGELOG.md](CHANGELOG.md) for the full list:
+- `直線移動(時間制御)` (linear move, time control) works on any track; `補間移動(時間制御)` is accepted.
+- Time-control edit curves (the `|` payload) and curved 位置 are kept unchanged.
+- Converting large projects is much faster (a 35 MB project in about 3 seconds).
+- GitHub Actions builds and tests every push and shows in-host measurement results.
+- Very low target rates (for example 66 → 10) are refused when short objects would overlap. Not supported yet.
 
-- Sub-scene rate: in a multi-scene project, a sub-scene whose source rate is lower than the exported scene's keeps its own rate (A/B/C cases run in AviUtl2).
-- Time control (時間制御(オブジェクト)): 位置 and `コマ落ち` are recomputed exactly in seconds. When the new end values leave 0..100, or a drop is not an integer multiple, the block becomes a `瞬間移動` staircase with one point per step.
-- Precise motion holds the end value after the original end instead of extrapolating. The P6 export (66 → 132, end hold on) ran in AviUtl2 with a per-frame error of at most 0.27 px.
-- The Precise motion checkbox is hidden in the dialog. Precise motion is always on in normal mode. A `free_fps_export.ini` next to the plugin DLL with `[debug] enabled=1` shows the checkbox and the `[debug]` settings (`precise`, `extra_decimals` 0 to 4, `keep_temp`).
-- Easing tracks `イージング（通常）@イージング` are accepted.
-- Known limits (last frame of a low-rate staircase, last frame of a two-point line, 3-decimal 位置) are in [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
+## Features
 
-## v1.2.1
+- Sub-scene rate: a sub-scene whose source rate is lower than the exported scene's keeps its own rate.
+- Time control (時間制御(オブジェクト)) 位置 and `コマ落ち` are recomputed exactly in seconds.
+- Precise motion (exact linear-motion speed) is on by default and its checkbox is hidden. Easing tracks `イージング（通常）@イージング` are accepted.
 
-v1.2.1 is a patch release on v1.2.0; see [CHANGELOG.md](CHANGELOG.md).
+## Download and install
 
-- Free FPS Export has an **Encoder settings...** button that opens the x264guiEx
-  settings window, and an encoder summary line. The container follows the output
-  file extension.
-- Free FPS Export encodes with the settings in the x264guiEx settings window. It
-  only turns off the built-in Enable Free Render FPS switch for the export.
-- The Free FPS Export dialog and the Free Render FPS tab support Chinese, Japanese
-  and English. Error messages are still English.
-- The Free Render FPS tab layout is fixed: the target FPS dropdown is no longer
-  covered by its label.
+- **Recommended:** `AviUtl2-FreeRenderFPS-v1.3.0-setup.zip`. Extract all of it, run `AviUtl2-FreeRenderFPS-v1.3.0-setup.exe` beside its `payload` directory, then restart AviUtl2. Manual: `AviUtl2-FreeRenderFPS-v1.3.0-portable.zip`, extracted over the AviUtl2 root. See [docs/INSTALL.md](docs/INSTALL.md).
 
-### v1.2.0 features
+## Usage
 
-v1.2.0 keeps the v1.1.0 single-plugin layout and adds Precise motion.
+In AviUtl2 v2.1.12, save the project, then choose **Edit > Free FPS Export...**. Set **Target FPS** (59.94 is 60000/1001), **Sub-scene frame rate** (Auto by default), and **Encoder settings...** for bitrate, preset, audio and container.
 
-- Adds **Precise motion** (exact speed for linear motion) to Free FPS Export. The
-  checkbox is on by default.
-- `x264guiEx-FreeRenderFPS.aux2` contains the output plugin and Edit >
-  **Free FPS Export...**, which re-times the scene through the public AviUtl2
-  SDK. Any rational output FPS works on AviUtl2 v2.1.12.
-- The built-in Enable Free Render FPS hook still supports AviUtl2 v2.1.4 x64
-  only. Other hosts get a message that points to Free FPS Export.
-- The installer migrates legacy `.auo2` installs to `.aux2` and keeps backups
-  outside `Plugin`. `--cleanup-legacy-backups` moves old backup folders out of
-  `Plugin` (opt-in; it never deletes).
-- Adds the `.aup2` retimer tool, host-free tests and validation tools.
+## Support
 
-The release gates and measurements below are v1.0.0 results. Free FPS Export was
-checked in-host on AviUtl2 v2.1.12 on 2026-10-17: 8 conversions with Precise motion
-enabled (frame counts equal the expected values, no duplicate or reversed frames,
-motion residual 0.12–0.23 px against a 1.0 px limit), and a 30-minute A/V sync run
-at 66, 50 and 60000/1001 fps (all PASS; maximum offset 0.00 ms at 66 and 50 fps,
-±8.33 ms, half a frame, at 60000/1001). The tested binary was
-`x264guiEx-FreeRenderFPS.aux2` (version resource 1.1.0, SHA256 114C3070…6076B,
-repacked 2026-10-17 17:52, contains Precise motion); the first 1.1.0 build did
-not contain precise mode. That build's contents are the 1.2.0 feature set; only the
-version number was not bumped. The built-in hook on AviUtl2 v2.1.4 still needs in-host validation. The AviUtl 1.x package is still v1.0.1 and needs
-re-validation on AviUtl 1.10 + ExEdit 0.92.
+- **AviUtl2 v2.1.12:** Edit > Free FPS Export... gives free render FPS. The built-in hook is AviUtl2 v2.1.4 x64 only.
+- **AviUtl 1.x:** x86 `.auo` package v1.0.1 for AviUtl 1.10 + ExEdit 0.92 only.
 
-Release gates passed by v1.0.0 on AviUtl2 v2.1.4 x64:
+## Validation
 
-- FreeFPS OFF compatibility output passes.
-- 30 → 60, 66 → 60, 66 → 59.94, 66 → 24, 66 → 120 and 120 → 60 pass.
-- 30 → 60 and 66 → 60 each produce 300/300 unique decoded frames.
-- Setup and portable package-only clean-host H.264/AAC encodes pass.
-- Runtime source/build provenance and exact release artifact hashes are locked.
+- AviUtl2 v2.1.12, Free FPS Export: 8 in-host conversions with Precise motion (residual 0.12–0.23 px). 30-minute A/V sync at 66, 50 and 60000/1001 fps: all PASS (maximum offset 0.00–8.33 ms).
+- AviUtl2 v2.1.4 x64 (v1.0.0 gates): 30 → 60, 66 → 60, 66 → 59.94, 66 → 24, 66 → 120 and 120 → 60 all PASS. AviUtl 1.x: 30 → 60 continuous motion only. Details: [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md) and [GitHub Actions](https://github.com/Arming1/AviUtl-Free-Render-FPS/actions).
 
-See [the final report](FINAL_REPORT.md), [validation matrix](docs/VALIDATION_MATRIX.md),
-and [installation guide](docs/INSTALL.md).
+## Known limitations
 
-The AviUtl2 build is the single plugin `x264guiEx-FreeRenderFPS.aux2`. It
-provides the x264guiEx FreeRenderFPS output plugin and the Edit menu item
-**Free FPS Export...**, which gives free render FPS on AviUtl2 v2.1.12. The
-built-in FreeRenderFPS hook supports only AviUtl2 v2.1.4 x64; unknown host
-signatures fail closed. Upgrade notes (old `.auo2`, `free_fps_export.aux2`, and
-backup folders) are in [docs/INSTALL.md](docs/INSTALL.md).
+Known limits (the last frame of a low-rate staircase or two-point line; 3-decimal 位置) are in [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md). Conversion rules are in [docs/RETIME_RULES.md](docs/RETIME_RULES.md). History: [CHANGELOG.md](CHANGELOG.md).
 
-Multiple scenes (from 1.2.5): scenes may have different frame rates. The exported
-scene (`display.scene`, default 0) always follows the target FPS. With **Sub-scene
-frame rate: Auto (recommended)** (the default), another scene follows the target FPS
-when its source rate is at least the exported scene's rate. A slower scene keeps its
-own rate, so its frame-hold steps stay visible. **Follow the target rate for all
-scenes** and **Keep the original rate for all scenes** are the other choices.
-Scene (`シーン`) playback position in seconds and playback speed in percent are not
-rescaled. Version 1.2.1 refuses such projects.
+## License
 
-The AviUtl 1.x adapter supports official AviUtl 1.10 + ExEdit 0.92 only and is
-distributed as an x86 `.auo` manual-install package at
-`dist\AviUtl1-FreeRenderFPS-v1.0.1`. Its current direct media validation covers
-30 → 60 with real continuous-motion sub-frame evaluation and preserved audio
-duration; the remaining legacy FPS matrix cases are explicitly pending.
-
-Project code is under [LICENSE](LICENSE). Third-party notices and redistribution
-details are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
-[docs/RUNTIME_DEPENDENCIES.md](docs/RUNTIME_DEPENDENCIES.md).
+Project code: [LICENSE](LICENSE). Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [docs/RUNTIME_DEPENDENCIES.md](docs/RUNTIME_DEPENDENCIES.md). Reuses [x264guiEx by rigaya](https://github.com/rigaya/x264guiEx).

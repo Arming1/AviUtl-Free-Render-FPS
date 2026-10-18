@@ -24,6 +24,12 @@ Held ends and steps: the ph_* projects (--precise keeps the last value; extra ke
 projects (reversed blocks, clamped end values, コマ落ち whose K x k or s x k is not an integer: 瞬間移動 steps; constant
 and changing trackbars next to steps; the 4096 point limit; a scene at k = 1) run at every target, precise off and on.
 
+Time control mode and payloads (always on): the tcm_* synthetic projects (直線移動(時間制御) on ordinary tracks of any effect,
+'|' payloads such as 0|1,0,1,0 on 直線移動, 直線移動(時間制御) and the easing mode, precise skips and re-sampling) and the
+tc_curve_* projects (a curve in the 位置 row, コマ落ち K x k or the refusal) at the nine targets and the five precise targets.
+User projects (read-only, copied first, skipped when absent): C:\\Users\\gaoha\\Desktop\\10 3.aup2, 神.aup2 and every
+D:\\ARZv2.0.1\\**\\output.aup2 at --target-fps 60, 66, 120 and --factor 2, with --precise off and on.
+
 Each case runs both tools one after the other with the same absolute --out path. Exit codes, stderr (the
 refusal text) and the .aup2 and .convert.json files must match exactly. The C++ and Python refusal texts are now
 identical (no known difference except a コマ落ち beyond 64 bits, which the port refuses and Python converts); any difference
@@ -58,6 +64,11 @@ ARZ_TEMPLATE = r"D:\ARZv2.0.1\ARZv2.0.1\template\15_mer1\.aup2"
 PROBE_DIR = os.path.join(REPO, "test_kit", "5_抽帧探针")
 
 SUBSCENE_POLICIES = ("auto", "follow", "keep")
+
+# Read-only user projects (copied into the work directory first; absent files are skipped).
+USER_PROJECTS = [r"C:\Users\gaoha\Desktop\10 3.aup2", r"C:\Users\gaoha\Desktop\神.aup2"]
+ARZ_ROOT = r"D:\ARZv2.0.1"
+USER_TARGETS = [["--target-fps", "60"], ["--target-fps", "66"], ["--target-fps", "120"], ["--factor", "2"]]
 
 TARGETS = [["--target-fps", rate] for rate in ("66", "60", "50", "59", "24", "120", "60000/1001", "30000/1001")]
 TARGETS += [["--factor", "2"], ["--factor", "3"]]
@@ -204,7 +215,14 @@ def effect_body(*lines):
 REFUSAL_CASES = [
     ("coma_ochi", synthetic_text(BASE_BODY + ["コマ落ち=2"]), ["--target-fps", "66"]),
     ("coma_ochi_zero", synthetic_text(BASE_BODY + ["コマ落ち=0"]), ["--target-fps", "66"]),
-    ("pipe_payload", synthetic_text(effect_body("effect.name=標準描画", "X=0.00,100.00,直線移動,0|27")),
+    ("pipe_payload", synthetic_text(effect_body("effect.name=標準描画", "X=0.00,100.00,補間移動,0|27")),
+     ["--target-fps", "66"]),
+    ("pipe_payload_curve_other_mode", synthetic_text(effect_body("effect.name=標準描画", "X=0.00,100.00,瞬間移動,0|1,0,1,0")),
+     ["--target-fps", "66"]),
+    ("tc_curve_drop_not_exact", synthetic_text(
+        ["[0]", "layer=0", "frame=0,59", "[0.0]", "effect.name=時間制御(オブジェクト)",
+         "位置=0.000,100.000,直線移動(時間制御),0|0,0,1,0", "繰り返し=1", "コマ落ち=2", "対象レイヤー数=1",
+         "[1]", "layer=1", "frame=0,59", "[1.0]", "effect.name=標準描画"], rate=30),
      ["--target-fps", "66"]),
     ("unknown_trackbar_mode", synthetic_text(effect_body("effect.name=標準描画", "X=0.00,100.00,未知移動,0")),
      ["--target-fps", "66"]),
@@ -309,6 +327,56 @@ def time_control_texts():
         object_lines(1, "0,29", tracks=["X=0.00,50.00,100.00,%s,0|27" % ease]), rate=30)
     texts["tc_flag_one"] = synthetic_text(
         tc_object(1, 0, "0,59", tc_row("0.000", "100.000", "1")) + controlled_object(2, 1, "0,59"), rate=30)
+    # 直線移動(時間制御) on ordinary tracks of any effect and '|' payloads (kept as written; --precise rules).
+    ease_mode = "イージング（通常）@イージング"
+    curve = "0|1,0,1,0"
+    tcm_rows = [
+        object_lines(1, "0,29", layer=0, tracks=["X=-600.00,600.00,%s,0" % TC_MODE]),
+        object_lines(2, "30,59", layer=1, tracks=["X=-600.00,600.00,%s,%s" % (TC_MODE, curve)]),
+        object_lines(3, "0,10,59", layer=2, tracks=["X=0.00,50.00,100.00,%s,0" % TC_MODE]),
+        object_lines(4, "0,29", layer=3, tracks=["Y=0.00,0.00,直線移動,%s" % curve, "X=1.00,2.00,直線移動,%s" % curve]),
+        object_lines(5, "30,59", layer=4, tracks=["X=3.00,4.00,%s,%s" % (ease_mode, curve)]),
+        object_lines(6, "0,29", layer=5, tracks=["拡大率=100.000,150.000,%s,0" % TC_MODE], effect="映像再生"),
+        object_lines(7, "0,29", layer=6, tracks=["X=5.00,5.00,%s,0" % TC_MODE, "Y=0.00,100.00,直線移動,0"]),
+        object_lines(8, "0,29", layer=7, tracks=["X=0.00,100.00,直線移動,0", "Y=0.00,100.00,%s,0" % TC_MODE]),
+    ]
+    texts["tcm_all_kinds"] = synthetic_text([line for rows in tcm_rows for line in rows], rate=30)
+    texts["tcm_all_kinds_66"] = synthetic_text([line for rows in tcm_rows for line in rows], rate=66)
+    for index, rows in enumerate(tcm_rows, 1):
+        texts["tcm_single_%d" % index] = synthetic_text(rows, rate=30)
+        texts["tcm_single_66_%d" % index] = synthetic_text(
+            [row.replace("0,29", "0,65").replace("30,59", "66,131").replace("0,10,59", "0,20,131") for row in rows], rate=66)
+    texts["tcm_count_mismatch"] = synthetic_text(
+        object_lines(1, "0,29", tracks=["X=0.00,50.00,100.00,%s,0" % TC_MODE]), rate=30)
+    texts["tcm_unknown_mode_suffix"] = synthetic_text(
+        object_lines(1, "0,29", tracks=["X=0.00,50.00,%s謎,0" % TC_MODE]), rate=30)
+    # A comma-free payload on every mode, and a '|' inside a value that is not a trackbar.
+    texts["tcm_pipe_inside_text"] = synthetic_text(
+        object_lines(1, "0,29", tracks=["X=0.00,100.00,直線移動,0|27", "Y=1,2,3,4|5,6"]), rate=30)
+    # 時間制御(オブジェクト) with a curve in 位置 (kept as written) and コマ落ち K x k.
+    cv = "0|0,0,1,0"
+    curves = tc_object(1, 0, "0,59", tc_row("0.000", "100.000", cv)) + \
+        tc_object(2, 1, "0,59", tc_row("100.000", "0.000", cv), "2") + \
+        tc_object(3, 2, "2,59", tc_row("10.000", "90.000", cv), "4") + \
+        controlled_object(4, 3, "0,59", tracks=["X=0.00,100.00,直線移動,0"])
+    texts["tc_curve_30"] = synthetic_text(curves, rate=30)
+    texts["tc_curve_60"] = synthetic_text(curves, rate=60)
+    texts["tc_curve_66"] = synthetic_text(curves, rate=66)
+    texts["tc_curve_no_drop"] = synthetic_text(
+        tc_object(1, 0, "0,59", tc_row("0.000", "100.000", cv)) + controlled_object(2, 1, "0,59"), rate=30)
+    texts["tc_curve_single_frame"] = synthetic_text(
+        tc_object(1, 0, "5,5", tc_row("0.000", "100.000", cv), "3") + controlled_object(2, 1, "0,12"), rate=30)
+    texts["tc_curve_mixed_with_lines"] = synthetic_text(
+        tc_object(1, 0, "0,59", tc_row("0.000", "100.000", cv)) + tc_object(2, 1, "0,59", tc_row("0.000", "100.000")) +
+        tc_object(3, 2, "0,59", tc_row("100.000", "0.000"), "2") + controlled_object(4, 3, "0,59"), rate=30)
+    texts["tc_curve_other_row"] = synthetic_text(
+        tc_object(1, 0, "0,59", None, effect_lines=["位置=" + tc_row("0.000", "100.000", cv), "繰り返し=1", "コマ落ち=1",
+                                                    "対象レイヤー数=1", "Y=7.00,7.00,%s,%s" % (TC_MODE, cv)]) +
+        controlled_object(2, 1, "0,59"), rate=30)
+    texts["tc_curve_subscene"] = multi_text(
+        ["display.scene=0"], scene_section(0, "main", 30, 1, SCENE_EFFECT_OBJECT),
+        scene_section(1, "sub", 15, 1, tc_object(3, 0, "0,74", tc_row("100.000", "0.000", cv), "2", scene=1) +
+                      controlled_object(4, 1, "0,74", scene=1)))
     # Multi-scene: a 15 FPS sub scene with a time control object (kept under auto, followed under follow).
     sub_tc = tc_object(3, 0, "0,74", tc_row("100.000", "0.000"), "2", scene=1) + \
         controlled_object(4, 1, "0,74", scene=1)
@@ -469,11 +537,37 @@ def time_control_cases(template_copy, synthetic_dir):
             cases.append((label, path, target))
         for target in PRECISE_TARGETS:
             cases.append((label, path, target + ["--precise"]))
-        if name.startswith(("tc_subscene", "tcs_sub_scene")) and python_tool_has_option("--subscene-rate"):
+        if name.startswith(("tc_subscene", "tcs_sub_scene", "tc_curve_subscene")) and python_tool_has_option("--subscene-rate"):
             for policy in SUBSCENE_POLICIES:
                 for target in TIME_CONTROL_TARGETS:
                     cases.append((label, path, target + ["--subscene-rate", policy]))
                     cases.append((label, path, target + ["--subscene-rate", policy, "--precise"]))
+    return cases
+
+
+def user_project_sources():
+    """(label, path) of the read-only user projects that exist: the desktop samples and every ARZ output.aup2."""
+    found = [(os.path.splitext(os.path.basename(path))[0], path) for path in USER_PROJECTS if os.path.isfile(path)]
+    for path in USER_PROJECTS:
+        if not os.path.isfile(path):
+            print("SKIP user project: %s is missing" % path)
+    pattern = os.path.join(ARZ_ROOT, "**", "output.aup2")
+    for index, path in enumerate(sorted(glob.glob(pattern, recursive=True)), 1):
+        found.append(("ARZ output.aup2 #%d" % index, path))
+    if not os.path.isdir(ARZ_ROOT):
+        print("SKIP user projects: %s is missing" % ARZ_ROOT)
+    return found
+
+
+def user_project_cases(work):
+    """Copies of the user projects (read-only originals) at 60, 66, 120 and 2x, precise off and on."""
+    cases = []
+    for index, (label, path) in enumerate(user_project_sources()):
+        copy = os.path.join(work, "user_project_%d.aup2" % index)
+        shutil.copyfile(path, copy)
+        for target in USER_TARGETS:
+            cases.append((label, copy, target))
+            cases.append((label, copy, target + ["--precise"]))
     return cases
 
 
@@ -656,6 +750,7 @@ def main(argv=None):
         else:
             print("SKIP ARZ template: %s is missing" % ARZ_TEMPLATE)
         cases.extend(time_control_cases(template_copy, synthetic_dir))
+        cases.extend(user_project_cases(work))
         for name, text, extra in REFUSAL_CASES + refusal_cases_extra:
             path = os.path.join(synthetic_dir, name + ".aup2")
             with open(path, "wb") as fh:
@@ -671,6 +766,8 @@ def main(argv=None):
     finally:
         if os.path.exists(real_copy):
             os.remove(real_copy)
+        for user_copy in glob.glob(os.path.join(work, "user_project_*.aup2")):
+            os.remove(user_copy)
         template_path = os.path.join(work, "arz_template_15_mer1.aup2")
         if os.path.exists(template_path):
             os.remove(template_path)

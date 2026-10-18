@@ -56,16 +56,36 @@ TRACK_MODES = frozenset({
     # parameter and the two end values, not on frame number, frame rate or time. Frames are rescaled and values are kept
     # like 直線移動. イージング（補間移動）@イージング is not listed: it reads obj.getpoint("time") and is not verified.
     "イージング（通常）@イージング",
+    # Time-control move mode on an ordinary track (measured in AviUtl2 v2.1.12: with two points and no payload it is
+    # frame by frame the same as 直線移動; with middle points their times are ignored, the value runs at constant speed
+    # over the whole path; a curve edited in the time control dialog is the '|' payload). It depends only on the
+    # progress inside the object, so frames are rescaled and values are kept like 直線移動.
+    "直線移動(時間制御)",
+    # Interpolated time-control move mode (measured, probe R3: with or without curve, with middle points, it follows the
+    # progress inside the object u = f / (N - 1) only; residual <= 0.38 px at 30 and 60 fps). Handled like 直線移動(時間制御).
+    "補間移動(時間制御)",
 })
 # Trackbar payloads after '|' (e.g. "0|27"). Meaning is undocumented, so none are accepted ...
 TRACK_PIPE_PAYLOADS = frozenset()
-# ... except in these modes, where any payload is kept as it is (the easing parameter, e.g. "0|27").
-TRACK_PAYLOAD_MODES = frozenset({"イージング（通常）@イージング"})
+# ... except in these modes, where any payload is kept as it is (the easing parameter, e.g. "0|27"; the normalised
+# curve points of the time control dialog, e.g. "0|1,0,1,0", which the host also keeps on unused 直線移動 tracks).
+# The payload text is not checked and may contain commas.
+TRACK_PAYLOAD_MODES = frozenset({"イージング（通常）@イージング", "直線移動", "直線移動(時間制御)", "補間移動(時間制御)"})
 # Modes exempt from the "value count equals frame count" check (study section 2).
 TRACK_COUNT_EXEMPT_MODES = frozenset({"再生範囲"})
 # --precise: a track is resampled exactly when it is this mode with this parameter, or when its values are constant.
 PRECISE_LINEAR_MODE = "直線移動"
 PRECISE_LINEAR_PARAM = "0"
+# --precise: the time-control move mode is resampled like PRECISE_LINEAR_MODE when it has two values and no payload, and
+# only when the object needs no extra keyframes (the mode ignores the time of middle points); otherwise the object is
+# skipped with these reasons (formatted with the line number and the mode).
+PRECISE_TC_CURVE_REASON = "trackbar at line %d uses mode %s with a curve or keyframes; it is not re-sampled"
+PRECISE_TC_HOLD_REASON = "trackbar at line %d uses mode %s; end hold needs keyframes this mode ignores"
+# --precise: 補間移動(時間制御) is never resampled (a spline through the points; payload or not).
+PRECISE_INTERP_TC_MODE = "補間移動(時間制御)"
+PRECISE_INTERP_TC_REASON = "trackbar at line %d uses mode %s; it is not re-sampled"
+# --precise: modes whose '|' payload is kept (appended after the flag) when the track is resampled.
+PRECISE_PAYLOAD_MODES = frozenset({PRECISE_LINEAR_MODE, "直線移動(時間制御)"})
 # --precise: tracks in these modes are left unchanged and do not make their object ineligible.
 PRECISE_EXEMPT_MODES = frozenset({"再生範囲"})
 # --precise: an object with exactly two frame= points that are equal has no segment; it is skipped with this reason
@@ -94,6 +114,10 @@ TIME_CONTROL_KEY_POSITION = "位置"
 # The one trackbar mode that is accepted only in the 位置 line of a time control effect; it is not in TRACK_MODES.
 TIME_CONTROL_MODE = "直線移動(時間制御)"
 TIME_CONTROL_POSITION_REASON = "time control 位置 must be a two-point 直線移動(時間制御) track"
+# A 位置 with a '|' payload is a curve edited in the time control dialog. It depends only on the progress inside the
+# object, so the line is kept as it is; these are the texts of its note and of its frame-drop refusal.
+TIME_CONTROL_CURVE_NOTE = "time control at line %d: 位置 has a curve; kept (object-relative, within one frame)"
+TIME_CONTROL_CURVE_DROP_REASON = "time control at line %d has a curve and %s=%d cannot be kept exact"
 # コマ落ち (frame drop) is an integer field (-/+ spin box): K means one update every K project frames, 1 is no drop.
 # K >= 2 is converted only in a time control effect (K x k with a two-point line, 1 with a staircase).
 KEY_FRAME_DROP = "コマ落ち"
@@ -170,6 +194,23 @@ def is_trackbar(value):
     if not all(RE_NUMBER.match(p) for p in parts[:-2]):
         return False
     return not RE_NUMBER.match(parts[-2])
+
+
+def trackbar_parts(value):
+    """Split a trackbar value 'v1,...,vn,mode,param' or 'v1,...,vn,mode,param|payload'.
+
+    Returns (value_texts, mode, param) or None when the value is not a trackbar. param keeps its '|payload' part, which
+    may itself contain commas (for example '0|1,0,1,0'). A value with '|' whose part before the first '|' is not a
+    trackbar is judged as a whole by is_trackbar(), as before.
+    """
+    head, bar, _ = value.partition("|")
+    if bar and is_trackbar(head):
+        parts = head.split(",")
+        return parts[:-2], parts[-2], value[len(head) - len(parts[-1]):]
+    if is_trackbar(value):
+        parts = value.split(",")
+        return parts[:-2], parts[-2], parts[-1]
+    return None
 
 
 def parse_frames(value, line_no):
@@ -359,14 +400,19 @@ def precise_keyframes(frames, new, k):
 
 def precise_track_problem(line_no, mode, param, values):
     """Reason a trackbar blocks --precise for its object, or None when the track can be resampled exactly."""
-    if "|" in param:
+    base, bar, _ = param.partition("|")
+    if bar and mode not in PRECISE_PAYLOAD_MODES and mode != PRECISE_INTERP_TC_MODE:
         return "trackbar at line %d has a '|' payload" % line_no
-    if mode == PRECISE_LINEAR_MODE and param == PRECISE_LINEAR_PARAM:
+    if mode == TIME_CONTROL_MODE and (bar or len(values) != 2):
+        return PRECISE_TC_CURVE_REASON % (line_no, mode)
+    if mode == PRECISE_INTERP_TC_MODE:
+        return PRECISE_INTERP_TC_REASON % (line_no, mode)
+    if mode in PRECISE_PAYLOAD_MODES and base == PRECISE_LINEAR_PARAM:
         return None
     if len(set(values)) == 1:
         return None
     return ("trackbar at line %d uses mode %s with parameter %s and changing values; only %s,%s or constant "
-            "values can be resampled exactly" % (line_no, mode, param, PRECISE_LINEAR_MODE, PRECISE_LINEAR_PARAM))
+            "values can be resampled exactly" % (line_no, mode, base, PRECISE_LINEAR_MODE, PRECISE_LINEAR_PARAM))
 
 
 def precise_resample(lines, effect_lines, section_of, object_frame_lines, frame_values, new_frames, k_of, notes,
@@ -389,8 +435,8 @@ def precise_resample(lines, effect_lines, section_of, object_frame_lines, frame_
     """
     tracks = {}
     for idx in effect_lines:
-        value = lines[idx].partition("=")[2]
-        if not is_trackbar(value) or value.split(",")[-2] in PRECISE_EXEMPT_MODES:
+        track = trackbar_parts(lines[idx].partition("=")[2])
+        if track is None or track[1] in PRECISE_EXEMPT_MODES:
             continue
         tracks.setdefault(section_of[idx][1], []).append(idx)
 
@@ -407,24 +453,29 @@ def precise_resample(lines, effect_lines, section_of, object_frame_lines, frame_
         parsed = []
         for idx in tracks[obj_no]:
             key, _, value = lines[idx].partition("=")
-            parts = value.split(",")
-            values = [Fraction(x) for x in parts[:-2]]
-            problem = precise_track_problem(idx + 1, parts[-2], parts[-1], values)
+            texts, mode, param = trackbar_parts(value)
+            values = [Fraction(x) for x in texts]
+            problem = precise_track_problem(idx + 1, mode, param, values)
             if problem:
                 break
             if len(frames) == 2 and frames[0] == frames[1]:
                 problem = PRECISE_ZERO_LENGTH_REASON
                 break
-            parsed.append((idx, key, parts, values))
+            parsed.append((idx, key, texts, mode, param, values))
+        points = precise_keyframes(frames, new, k)
+        if not problem:
+            # 直線移動(時間制御) ignores the time of middle points, so extra keyframes would change it.
+            tc_idx = next((item[0] for item in parsed if item[3] == TIME_CONTROL_MODE), None)
+            if tc_idx is not None and points != list(new):
+                problem = PRECISE_TC_HOLD_REASON % (tc_idx + 1, TIME_CONTROL_MODE)
         if problem:
             skipped.append({"line": frame_idx + 1, "reason": problem})
             continue
         applied += 1
-        points = precise_keyframes(frames, new, k)
         if points != list(new):
             frames_out[obj_no] = points
-        for idx, key, parts, values in parsed:
-            places = max(decimal_places(x) for x in parts[:-2]) + extra_decimals
+        for idx, key, texts, mode, param, values in parsed:
+            places = max(decimal_places(x) for x in texts) + extra_decimals
             scale = 10 ** places
             exact = [held_curve_value(frames, values, Fraction(f) / k) for f in points]
             quantized = [quantize(x, places) for x in exact]
@@ -432,7 +483,7 @@ def precise_resample(lines, effect_lines, section_of, object_frame_lines, frame_
             span = max(values) - min(values)
             ratio = error / span if span else Fraction(0)
             end_shift = Fraction(quantized[-1][0], scale) - values[-1]
-            bodies[idx] = "%s=%s" % (key, ",".join([text for _, text in quantized] + parts[-2:]))
+            bodies[idx] = "%s=%s" % (key, ",".join([text for _, text in quantized] + [mode, param]))
             track_reports.append({
                 "object_line": frame_idx + 1,
                 "line": idx + 1,
@@ -451,17 +502,18 @@ def precise_resample(lines, effect_lines, section_of, object_frame_lines, frame_
 
 
 def parse_time_control_position(value):
-    """Parse the value of a time control 位置 line: 'a,b,直線移動(時間制御),flag'.
+    """Parse the value of a time control 位置 line: 'a,b,直線移動(時間制御),flag' or '...,flag|curve'.
 
-    Returns (a_text, b_text, flag_text), or None when it is not exactly two plain numbers, the time control mode
-    and a flag without '|' payload.
+    Returns (a_text, b_text, flag_text, curve_text), or None when it is not exactly two plain numbers, the time control
+    mode and a flag. curve_text is the text after the first '|' (any content, commas included) or None without one.
     """
-    parts = value.split(",")
+    head, bar, curve = value.partition("|")
+    parts = head.split(",")
     if len(parts) != 4 or not RE_NUMBER.match(parts[0]) or not RE_NUMBER.match(parts[1]):
         return None
-    if parts[2] != TIME_CONTROL_MODE or "|" in parts[3]:
+    if parts[2] != TIME_CONTROL_MODE:
         return None
-    return parts[0], parts[1], parts[3]
+    return parts[0], parts[1], parts[3], (curve if bar else None)
 
 
 def clamp_percent(value):
@@ -828,19 +880,19 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
             notes.append(text)
         if idx in time_control_positions:
             continue
-        if not is_trackbar(value):
+        track = trackbar_parts(value)
+        if track is None:
             continue
-        parts = value.split(",")
-        mode, param = parts[-2], parts[-1]
+        texts, mode, param = track
         if mode not in TRACK_MODES:
             raise Refusal(idx + 1, "trackbar mode %r is not on the whitelist" % mode)
         if "|" in param:
-            payload = param.split("|", 1)[1]
+            payload = param.partition("|")[2]
             if mode not in TRACK_PAYLOAD_MODES and payload not in TRACK_PIPE_PAYLOADS:
                 raise Refusal(idx + 1, "trackbar '|' payload %r is not on the whitelist" % payload)
         obj_no = section[1]
         if obj_no in frame_values and mode not in TRACK_COUNT_EXEMPT_MODES:
-            count = len(parts) - 2
+            count = len(texts)
             if count != len(frame_values[obj_no]):
                 raise Refusal(idx + 1, "trackbar has %d values but object [%d] has %d frame points"
                               % (count, obj_no, len(frame_values[obj_no])))
@@ -858,12 +910,30 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
     # exact (K = 1, or K x k and s x k are integers; and both new values are in 0..100), with コマ落ち K x k. Otherwise
     # the object gets a 瞬間移動 staircase with one point per change and コマ落ち 1. A scene with k = 1 is not touched.
     time_control_bodies = {}  # line index -> rewritten 位置, コマ落ち or constant trackbar line
+    effect_lines_of_object = {}  # object number -> its effect lines in file order (the staircase scans them)
+    for idx in effect_lines:
+        effect_lines_of_object.setdefault(section_of[idx][1], []).append(idx)
     final_frames = dict(new_frames)  # object number -> frame list to write (more points than new_frames: see below)
-    for obj_no, eff_no, pos_idx, (a_text, b_text, flag) in time_controls:
+    for obj_no, eff_no, pos_idx, (a_text, b_text, flag, curve) in time_controls:
         k_obj = object_k[obj_no]
         if k_obj == 1:
             continue
         frame_idx = followed_frame_lines[obj_no]
+        if curve is not None:
+            # A curve edited in the time control dialog: 位置 depends only on the progress inside the object (host
+            # measurement), so the line stays as written. コマ落ち K >= 2 is kept exact or refused.
+            props = effect_props[(obj_no, eff_no)]
+            drop_text, drop_idx = props.get(KEY_FRAME_DROP, ("1", None))
+            drop = int(drop_text)
+            note = TIME_CONTROL_CURVE_NOTE % (frame_idx + 1)
+            if drop > 1:
+                drop_k = drop * k_obj
+                if drop_k.denominator != 1 or (frame_values[obj_no][0] * k_obj).denominator != 1:
+                    raise Refusal(None, TIME_CONTROL_CURVE_DROP_REASON % (pos_idx + 1, KEY_FRAME_DROP, drop))
+                time_control_bodies[drop_idx] = "%s=%d" % (KEY_FRAME_DROP, int(drop_k))
+                note += "; %s %d -> %d" % (KEY_FRAME_DROP, drop, int(drop_k))
+            notes.append(note)
+            continue
         old_frames, new = frame_values[obj_no], new_frames[obj_no]
         old_range, new_range = (old_frames[0], old_frames[-1]), (new[0], new[-1])
         a, b = Fraction(a_text), Fraction(b_text)
@@ -902,16 +972,17 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
         # Staircase. The frame= list gets more points, so every other trackbar of the object must be constant (its
         # value is repeated); a 再生範囲 trackbar has no per-point values and stays.
         repeated = {}
-        for idx in effect_lines:
-            if section_of[idx][1] != obj_no or idx == pos_idx or not is_trackbar(lines[idx].partition("=")[2]):
-                continue
+        for idx in effect_lines_of_object.get(obj_no, ()):
             key_other, _, value = lines[idx].partition("=")
-            parts = value.split(",")
-            if parts[-2] in PRECISE_EXEMPT_MODES:
+            track = trackbar_parts(value)
+            if idx == pos_idx or track is None:
                 continue
-            if len({Fraction(x) for x in parts[:-2]}) != 1:
+            texts, mode_other, param_other = track
+            if mode_other in PRECISE_EXEMPT_MODES:
+                continue
+            if len({Fraction(x) for x in texts}) != 1:
                 raise Refusal(None, "time control at line %d: the object has other animated trackbars" % (pos_idx + 1))
-            repeated[idx] = (key_other, parts)
+            repeated[idx] = (key_other, texts, mode_other, param_other)
         steps = time_control_steps(old_range, new_range, a, b, drop, k_obj, places)
         if steps is None:
             raise Refusal(None, "time control at line %d needs more than %d steps"
@@ -920,8 +991,9 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
         final_frames[obj_no] = points
         time_control_bodies[pos_idx] = "%s=%s,%s,%s" % (key, ",".join(texts), TIME_CONTROL_STEP_MODE,
                                                          TIME_CONTROL_STEP_FLAG)
-        for idx, (key_other, parts) in repeated.items():
-            time_control_bodies[idx] = "%s=%s" % (key_other, ",".join([parts[0]] * len(points) + parts[-2:]))
+        for idx, (key_other, texts, mode_other, param_other) in repeated.items():
+            time_control_bodies[idx] = "%s=%s" % (
+                key_other, ",".join([texts[0]] * len(points) + [mode_other, param_other]))
         note = "time control at line %d: %s %s,%s -> %d steps (%s)" % (
             frame_idx + 1, TIME_CONTROL_KEY_POSITION, a_text, b_text, len(points), TIME_CONTROL_STEP_MODE)
         if drop > 1:

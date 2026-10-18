@@ -77,6 +77,7 @@ scenes share one rate) `Rp` is the same everywhere. With several rates each foll
 | `[N] effect` trackbar values (only with `--precise`) | Re-sampled at the new keyframes (plus the points of the end hold) for eligible objects; the object's `frame=` line can get up to four more points. Other objects are unchanged. See "Precise mode". |
 | `[N.M] 位置=a,b,直線移動(時間制御),flag` (effect `時間制御(オブジェクト)`) | Recomputed exactly so that the controlled layers show the same content at the same time: a two-point line when that is exact, else a `瞬間移動` staircase (and the object's `frame=` and its constant trackbars get one point per step). Always, with or without `--precise`. See "Time control". |
 | `[N.M] コマ落ち=K` (same effect, K ≥ 2) | `K × k` with a two-point line; `1` with a staircase (the staircase holds each segment). See "Time control". |
+| `[N.M] 位置=a,b,直線移動(時間制御),flag\|curve` (same effect, with a `\|` payload) | Kept as written (the curve depends only on the progress inside the object); `コマ落ち` K ≥ 2 becomes `K × k` when exact, else the run is refused. See "Time control" and "Curve payloads and 直線移動(時間制御) tracks". |
 
 A scene that is kept (see "Scenes and sub-scenes") and all objects and effects in it are copied byte-for-byte. Everything
 else is copied byte-for-byte: encoding, BOM (kept if present), CRLF or LF per line, seconds-based values
@@ -193,7 +194,8 @@ Rules (`precise_track_problem`, `precise_keyframes`, `precise_resample` in `tool
   not a refusal.
 - An object is skipped, with all its values unchanged, if any other trackbar is not eligible (for example a
   trackbar with changing values in `加減速`, `補間移動` or `イージング`, or any trackbar whose value has a
-  `|` payload), or if its `frame=` is one frame (`frame=s,s`). Each skipped object is listed in `precise.skipped`
+  `|` payload; `直線移動` and `直線移動(時間制御)` are the exceptions, see "Curve payloads and 直線移動(時間制御) tracks"), or if
+  its `frame=` is one frame (`frame=s,s`). Each skipped object is listed in `precise.skipped`
   with its `frame=` line and a reason. An object that holds a `時間制御(オブジェクト)` effect is left alone, not listed: its
   `frame=` list must stay two points (a staircase rewrites it itself, see "Time control").
 - `--precise-extra-decimals N` must be an integer from 0 to 4 and needs `--precise`. Otherwise the tool refuses.
@@ -275,10 +277,17 @@ Rules (functions `parse_time_control_position`, `time_control_tau`, `retime_time
 `tools/aup2_fps_upconvert.py`; they apply to objects of followed scenes only, a kept scene is copied byte for byte):
 
 - **Recognised** by `effect.name=時間制御(オブジェクト)`. Its `位置` line must be exactly two plain numbers, the mode
-  `直線移動(時間制御)` and a flag without a `|` payload, and the object must have exactly two `frame=` points (`s`, `e`).
-  Otherwise the tool refuses with `REFUSED: line N: time control 位置 must be a two-point 直線移動(時間制御) track`, `N`
-  being the `位置` line (the `effect.name` line when there is no `位置` line). The mode `直線移動(時間制御)` is accepted
-  only in the `位置` line of this effect; anywhere else it is refused by the trackbar whitelist as before.
+  `直線移動(時間制御)` and a flag (optionally followed by a `|` payload, the curve), and the object must have exactly two `frame=`
+  points (`s`, `e`). Otherwise the tool refuses with `REFUSED: line N: time control 位置 must be a two-point 直線移動(時間制御) track`, `N`
+  being the `位置` line (the `effect.name` line when there is no `位置` line). The mode `直線移動(時間制御)` is also accepted on
+  the tracks of every other effect (see "Curve payloads and 直線移動(時間制御) tracks").
+- **Curve** (a `位置` line with a `|` payload, `位置=0.000,100.000,直線移動(時間制御),0|0,0,1,0`): the A/B rewrite below is not
+  done. The `位置` line is kept as written (values and payload), the frames are converted as for every object, and
+  `コマ落ち` K = 1 stays. For K ≥ 2: when `K × k` and `s × k` are integers it becomes `K × k`; otherwise the tool refuses with
+  `REFUSED: time control at line N has a curve and コマ落ち=K cannot be kept exact` (`N` = the `位置` line, no second `line`
+  prefix). Note (one per curve object whose scene has `k ≠ 1`, in file order with the other time control notes):
+  `time control at line N: 位置 has a curve; kept (object-relative, within one frame)` (`N` = the `frame=` line of the object),
+  plus `; コマ落ち K -> K'` when `コマ落ち` was rewritten. A scene with `k = 1` is not touched and gets no note.
 - **New range.** `s'`, `e'` follow the object rules above (start rounds `s × k`, end rounds `(e + 1) × k`, minus 1).
   `L' = e' − s' + 1`.
 - **Scene with `k = 1`**: nothing is rewritten (`位置`, `コマ落ち` and the frame list stay as they are, no note).
@@ -373,8 +382,8 @@ frame number, the frame rate or the time. So it is handled like `直線移動`: 
 object rules (a multi-point object by the multi-point rule), and the values are kept. The end point is approximated in
 the same way as for `直線移動` (see "Motion endpoints").
 
-- The part after `|` (for example `27`, the easing parameter) is kept byte for byte, with any content. In every other mode a
-  `|` payload is still refused (`trackbar '|' payload '27' is not on the whitelist`).
+- The part after `|` (for example `27`, the easing parameter) is kept byte for byte, with any content. In every mode that
+  is not `直線移動`, `直線移動(時間制御)` or this one a `|` payload is still refused (`trackbar '|' payload '27' is not on the whitelist`).
 - The value count must still match the frame-point count (`trackbar has N values but object [M] has K frame points`).
 - `イージング（補間移動）@イージング` is not on the whitelist: it reads `obj.getpoint("time")`, which has not been verified, so
   it is refused as `trackbar mode 'イージング（補間移動）@イージング' is not on the whitelist`.
@@ -384,6 +393,43 @@ the same way as for `直線移動` (see "Motion endpoints").
   values; only 直線移動,0 or constant values can be resampled exactly`. The object is listed in `precise.skipped` and keeps
   its values. A constant easing track without payload is eligible like any constant track and stays constant.
 - The order of the checks is unchanged: mode whitelist, then payload, then value count.
+
+## Curve payloads and `直線移動(時間制御)` tracks
+
+Measured in AviUtl2 v2.1.12 (probes R1 and R2):
+
+- An ordinary track `X=a,b,直線移動(時間制御),0` (two points, no payload) is frame by frame the same as `X=a,b,直線移動,0` (0.000 px).
+- With middle points the mode ignores their times and runs at constant speed over the whole path; it depends only on the progress
+  inside the object. A curve edited in the time control dialog is saved as a payload: `X=-600.00,600.00,直線移動(時間制御),0|1,0,1,0`
+  (four normalised control point numbers after `|`). The host also keeps such a payload on plain `直線移動` rows after the move mode
+  was switched (`Y=0.00,0.00,直線移動,0|1,0,1,0`), where it has no effect.
+- Real projects use the mode on `拡大率` (映像再生), `基本出力`, `カメラ制御` and on `位置` of a time control effect.
+
+Rules (`trackbar_parts`, `TRACK_MODES`, `TRACK_PAYLOAD_MODES`, `precise_track_problem` in `tools/aup2_fps_upconvert.py`):
+
+- `直線移動(時間制御)` is on the whitelist for every trackbar of every effect. The frame list is converted as for any object and the
+  values are kept, with two points or more (the value count must still match the frame-point count).
+- `補間移動(時間制御)` is handled the same way (measured, probe R3: with or without a curve, with middle points, it follows the progress
+  inside the object `u = f / (N − 1)` only; residual ≤ 0.38 px at 30 and 60 fps): on the whitelist, frames converted, values and
+  payload kept, with two points or more.
+- A `|` payload at the end of a trackbar is allowed in the modes `直線移動`, `直線移動(時間制御)`, `補間移動(時間制御)` and `イージング（通常）@イージング`. Its
+  text is kept as it is, is not checked and may contain commas. `trackbar_parts` splits a value at the first `|` when the part before it
+  is a trackbar; the parameter then holds the whole `0|1,0,1,0`. Other modes with a payload are refused as before (this now also applies
+  to a comma payload such as `瞬間移動,0|1,0,1,0`, which was not recognised as a trackbar before).
+- `--precise`, per trackbar (the first problem found in file order blocks the object, as before):
+  - `直線移動`, with or without payload: resampled as before; a payload is appended after the flag unchanged
+    (`X=-200.00,200.00,200.00,直線移動,0|1,0,1,0`).
+  - `直線移動(時間制御)` with a payload, or with other than two values (even if constant): the object is skipped, reason
+    `trackbar at line N uses mode 直線移動(時間制御) with a curve or keyframes; it is not re-sampled`.
+  - `直線移動(時間制御)`, two values, no payload: resampled like `直線移動` (the mode text stays) when the object needs no extra keyframes.
+    When the end hold or the start hold needs extra keyframes (they would be middle points, which the mode ignores), the object is skipped,
+    reason `trackbar at line N uses mode 直線移動(時間制御); end hold needs keyframes this mode ignores`. This check comes after the
+    per-track checks and uses the first such track of the object; a constant track counts too.
+  - `補間移動(時間制御)`, always (payload or not, any value count, constant too; checked after the `直線移動(時間制御)` curve rule and
+    instead of the generic `has a '|' payload` rule): the object is skipped, reason
+    `trackbar at line N uses mode 補間移動(時間制御); it is not re-sampled`.
+  - every other case follows the existing rules (`has a '|' payload` for the other modes, the zero-length reason, and so on).
+- A time control effect `位置` curve is covered in "Time control" (kept as written).
 
 ## Scenes and sub-scenes
 
@@ -482,18 +528,20 @@ Time-based uses (`obj.time`, `obj.totaltime`, `obj.getvalue`) are not markers an
   `コマ落ち=0,10,直線移動,0`: `REFUSED: line N: コマ落ち=<value> (frame drop) must be a positive integer`. `1` (no drop) is
   kept; `K ≥ 2` is converted only in a `時間制御(オブジェクト)` effect (see "Time control"); elsewhere it is refused with
   `... is only converted inside a 時間制御(オブジェクト) effect`.
-- A `時間制御(オブジェクト)` effect whose `位置` is not exactly two numbers with `直線移動(時間制御)` and no `|` payload, or
-  whose object does not have exactly two `frame=` points
+- A `時間制御(オブジェクト)` effect whose `位置` is not exactly two numbers with `直線移動(時間制御)` and a flag (a `|` payload is
+  allowed), or whose object does not have exactly two `frame=` points
   (`time control 位置 must be a two-point 直線移動(時間制御) track`).
 - A time control staircase that needs more than 4096 points (`REFUSED: time control at line N needs more than 4096 steps`), or
   whose object has another trackbar with changing values
   (`REFUSED: time control at line N: the object has other animated trackbars`). `N` is the `位置` line. See "Time control". The old
   refusal `コマ落ち=K cannot be kept exact at the target rate` is gone: such a block becomes a staircase.
-- A trackbar whose move mode is not on the whitelist (`直線移動`, `補間移動`, `瞬間移動`, `移動無し`, `回転`, `再生範囲`,
-  `イージング（通常）@イージング`), or that has a `|` payload in any mode but `イージング（通常）@イージング` (the meaning of
-  the payload is undocumented, so only that mode keeps it). `直線移動(時間制御)` is not on the whitelist; it is accepted only
-  as the `位置` of a `時間制御(オブジェクト)` effect, which has its own rules. `イージング（補間移動）@イージング` is refused
-  (its script reads `obj.getpoint("time")`; not verified).
+- A time control `位置` with a curve and `コマ落ち=K` (K ≥ 2) where `K × k` or `s × k` is not an integer
+  (`REFUSED: time control at line N has a curve and コマ落ち=K cannot be kept exact`, `N` = the `位置` line).
+- A trackbar whose move mode is not on the whitelist (`直線移動`, `直線移動(時間制御)`, `補間移動(時間制御)`, `補間移動`, `瞬間移動`, `移動無し`, `回転`,
+  `再生範囲`, `イージング（通常）@イージング`), or that has a `|` payload in any mode but `直線移動`, `直線移動(時間制御)`, `補間移動(時間制御)` and
+  `イージング（通常）@イージング` (the meaning of the payload is undocumented, so only those modes keep it): `REFUSED: line N:
+  trackbar '|' payload '<text after the first |>' is not on the whitelist`. The payload may contain commas
+  (`0|1,0,1,0`). `イージング（補間移動）@イージング` is refused (its script reads `obj.getpoint("time")`; not verified).
 - A trackbar whose value count differs from its object's frame-point count (`再生範囲` is exempt).
 - Frame lists that are non-integer, have fewer than 2 values, have a duplicate `frame=`, or are not strictly increasing.
 - A multi-point frame list whose points collide or stop increasing after rescaling (for example `0,1,2,599` at 120 → 24
@@ -556,7 +604,8 @@ It includes the `--precise` property checks and the worked-example end values, t
 `コマ落ち` for 30 → 60, 30 → 66, 30 → 45, 30 → 10, 66 → 60 and 30 → 90, `fixtures/time_control_66.aup2`), a host model of the measurements
 (`host_tau`, `host_display`) that compares every new frame with the original at the same moment (10 rate pairs × 8 `位置` × 6 frame
 ranges × 4 drops, circle blocks with `--precise`, the P6 probe `test_kit/5_抽帧探针/P6_66fps_ARZ式12帧交替_rep1.aup2` at 66 → 132 when
-present), their refusals (4096 points, other animated trackbars), and a check that projects without a time control effect, and
+present), their refusals (4096 points, other animated trackbars), the v1.2.6 cases (`直線移動(時間制御)` on ordinary tracks, payloads in the three
+modes and their refusals elsewhere, `--precise` with payload and with the time control mode, time control curves and `コマ落ち`), and a check that projects without a time control effect, and
 `--precise` outputs that need no hold, produce the same bytes as the previous version (`UNCHANGED_GOLDEN`).
 `run_long.ps1` runs `tests/aup2_upconvert/test_long_duration.py` (30 and 60 minute synthetic projects, 108 cases of
 30/60 minutes × 6 source rates × 9 targets). It checks boundary error, drift, total duration and audio/picture start

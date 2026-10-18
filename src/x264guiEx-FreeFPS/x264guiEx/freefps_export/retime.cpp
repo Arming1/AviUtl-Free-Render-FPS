@@ -458,9 +458,17 @@ const std::string kSceneRefuseMarkers[] = {"frame", "mark", "range"};
 // the object, the parameter and the two end values, so frames are rescaled and values are kept like 直線移動.
 // イージング（補間移動）@イージング reads obj.getpoint("time") and is not listed.
 const std::string kEasingMode = "イージング（通常）@イージング";
-const std::set<std::string> kTrackModes = {"直線移動", "補間移動", "瞬間移動", "移動無し", "回転", "再生範囲", kEasingMode};
-// Modes that may carry a '|' payload after the parameter (kept as written, not checked); every other mode refuses it.
-const std::set<std::string> kTrackPayloadModes = {kEasingMode};
+// 直線移動(時間制御) is allowed on any track of any effect: its value depends only on the progress inside the object, so frames are
+// rescaled and values are kept like 直線移動 (the time control effect's own 位置 row is handled by plan_time_control).
+const std::string kTimeControlMode = "直線移動(時間制御)";
+// 補間移動(時間制御) follows the progress inside the object only as well (measured, with or without a curve and with middle
+// points), so it is handled like 直線移動(時間制御); precise mode never re-samples it.
+const std::string kInterpTimeControlMode = "補間移動(時間制御)";
+const std::set<std::string> kTrackModes = {"直線移動", "補間移動", "瞬間移動", "移動無し", "回転", "再生範囲", kEasingMode,
+                                           kTimeControlMode, kInterpTimeControlMode};
+// Modes that may carry a '|' payload after the parameter (the saved curve or the easing parameter, e.g. "0|1,0,1,0" or
+// "0|27"); it is kept as written and not checked. Every other mode refuses it.
+const std::set<std::string> kTrackPayloadModes = {"直線移動", kTimeControlMode, kInterpTimeControlMode, kEasingMode};
 const std::set<std::string> kTrackCountExempt = {"再生範囲"};
 const std::string kCounterEffect = "カウンター";
 const std::string kSpeedKey = "速度";
@@ -469,7 +477,6 @@ const std::string kColumnNoDrop = "1";
 // 時間制御(オブジェクト): 位置=a,b,直線移動(時間制御),flag maps the object's range to the controlled layers.
 const std::string kTimeControlEffect = "時間制御(オブジェクト)";
 const std::string kTimeControlPosition = "位置";
-const std::string kTimeControlMode = "直線移動(時間制御)";
 const std::string kTimeControlRefusal = "time control 位置 must be a two-point 直線移動(時間制御) track";
 
 // ---------------------------------------------------------------------------
@@ -558,6 +565,38 @@ bool is_trackbar(const std::string& value) {
         }
     }
     return !is_number(parts[parts.size() - 2]);
+}
+
+// A trackbar value split into its parts. The text after the first '|' (the saved curve or the easing parameter) is the
+// payload and may hold commas ("0|1,0,1,0"); is_trackbar() looks at the text before it. param is the flag before the '|'.
+struct TrackText {
+    std::vector<std::string> values;
+    std::string mode;
+    std::string param;
+    std::optional<std::string> payload;
+};
+
+// A value whose text before the first '|' is not a trackbar is judged as a whole (a '|' inside the mode name makes an unknown
+// mode that is refused), as it was before payloads were looked at.
+bool parse_track_text(const std::string& value, TrackText& out) {
+    out.payload.reset();
+    const std::size_t bar = value.find('|');
+    if (bar != std::string::npos && is_trackbar(value.substr(0, bar))) {
+        const auto parts = split_on(value.substr(0, bar), ',');
+        out.values.assign(parts.begin(), parts.end() - 2);
+        out.mode = parts[parts.size() - 2];
+        out.param = parts.back();
+        out.payload = value.substr(bar + 1);
+        return true;
+    }
+    if (!is_trackbar(value)) {
+        return false;
+    }
+    const auto parts = split_on(value, ',');
+    out.values.assign(parts.begin(), parts.end() - 2);
+    out.mode = parts[parts.size() - 2];
+    out.param = parts.back();
+    return true;
 }
 
 // Python parse_frames(): 2 or more non-negative integers.
@@ -876,21 +915,31 @@ struct TrackLine {
     std::string name;
     std::string mode;
     std::string param;
+    std::optional<std::string> payload;  // the text after '|', kept as written
     std::vector<std::string> values;
 };
 
 // Python precise_track_problem(), in the same order, plus the zero-length rule. Empty when the row can be
-// resampled. The reason names the row's own line, as the Python tool does.
+// resampled. The reason names the row's own line, as the Python tool does. A payload is kept when the row is resampled
+// (直線移動 only). 直線移動(時間制御) is resampled like 直線移動 when it has two points and no payload (the object-level check
+// for the end hold, which that mode cannot take, is in apply_precise).
 std::string precise_problem(const TrackLine& track, const std::vector<Rational>& vals, const std::vector<i64>& pts) {
     const std::string line = std::to_string(track.idx + 1);
-    if (track.param.find('|') != std::string::npos) {
+    if (track.mode == kTimeControlMode) {
+        if (track.payload || vals.size() != 2) {
+            return "trackbar at line " + line + " uses mode " + track.mode +
+                   " with a curve or keyframes; it is not re-sampled";
+        }
+    } else if (track.mode == kInterpTimeControlMode) {
+        return "trackbar at line " + line + " uses mode " + track.mode + "; it is not re-sampled";
+    } else if (track.payload && track.mode != "直線移動") {
         return "trackbar at line " + line + " has a '|' payload";
     }
     bool constant = true;
     for (const Rational& v : vals) {
         constant = constant && rat_equal(v, vals.front());
     }
-    const bool linear = track.mode == "直線移動" && track.param == "0";
+    const bool linear = (track.mode == "直線移動" || track.mode == kTimeControlMode) && track.param == "0";
     if (!linear && !constant) {
         return "trackbar at line " + line + " uses mode " + track.mode + " with parameter " + track.param +
                " and changing values; only 直線移動,0 or constant values can be resampled exactly";
@@ -929,20 +978,17 @@ std::map<std::size_t, std::string> apply_precise(
         if (time_control_sections.count(std::make_pair(section_of[idx].a, section_of[idx].b)) != 0) {
             continue;
         }
-        const std::string value = value_of(lines[idx]);
-        if (!is_trackbar(value)) {
-            continue;
-        }
-        const auto parts = split_on(value, ',');
-        if (kTrackCountExempt.count(parts[parts.size() - 2]) != 0) {
+        TrackText text;
+        if (!parse_track_text(value_of(lines[idx]), text) || kTrackCountExempt.count(text.mode) != 0) {
             continue;
         }
         TrackLine track;
         track.idx = idx;
         track.name = key_of(lines[idx]);
-        track.mode = parts[parts.size() - 2];
-        track.param = parts.back();
-        track.values.assign(parts.begin(), parts.end() - 2);
+        track.mode = text.mode;
+        track.param = text.param;
+        track.payload = text.payload;
+        track.values = text.values;
         tracks_of[section_of[idx].a].push_back(std::move(track));
     }
 
@@ -982,12 +1028,22 @@ std::map<std::size_t, std::string> apply_precise(
             parsed.push_back(std::move(vals));
             decimals.push_back(most);
         }
+        const std::vector<i64> keys = hold_keyframes(pts, nf, k);
+        if (problem.empty() && keys != nf) {
+            // 直線移動(時間制御) ignores intermediate points in time, so keyframes added for the end hold would change it.
+            for (const TrackLine& track : found->second) {
+                if (track.mode == kTimeControlMode) {
+                    problem = "trackbar at line " + std::to_string(track.idx + 1) + " uses mode " + track.mode +
+                              "; end hold needs keyframes this mode ignores";
+                    break;
+                }
+            }
+        }
         if (!problem.empty()) {
             report.skipped.push_back(PreciseSkip{frame_idx + 1, problem});
             continue;
         }
         report.applied += 1;
-        const std::vector<i64> keys = hold_keyframes(pts, nf, k);
         if (keys != nf) {
             written_frames[obj] = keys;
         }
@@ -1038,7 +1094,8 @@ std::map<std::size_t, std::string> apply_precise(
             for (std::size_t i = 0; i < texts.size(); ++i) {
                 joined += (i > 0 ? "," : "") + texts[i];
             }
-            bodies[track.idx] = track.name + "=" + joined + "," + track.mode + "," + track.param;
+            bodies[track.idx] = track.name + "=" + joined + "," + track.mode + "," + track.param +
+                                (track.payload ? "|" + *track.payload : std::string());
 
             const std::string error_text = format_fixed(quantize_scaled(max_error, 6), 6);
             const std::string end_text = format_fixed(quantize_scaled(end_shift, 6), 6);
@@ -1080,6 +1137,7 @@ struct TimeControl {
     std::string a_text;
     std::string b_text;
     std::string flag;
+    bool curve = false;  // the 位置 row carries a '|' payload (a curve edited in the time control dialog)
 };
 
 // One time control object: the original range s..e, the new range s'..e', the end values of 位置 clamped to 0..100,
@@ -1153,30 +1211,27 @@ struct RepeatedTrack {
 // frame point and stays): a row with changing values cannot follow the new frame= list and refuses; a row whose values
 // are all equal is repeated at every point (see repeated_row).
 std::vector<RepeatedTrack> other_trackbars(const std::vector<std::string>& lines,
-                                           const std::vector<std::size_t>& effect_lines,
-                                           const std::vector<Section>& section_of, i64 obj, std::size_t pos_idx) {
+                                           const std::vector<std::size_t>& object_effect_lines, std::size_t pos_idx) {
     std::vector<RepeatedTrack> rows;
-    for (std::size_t idx : effect_lines) {
-        if (section_of[idx].a != obj || idx == pos_idx) {
+    for (std::size_t idx : object_effect_lines) {
+        if (idx == pos_idx) {
             continue;
         }
-        const std::string value = value_of(lines[idx]);
-        if (!is_trackbar(value)) {
-            continue;
-        }
-        const auto parts = split_on(value, ',');
-        if (kTrackCountExempt.count(parts[parts.size() - 2]) != 0) {
+        TrackText text;
+        if (!parse_track_text(value_of(lines[idx]), text) || kTrackCountExempt.count(text.mode) != 0) {
             continue;
         }
         std::size_t digits = 0;
-        const Rational first = parse_decimal(parts[0], digits);
-        for (std::size_t i = 1; i + 2 < parts.size(); ++i) {
-            if (!rat_equal(parse_decimal(parts[i], digits), first)) {
+        const Rational first = parse_decimal(text.values[0], digits);
+        for (std::size_t i = 1; i < text.values.size(); ++i) {
+            if (!rat_equal(parse_decimal(text.values[i], digits), first)) {
                 refuse(0, "time control at line " + std::to_string(pos_idx + 1) +
                               ": the object has other animated trackbars");
             }
         }
-        rows.push_back(RepeatedTrack{idx, parts[0], "," + parts[parts.size() - 2] + "," + parts.back()});
+        rows.push_back(RepeatedTrack{idx, text.values[0],
+                                     "," + text.mode + "," + text.param +
+                                         (text.payload ? "|" + *text.payload : std::string())});
     }
     return rows;
 }
@@ -1192,6 +1247,10 @@ std::map<std::size_t, std::string> plan_time_control(
     const std::map<i64, std::vector<i64>>& new_frames, const std::map<i64, Rational>& k_of,
     std::map<i64, std::vector<i64>>& written_frames, RetimeResult& res) {
     std::map<std::size_t, std::string> bodies;
+    std::map<i64, std::vector<std::size_t>> effect_lines_of;  // object -> its effect lines, file order
+    for (std::size_t idx : effect_lines) {
+        effect_lines_of[section_of[idx].a].push_back(idx);
+    }
     std::sort(controls.begin(), controls.end(),
               [](const TimeControl& x, const TimeControl& y) { return x.pos_idx < y.pos_idx; });
     for (const TimeControl& tc : controls) {
@@ -1223,6 +1282,25 @@ std::map<std::size_t, std::string> plan_time_control(
         const Rational scaled_drop = rat_mul(Rational{g.drop, 1}, g.k);  // K x k
         const Rational scaled_start = rat_mul(Rational{g.s, 1}, g.k);    // s x k
         const bool one_frame = g.s2 == g.e2;
+        if (tc.curve) {
+            // A curve is a function of the progress inside the object, so the row stays as it is; only the frame= list
+            // and a コマ落ち K x k change. K x k and s x k must be exact (a staircase cannot follow a curve).
+            const std::string position_line = std::to_string(tc.pos_idx + 1);
+            std::string note = "time control at line " + std::to_string(frame_line_of.at(tc.obj) + 1) + ": " +
+                               kTimeControlPosition + " has a curve; kept (object-relative, within one frame)";
+            if (g.drop > 1) {
+                if (scaled_drop.den != 1 || scaled_start.den != 1) {
+                    refuse(0, "time control at line " + position_line + " has a curve and " + kColumnKey + "=" +
+                                  std::to_string(g.drop) + " cannot be kept exact");
+                }
+                if (scaled_drop.num != g.drop) {
+                    bodies[drop_prop->second.idx] = kColumnKey + "=" + std::to_string(scaled_drop.num);
+                    note += "; " + kColumnKey + " " + std::to_string(g.drop) + " -> " + std::to_string(scaled_drop.num);
+                }
+            }
+            res.notes.push_back(note);
+            continue;
+        }
         const bool drop_exact = g.drop == 1 || (scaled_drop.den == 1 && scaled_start.den == 1);
 
         const Rational first = tc_linear_percent(g, g.s2);
@@ -1256,7 +1334,7 @@ std::map<std::size_t, std::string> plan_time_control(
         } else {
             const std::string too_many = "time control at line " + position_line + " needs more than " +
                                          std::to_string(kMaxTimeControlSteps) + " steps";
-            const std::vector<RepeatedTrack> others = other_trackbars(lines, effect_lines, section_of, tc.obj, tc.pos_idx);
+            const std::vector<RepeatedTrack> others = other_trackbars(lines, effect_lines_of[tc.obj], tc.pos_idx);
             std::vector<i64> points;
             std::vector<std::string> texts;
             std::string previous;
@@ -1668,12 +1746,9 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         const auto position = entry.second.find(kTimeControlPosition);
         const std::size_t refusal_idx = position == entry.second.end() ? name->second.idx : position->second.idx;
         const auto fv = frame_values.find(entry.first.first);
-        std::vector<std::string> parts;
-        if (position != entry.second.end()) {
-            parts = split_on(position->second.value, ',');
-        }
-        if (position == entry.second.end() || parts.size() != 4 || !is_number(parts[0]) || !is_number(parts[1]) ||
-            parts[2] != kTimeControlMode || parts[3].find('|') != std::string::npos || fv == frame_values.end() ||
+        TrackText pos;
+        if (position == entry.second.end() || !parse_track_text(position->second.value, pos) ||
+            pos.values.size() != 2 || pos.mode != kTimeControlMode || fv == frame_values.end() ||
             fv->second.size() != 2) {
             refuse(refusal_idx + 1, kTimeControlRefusal);
         }
@@ -1681,9 +1756,10 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         tc.obj = entry.first.first;
         tc.effect = entry.first.second;
         tc.pos_idx = position->second.idx;
-        tc.a_text = parts[0];
-        tc.b_text = parts[1];
-        tc.flag = parts[3];
+        tc.a_text = pos.values[0];
+        tc.b_text = pos.values[1];
+        tc.flag = pos.param;
+        tc.curve = pos.payload.has_value();
         time_controls.push_back(tc);
         time_control_positions.insert(tc.pos_idx);
     }
@@ -1710,23 +1786,21 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         if (time_control_positions.count(idx) != 0) {
             continue;  // the validated 位置 row of a time control effect: rewritten below
         }
-        if (!is_trackbar(value)) {
+        TrackText text;
+        if (!parse_track_text(value, text)) {
             continue;
         }
-        const auto parts = split_on(value, ',');
-        const std::string& mode_name = parts[parts.size() - 2];
-        const std::string& param = parts.back();
+        const std::string& mode_name = text.mode;
         if (kTrackModes.count(mode_name) == 0) {
             refuse(idx + 1, "trackbar mode '" + mode_name + "' is not on the whitelist");
         }
-        const std::size_t bar = param.find('|');
-        if (bar != std::string::npos && kTrackPayloadModes.count(mode_name) == 0) {
-            refuse(idx + 1, "trackbar '|' payload '" + param.substr(bar + 1) + "' is not on the whitelist");
+        if (text.payload && kTrackPayloadModes.count(mode_name) == 0) {
+            refuse(idx + 1, "trackbar '|' payload '" + *text.payload + "' is not on the whitelist");
         }
         const i64 obj = sec.a;
         const auto fv = frame_values.find(obj);
         if (fv != frame_values.end() && kTrackCountExempt.count(mode_name) == 0) {
-            const std::size_t count = parts.size() - 2;
+            const std::size_t count = text.values.size();
             if (count != fv->second.size()) {
                 refuse(idx + 1, "trackbar has " + std::to_string(count) + " values but object [" +
                                     std::to_string(obj) + "] has " + std::to_string(fv->second.size()) +

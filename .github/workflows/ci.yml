@@ -12,6 +12,9 @@ env:
   # Appended to the MSBuild call as /p:PlatformToolset=<value> when non-empty.
   # Empty means the project default ($(DefaultPlatformToolset) from the installed VS).
   PLATFORM_TOOLSET: ""
+  # Shown at the top of every job summary (the run page's Summary tab).
+  RUN_COMMIT: ${{ github.sha }}
+  RUN_BRANCH: ${{ github.ref_name }}
 
 jobs:
   python-tests:
@@ -20,26 +23,114 @@ jobs:
     # Windows runner: the golden hashes assume the CRLF checkout that git uses on Windows.
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      UNIT_LOG: ${{ github.workspace }}\upconvert_unit.log
+      LONG_LOG: ${{ github.workspace }}\long_duration.log
     steps:
+      - name: run info (job summary header)
+        shell: pwsh
+        run: |
+          $sha = $env:RUN_COMMIT
+          $short = $sha.Substring(0, [Math]::Min(7, $sha.Length))
+          $md = @(
+            '## python-tests / 测试结果 Test results',
+            '',
+            '| 项目 Item | 值 Value |',
+            '|---|---|',
+            "| 提交 Commit | $short (full: $sha) |",
+            "| 分支 Branch | $env:RUN_BRANCH |",
+            ''
+          )
+          $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # Output is tee'd to a log so the job summary can read the "N/M passed" line; the exit code is kept.
       - name: up-convert unit tests
-        run: python -I tests/aup2_upconvert/test_upconvert.py
+        id: unit
+        shell: pwsh
+        run: |
+          python -I tests/aup2_upconvert/test_upconvert.py | Tee-Object -FilePath $env:UNIT_LOG
+          exit $LASTEXITCODE
 
       - name: long-duration drift test (30/60 min)
+        id: long
+        shell: pwsh
         env:
           AUP2_TEST_TMP: ${{ runner.temp }}/aup2_long_duration
-        run: python -I tests/aup2_upconvert/test_long_duration.py
+        run: |
+          python -I tests/aup2_upconvert/test_long_duration.py | Tee-Object -FilePath $env:LONG_LOG
+          exit $LASTEXITCODE
+
+      - name: job summary
+        if: always()
+        shell: pwsh
+        env:
+          UNIT_OUTCOME: ${{ steps.unit.outcome }}
+          LONG_OUTCOME: ${{ steps.long.outcome }}
+        run: |
+          function Get-LogLines([string]$Path) {
+            if (Test-Path -LiteralPath $Path) { return @(Get-Content -LiteralPath $Path) }
+            return @()
+          }
+          $md = @(
+            '| 项目 Item | 结果 Result |',
+            '|---|---|'
+          )
+          $unit = Get-LogLines $env:UNIT_LOG
+          $unitLine = $unit | Where-Object { $_ -match '^\d+/\d+ passed$' } | Select-Object -Last 1
+          $unitFailed = @($unit | Where-Object { $_ -match '^FAIL ' }).Count
+          if ($unitLine -match '^(\d+)/(\d+) passed$') {
+            $unitText = "$($matches[1]) / $($matches[2]) passed"
+          } else {
+            $unitText = '未输出 / not reported'
+          }
+          $md += "| 单元测试 通过/总数 Unit tests passed/total | $unitText |"
+          $md += "| 单元测试 FAIL 行数 FAIL lines | $unitFailed |"
+          $md += "| 单元测试 步骤结果 Unit step outcome | $env:UNIT_OUTCOME |"
+
+          $long = Get-LogLines $env:LONG_LOG
+          $longLine = $long | Where-Object { $_ -match '^combinations: ' } | Select-Object -Last 1
+          $longVerdict = $long | Where-Object { $_ -match '^(all checks passed|FAILED: \d+)$' } | Select-Object -Last 1
+          if ($longVerdict) { $longText = $longVerdict } else { $longText = '未输出 / not reported' }
+          $md += "| 长时测试 结论 Long-duration verdict | $longText |"
+          $md += "| 长时测试 步骤结果 Long-duration step outcome | $env:LONG_OUTCOME |"
+          if ($longLine) {
+            $md += ''
+            $md += '```'
+            $md += $longLine
+            $md += '```'
+          }
+          $md += ''
+          $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   cpp-retime:
     name: cpp-retime
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      CPP_LOG: ${{ github.workspace }}\free_fps_export.log
     steps:
+      - name: run info (job summary header)
+        shell: pwsh
+        run: |
+          $sha = $env:RUN_COMMIT
+          $short = $sha.Substring(0, [Math]::Min(7, $sha.Length))
+          $md = @(
+            '## cpp-retime / 测试结果 Test results',
+            '',
+            '| 项目 Item | 值 Value |',
+            '|---|---|',
+            "| 提交 Commit | $short (full: $sha) |",
+            "| 分支 Branch | $env:RUN_BRANCH |",
+            ''
+          )
+          $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -61,11 +152,69 @@ jobs:
           }
           "VC_BUILD_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # The script writes its results with Out-Host, which bypasses the pipeline, so it runs in a child
+      # pwsh whose stdout is tee'd to the log. The child's exit code is kept.
       - name: build and run free_fps_export tests
+        id: cpp
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\experiments\free_fps_export\build_and_run.ps1"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\experiments\free_fps_export\build_and_run.ps1" | Tee-Object -FilePath $env:CPP_LOG
           exit $LASTEXITCODE
+
+      - name: job summary
+        if: always()
+        shell: pwsh
+        env:
+          CPP_OUTCOME: ${{ steps.cpp.outcome }}
+        run: |
+          function Get-LogLines([string]$Path) {
+            if (Test-Path -LiteralPath $Path) { return @(Get-Content -LiteralPath $Path) }
+            return @()
+          }
+          $log = Get-LogLines $env:CPP_LOG
+          # Lines are grouped under the "=== <name> ===" headers that build_and_run.ps1 echoes.
+          $sections = @{}
+          $current = ''
+          foreach ($line in $log) {
+            if ($line -match '^=== (.+) ===$') {
+              $current = $matches[1]
+              $sections[$current] = @()
+              continue
+            }
+            if ($current) { $sections[$current] += $line }
+          }
+          function Get-Verdict([string]$Name) {
+            if (-not $sections.ContainsKey($Name)) { return '未运行 / not run' }
+            $hit = $sections[$Name] | Where-Object { $_ -match '^(ALL PASS|FAILED) \(\d+ failures?\)$' } | Select-Object -Last 1
+            if ($hit) { return $hit }
+            return '未输出 / not reported'
+          }
+          function Get-Exit([string]$Name) {
+            $hit = $log | Where-Object { $_ -match "^$Name=(\d+)$" } | Select-Object -Last 1
+            if ($hit) { return $hit }
+            return '未输出 / not reported'
+          }
+          function Get-CrossLine([string]$Pattern) {
+            if (-not $sections.ContainsKey('crosscheck')) { return '未运行 / not run' }
+            $hit = $sections['crosscheck'] | Where-Object { $_ -match $Pattern } | Select-Object -Last 1
+            if ($hit) { return $hit }
+            return '未输出 / not reported'
+          }
+          $md = @(
+            '| 测试 Test | 结果 Result |',
+            '|---|---|',
+            "| retime_test | $(Get-Verdict 'retime_test') |",
+            "| host_stub_test | $(Get-Verdict 'host_stub_test') |",
+            "| retime_test 退出码 exit code | $(Get-Exit 'retime_test_exit') |",
+            "| host_stub_test 退出码 exit code | $(Get-Exit 'host_stub_test_exit') |",
+            "| crosscheck cases | $(Get-CrossLine '^cases: ') |",
+            "| crosscheck matches | $(Get-CrossLine '^matches: ') |",
+            "| crosscheck mismatches | $(Get-CrossLine '^mismatches: ') |",
+            "| crosscheck 结论 verdict | $(Get-CrossLine '^(ALL MATCH|MISMATCH|SKIP)') |",
+            "| 构建/测试步骤结果 Step outcome | $env:CPP_OUTCOME |",
+            ''
+          )
+          $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   build-plugin:
     name: build-plugin (${{ matrix.platform }})
@@ -83,20 +232,49 @@ jobs:
       PLATFORM: ${{ matrix.platform }}
       EXT: ${{ matrix.ext }}
     steps:
+      - name: run info (job summary header)
+        shell: pwsh
+        run: |
+          $sha = $env:RUN_COMMIT
+          $short = $sha.Substring(0, [Math]::Min(7, $sha.Length))
+          $md = @(
+            "## build-plugin ($env:PLATFORM) / 构建结果 Build result",
+            '',
+            '| 项目 Item | 值 Value |',
+            '|---|---|',
+            "| 提交 Commit | $short (full: $sha) |",
+            "| 分支 Branch | $env:RUN_BRANCH |",
+            ''
+          )
+          $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - uses: actions/checkout@v4
 
       - uses: microsoft/setup-msbuild@v2
 
       # Records which Visual Studio image is installed, so the toolset/version in the log can be matched to it.
+      # The name and version are also exported as step outputs for the job summary.
       - name: report Visual Studio and MSBuild versions
+        id: vs
         shell: pwsh
         run: |
+          $vsName = 'vswhere not found'
+          $vsVersion = 'vswhere not found'
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           if (Test-Path -LiteralPath $vswhere) {
-            & $vswhere -latest -format text | Where-Object { $_ -match '^installation(Name|Version):' } | Out-Host
+            $info = @(& $vswhere -latest -format text | Where-Object { $_ -match '^installation(Name|Version):' })
+            $info | Out-Host
+            $vsName = 'unknown'
+            $vsVersion = 'unknown'
+            foreach ($line in $info) {
+              if ($line -match '^installationName:\s*(.+)$') { $vsName = $matches[1].Trim() }
+              if ($line -match '^installationVersion:\s*(.+)$') { $vsVersion = $matches[1].Trim() }
+            }
           } else {
             Write-Output "vswhere not found at $vswhere"
           }
+          "vs_name=$vsName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vs_version=$vsVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           msbuild -version -nologo | Out-Host
 
       - name: build x264guiEx-FreeRenderFPS
@@ -137,3 +315,87 @@ jobs:
           path: src/x264guiEx-FreeFPS/x264guiEx/Release/${{ matrix.platform }}/x264guiEx-FreeRenderFPS.${{ matrix.ext }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: job summary
+        if: always()
+        shell: pwsh
+        env:
+          VS_NAME: ${{ steps.vs.outputs.vs_name }}
+          VS_VERSION: ${{ steps.vs.outputs.vs_version }}
+        run: |
+          $relative = "src\x264guiEx-FreeFPS\x264guiEx\Release\$env:PLATFORM\x264guiEx-FreeRenderFPS.$env:EXT"
+          $path = Join-Path $env:GITHUB_WORKSPACE $relative
+          $md = @(
+            '### 产物 / Artifact',
+            '',
+            '| 项目 Item | 值 Value |',
+            '|---|---|'
+          )
+          if (Test-Path -LiteralPath $path) {
+            $item = Get-Item -LiteralPath $path
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+            $version = $item.VersionInfo.ProductVersion
+            $md += "| 文件名 File | $($item.Name) |"
+            $md += "| 路径 Path | $relative |"
+            $md += "| 大小 Size | $($item.Length) bytes |"
+            $md += "| SHA256 | $hash |"
+            $md += "| ProductVersion | $version |"
+          } else {
+            $md += "| 产物 Output | not found: $relative |"
+          }
+          $md += "| Visual Studio 名称 name (vswhere) | $env:VS_NAME |"
+          $md += "| Visual Studio 版本 version (vswhere) | $env:VS_VERSION |"
+          $md += ''
+          $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  # Host (AviUtl) measurements cannot run on CI. The measured per-frame CSVs and the R2 project are
+  # checked in under test_kit/7_轨迹移动方式/data/; this job recomputes the results from them.
+  host-results:
+    name: host-results
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The script's exit code is 1 when R1a vs R1b differs by >= 0.5 px. Its Markdown goes to a file
+      # so the summary step below can publish it even when this step fails.
+      - name: recompute host measurements
+        id: host
+        run: |
+          python -I tests/host_results/host_results.py > "$RUNNER_TEMP/host_results.md"
+
+      - name: job summary
+        if: always()
+        env:
+          RUN_COMMIT_SHA: ${{ github.sha }}
+          RUN_BRANCH_NAME: ${{ github.ref_name }}
+          HOST_OUTCOME: ${{ steps.host.outcome }}
+        run: |
+          {
+            echo "## host-results / 宿主实测复算 Host measurement recheck"
+            echo ""
+            echo "| 项目 Item | 值 Value |"
+            echo "|---|---|"
+            echo "| 提交 Commit | ${RUN_COMMIT_SHA:0:7} (full: $RUN_COMMIT_SHA) |"
+            echo "| 分支 Branch | $RUN_BRANCH_NAME |"
+            echo "| 复算步骤结果 Recheck step outcome | $HOST_OUTCOME |"
+            echo ""
+            if [ -s "$RUNNER_TEMP/host_results.md" ]; then
+              cat "$RUNNER_TEMP/host_results.md"
+            else
+              echo "No output: the recheck script did not finish (missing input or error)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload host measurement data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-measurement-data
+          path: test_kit/7_轨迹移动方式/data/
+          if-no-files-found: error
+          retention-days: 30
