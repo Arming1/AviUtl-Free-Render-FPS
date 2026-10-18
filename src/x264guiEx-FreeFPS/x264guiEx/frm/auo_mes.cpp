@@ -663,6 +663,8 @@ static const char * AUO_MES_ID_NAME_STR[] = {
 "AuoFreeFpsExportScenePlanMain",
 "AuoFreeFpsExportScenePlanSub",
 "AuoFreeFpsExportScenePlanPrefix",
+"AuoFreeFpsExportSeparateProcess",
+"AuoFreeFpsExportSeparateProcessHint",
 "AUO_CONFIG_CX_SECTION_START",
 "AUO_CONFIG_CX_X264_ENCMODE_SINGLE_CBR",
 "AUO_CONFIG_CX_X264_ENCMODE_SINGLE_QP",

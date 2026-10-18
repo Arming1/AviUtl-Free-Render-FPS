@@ -459,7 +459,13 @@ BOOL func_output( OUTPUT_INFO *oip ) {
 
     log_process_events();
     // エラーが発生しなかった場合は設定を保存
-    if (ret == AUO_RESULT_SUCCESS) {
+#if AVIUTL_TARGET_VER == 2
+    // The second host of a Free FPS Export in a separate process must not rewrite the user's last-output settings.
+    const bool keep_user_settings = g_freefps_child_process.load();
+#else
+    const bool keep_user_settings = false;
+#endif
+    if (ret == AUO_RESULT_SUCCESS && !keep_user_settings) {
         memset(default_stg_file, 0, sizeof(default_stg_file));
         PathCombine(default_stg_file, g_sys_dat.exstg->s_local.stg_dir, get_last_out_stg_appendix().c_str());
         conf_out.vid.freefps_enable = user_freefps_enable;  // never persist the menu-export override
