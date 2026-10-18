@@ -17,8 +17,8 @@ jobs:
   python-tests:
     name: python-tests
     # The tests only use pathlib-free os/subprocess calls, binary file I/O and explicit utf-8;
-    # the Windows-only REAL_WORLD path is skipped when absent. Nothing needs a Windows runner.
-    runs-on: ubuntu-latest
+    # Windows runner: the golden hashes assume the CRLF checkout that git uses on Windows.
+    runs-on: windows-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
