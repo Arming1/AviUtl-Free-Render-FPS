@@ -114,6 +114,8 @@ std::string refusal_message(const RetimeResult& result);
 // Off by default, and then the output is the same as without the arguments.
 // The 位置 of a 時間制御(オブジェクト) is always rewritten (also without precise): a straight 直線移動(時間制御) line when
 // that is exact, otherwise a 瞬間移動 staircase (at most 4096 points) with コマ落ち 1; a scene at k = 1 is not touched.
+// The frame-counting modes 反復移動 and ランダム移動 (parameter times k) and 移動量指定 (step divided by k) are rewritten
+// exactly or refused; their object needs exactly two frame points and two values (see retime.cpp).
 // precise_extra_decimals: precise mode only; each re-sampled row gets this many decimals more than its own
 // largest decimal count (0 keeps the row's own count).
 // subscene_rate: which scenes follow the target rate (see SubsceneRatePolicy). The exported scene is the one

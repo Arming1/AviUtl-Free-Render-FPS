@@ -2526,6 +2526,211 @@ void test_tcmode_and_payload() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Frame-counting modes (反復移動, ランダム移動, 移動量指定). Rules and texts as in the Python tool.
+// ---------------------------------------------------------------------------
+
+// One 標準描画 object on layer 0 with the given frame= points, followed by its trackbar rows (each ends with '\n').
+std::string frame_mode_object(const std::string& rows, const std::string& frames = "0,29") {
+    return plain_object(0, 0, frames) + rows;
+}
+
+void test_frame_count_modes() {
+    const std::string repeat = "反復移動";
+    const std::string random = "ランダム移動";
+    const std::string step = "移動量指定";
+    const std::string x_row = "X=-600.00,600.00,反復移動,4|15\n";
+
+    // 1. 反復移動 30 -> 60: the parameter doubles (15 -> 30), the values stay; Y and Z change as well. One note per changed row.
+    {
+        const std::string text = project(scene30(), frame_mode_object(x_row + "Y=0.00,0.00,反復移動,4|15\n"));
+        const RetimeResult r = retime_target(text, rate(60));
+        const std::string x_line = std::to_string(line_of_first(text, "X="));
+        const std::string y_line = std::to_string(line_of_first(text, "Y="));
+        check(r.ok && first_row(r, "frame=") == "frame=0,59" && first_row(r, "X=") == "X=-600.00,600.00,反復移動,4|30" &&
+                  first_row(r, "Y=") == "Y=0.00,0.00,反復移動,4|30",
+              "frame modes: 反復移動 30 -> 60 doubles the parameter, values kept", refusal_or_converted(r));
+        check(r.notes.size() == 2 && r.notes[0] == "trackbar at line " + x_line + ": 反復移動 parameter 15 -> 30" &&
+                  r.notes[1] == "trackbar at line " + y_line + ": 反復移動 parameter 15 -> 30",
+              "frame modes: 反復移動 30 -> 60 notes", r.notes.empty() ? std::string("<no notes>") : r.notes[0]);
+    }
+    // 2. 反復移動 30 -> 60000/1001: 15 x 2000/1001 = 29.97002997..., written with 6 decimals and trailing zeros removed.
+    {
+        const RetimeResult r = retime_target(project(scene30(), frame_mode_object(x_row)), rate(60000, 1001));
+        check(r.ok && first_row(r, "X=") == "X=-600.00,600.00,反復移動,4|29.97003" && first_row(r, "frame=") == "frame=0,59",
+              "frame modes: 反復移動 30 -> 60000/1001 writes 29.97003", refusal_or_converted(r));
+    }
+    // 3. 反復移動 30 -> 66 (k = 11/5): 7 -> 15.4, a decimal parameter; 15.0 is read as 15.
+    {
+        const RetimeResult r = retime_target(project(scene30(), frame_mode_object("X=-600.00,600.00,反復移動,4|7\n")), rate(66));
+        const RetimeResult d = retime_target(project(scene30(), frame_mode_object("X=-600.00,600.00,反復移動,4|15.0\n")), rate(60));
+        check(r.ok && first_row(r, "X=") == "X=-600.00,600.00,反復移動,4|15.4" && first_row(r, "frame=") == "frame=0,65",
+              "frame modes: 反復移動 30 -> 66 writes 15.4 for 7", refusal_or_converted(r));
+        check(d.ok && first_row(d, "X=") == "X=-600.00,600.00,反復移動,4|30",
+              "frame modes: a parameter 15.0 is the integer 15", refusal_or_converted(d));
+    }
+    // 4. ランダム移動 30 -> 66: 15 x 11/5 = 33, an integer, kept as an integer.
+    {
+        const RetimeResult r = retime_target(project(scene30(), frame_mode_object("X=-600.00,600.00,ランダム移動,4|15\n")), rate(66));
+        check(r.ok && first_row(r, "X=") == "X=-600.00,600.00,ランダム移動,4|33", "frame modes: ランダム移動 30 -> 66 writes 33",
+              refusal_or_converted(r));
+        const RetimeResult d = retime_target(project(scene30(), frame_mode_object("X=-600.00,600.00,ランダム移動,4|15.0\n")), rate(60));
+        check(d.ok && first_row(d, "X=") == "X=-600.00,600.00,ランダム移動,4|30",
+              "frame modes: ランダム移動 with 15.0 is the integer 15", refusal_or_converted(d));
+    }
+    // 5. ランダム移動 refuses a parameter that is not an integer at the target rate (15 x 2000/1001 = 30000/1001), and one
+    //    that is not an integer itself (15.4).
+    {
+        const std::string text = project(scene30(), frame_mode_object("X=-600.00,600.00,ランダム移動,4|15\n"));
+        expect_refused("frame modes: ランダム移動 30 -> 60000/1001 is refused", text, rate(60000, 1001),
+                       line_of_first(text, "X="),
+                       "ランダム移動 parameter 15 becomes 30000/1001 at the target rate; a non-integer parameter is not verified");
+        const std::string frac = project(scene30(), frame_mode_object("X=-600.00,600.00,ランダム移動,4|15.4\n"));
+        expect_refused("frame modes: ランダム移動 15.4 is refused", frac, rate(60), line_of_first(frac, "X="),
+                       "ランダム移動 parameter must be an integer, got '15.4'");
+    }
+    // 6. 移動量指定 30 -> 60: the step is halved (4.00 -> 2.00), written with the decimals of the original; Y and Z stay (0.00).
+    {
+        const std::string text = project(scene30(), frame_mode_object("X=-600.00,4.00,移動量指定,4\nY=0.00,0.00,移動量指定,4\n"
+                                                                      "Z=0.00,0.00,移動量指定,4\n"));
+        const RetimeResult r = retime_target(text, rate(60));
+        check(r.ok && first_row(r, "X=") == "X=-600.00,2.00,移動量指定,4" && first_row(r, "Y=") == "Y=0.00,0.00,移動量指定,4" &&
+                  first_row(r, "Z=") == "Z=0.00,0.00,移動量指定,4" && r.notes.size() == 1 &&
+                  r.notes[0] == "trackbar at line " + std::to_string(line_of_first(text, "X=")) + ": 移動量指定 step 4.00 -> 2.00",
+              "frame modes: 移動量指定 30 -> 60 halves the step, a zero step stays unchanged and is not noted",
+              refusal_or_converted(r));
+        const RetimeResult whole = retime_target(project(scene30(), frame_mode_object("X=-600,4,移動量指定,4\n")), rate(60));
+        check(whole.ok && first_row(whole, "X=") == "X=-600,2,移動量指定,4", "frame modes: a step without decimals is written without them",
+              refusal_or_converted(whole));
+    }
+    // 7. 移動量指定 30 -> 66: 4 x 5/11 = 20/11, written with 6 decimals (1.818182); the error stays below half a frame.
+    {
+        const RetimeResult r = retime_target(project(scene30(), frame_mode_object("X=-600.00,4.00,移動量指定,4\n")), rate(66));
+        check(r.ok && first_row(r, "X=") == "X=-600.00,1.818182,移動量指定,4", "frame modes: 移動量指定 30 -> 66 writes 1.818182",
+              refusal_or_converted(r));
+    }
+    // 8. Error bound: 反復移動 30 -> 10 (k = 1/3) writes 0.333333 for 1, which is within half a frame for small values and not
+    //    for large ones.
+    {
+        const RetimeResult ok = retime_target(project(scene30(), frame_mode_object("X=-600.00,600.00,反復移動,4|1\n")), rate(10));
+        check(ok.ok && first_row(ok, "X=") == "X=-600.00,600.00,反復移動,4|0.333333", "frame modes: 0.333333 is within half a frame",
+              refusal_or_converted(ok));
+        const std::string big = project(scene30(), frame_mode_object("X=-60000.00,60000.00,反復移動,4|1\n"));
+        expect_refused("frame modes: a parameter that cannot be written within half a frame is refused", big, rate(10),
+                       line_of_first(big, "X="), "反復移動 parameter 1 cannot be written with 6 decimals within 0.5");
+    }
+    // 9. Format rules, each refused on the trackbar's line with the first rule that fails.
+    {
+        const std::string frames3 = "0,15,29";
+        const std::string xx = "X=-600.00,600.00,";
+        const std::string bad_bar = "移動量指定 takes no '|' payload, got '4|2'";
+        const std::string points = "is accepted only with two frame points and two values (middle points are not verified)";
+        struct Case {
+            std::string name;
+            std::string text;
+            std::string reason;
+        };
+        const std::vector<Case> cases = {
+            {"a '|' on 移動量指定", project(scene30(), frame_mode_object("X=-600.00,4.00,移動量指定,4|2\n")), bad_bar},
+            {"no '|' on 反復移動", project(scene30(), frame_mode_object(xx + "反復移動,4\n")),
+             "反復移動 needs a '|' parameter, got '4'"},
+            {"flag 5", project(scene30(), frame_mode_object(xx + "反復移動,5|15\n")), "反復移動 flag must be 4, got '5'"},
+            {"flag 5 on ランダム移動", project(scene30(), frame_mode_object(xx + "ランダム移動,5|15\n")),
+             "ランダム移動 flag must be 4, got '5'"},
+            {"three frame points", project(scene30(), frame_mode_object(xx + "反復移動,4|15\n", frames3)),
+             "反復移動 " + points},
+            {"three values", project(scene30(), frame_mode_object("X=-600.00,0.00,600.00,反復移動,4|15\n")),
+             "反復移動 " + points},
+            {"no frame= line", project(scene30(), "[0]\nlayer=0\n[0.0]\neffect.name=標準描画\n" + xx + "反復移動,4|15\n"),
+             "反復移動 " + points},
+            {"parameter 0.5", project(scene30(), frame_mode_object(xx + "反復移動,4|0.5\n")),
+             "反復移動 parameter must be a number of at least 1, got '0.5'"},
+            {"parameter abc", project(scene30(), frame_mode_object(xx + "反復移動,4|abc\n")),
+             "反復移動 parameter must be a number of at least 1, got 'abc'"},
+            {"parameter 0 on ランダム移動", project(scene30(), frame_mode_object(xx + "ランダム移動,4|0\n")),
+             "ランダム移動 parameter must be a number of at least 1, got '0'"},
+            {"empty parameter", project(scene30(), frame_mode_object(xx + "反復移動,4|\n")),
+             "反復移動 parameter must be a number of at least 1, got ''"},
+            {"no '|' with Japanese text", project(scene30(), frame_mode_object(xx + "反復移動,全角\n")),
+             "反復移動 needs a '|' parameter, got '全角'"},
+            {"the first rule wins", project(scene30(), frame_mode_object("X=-600.00,4.00,移動量指定,5|1\n")),
+             "移動量指定 takes no '|' payload, got '5|1'"},
+        };
+        for (const Case& c : cases) {
+            expect_refused("frame modes: refused, " + c.name, c.text, rate(60), line_of_first(c.text, "X="), c.reason);
+        }
+    }
+    // 10. 時間制御(オブジェクト) overlap: a frame-counting row of a scene whose time control object has an overlapping frame
+    //     range is refused. The reason names the time control object with the smallest frame= line.
+    {
+        const std::string text = tc_project(30, tc_object(0, 1, "0,29", tc_row("0.000", "100.000")) +
+                                                    plain_object(1, 0, "0,29") + x_row);
+        expect_refused("frame modes: overlap with a 時間制御 object is refused", text, rate(60), line_of_first(text, "X="),
+                       "反復移動 is not verified together with 時間制御(オブジェクト) (the time control object at line " +
+                           std::to_string(line_of_first(text, "frame=0,29\n[0.0]\neffect.name=時間制御")) + " overlaps it)");
+        const std::string apart = tc_project(30, tc_object(0, 1, "0,9", tc_row("0.000", "100.000")) +
+                                                     plain_object(1, 0, "10,29") + x_row);
+        const RetimeResult r = retime_target(apart, rate(60));
+        check(r.ok && first_row(r, "X=") == "X=-600.00,600.00,反復移動,4|30", "frame modes: no overlap, converted",
+              refusal_or_converted(r));
+        const std::string two = tc_project(30, tc_object(2, 1, "0,29", tc_row("0.000", "100.000")) +
+                                                   tc_object(1, 2, "0,29", tc_row("0.000", "100.000")) +
+                                                   plain_object(3, 0, "0,29") + x_row);
+        expect_refused("frame modes: with two time control objects the smaller frame= line is named", two, rate(60),
+                       line_of_first(two, "X="),
+                       "(the time control object at line " +
+                           std::to_string(line_of_first(two, "frame=0,29\n[2.0]\neffect.name=時間制御")) + " overlaps it)");
+    }
+    // 11. k = 1: the rows are not rewritten and no note is written, and the time control overlap is not checked.
+    {
+        const std::string text = tc_project(30, tc_object(0, 1, "0,29", tc_row("0.000", "100.000")) +
+                                                    plain_object(1, 0, "0,29") + x_row + "Y=0.00,4.00,移動量指定,4\n");
+        const RetimeResult r = retime_target(text, rate(30));
+        check(r.ok && first_row(r, "X=") == "X=-600.00,600.00,反復移動,4|15" && first_row(r, "Y=") == "Y=0.00,4.00,移動量指定,4" &&
+                  r.notes.empty(),
+              "frame modes: k = 1 leaves the rows and notes alone", refusal_or_converted(r));
+    }
+    // 13. Exact error test with a 6-decimal parameter (the overflow case of the probe C7_反復_30_6位小数): 7.123457 at
+    //     30 -> 132 (k = 22/5) and 30 -> 60000/1001 are converted with the values the Python tool writes.
+    {
+        const std::string text = project(scene30(), frame_mode_object("X=-600.00,600.00,反復移動,4|7.123457\n"
+                                                                      "Y=0.00,0.00,反復移動,4|7.123457\n"
+                                                                      "Z=0.00,0.00,反復移動,4|7.123457\n",
+                                                                      "0,149"));
+        const RetimeResult r = retime_target(text, rate(132));
+        check(r.ok && first_row(r, "frame=") == "frame=0,659" && first_row(r, "X=") == "X=-600.00,600.00,反復移動,4|31.343211" &&
+                  first_row(r, "Z=") == "Z=0.00,0.00,反復移動,4|31.343211" && r.notes.size() == 3 &&
+                  r.notes[0] == "trackbar at line " + std::to_string(line_of_first(text, "X=")) +
+                                    ": 反復移動 parameter 7.123457 -> 31.343211",
+              "frame modes: 反復移動 7.123457 at 30 -> 132 (exact bound, no overflow)", refusal_or_converted(r));
+        const RetimeResult s = retime_target(text, rate(60000, 1001));
+        check(s.ok && first_row(s, "frame=") == "frame=0,299" && first_row(s, "X=") == "X=-600.00,600.00,反復移動,4|14.232681" &&
+                  first_row(s, "Y=") == "Y=0.00,0.00,反復移動,4|14.232681",
+              "frame modes: 反復移動 7.123457 at 30 -> 60000/1001 (exact bound, no overflow)", refusal_or_converted(s));
+    }
+    // 12. Precise mode: an object with a frame-counting row is skipped with the mode reason; its rows are still converted.
+    {
+        const std::string text = project(scene30(), frame_mode_object(x_row));
+        const RetimeResult p = free_fps::retime(text, rate(60), L"D:\\out\\retimed.aup2", true);
+        check(p.ok && p.precise && p.precise->applied == 0 && p.precise->skipped.size() == 1 &&
+                  p.precise->skipped[0].line == line_of_first(text, "frame=0,29") &&
+                  p.precise->skipped[0].reason == "trackbar at line " + std::to_string(line_of_first(text, "X=")) +
+                                                      " uses mode 反復移動; frame-counting modes are not re-sampled",
+              "frame modes: precise skips the object with the mode reason",
+              p.precise && !p.precise->skipped.empty() ? p.precise->skipped[0].reason : refusal_message(p));
+        check(frame_line(p, "X=") == "X=-600.00,600.00,反復移動,4|30", "frame modes: the skipped object's row is still converted",
+              frame_line(p, "X="));
+        const RetimeResult s = free_fps::retime(project(scene30(), frame_mode_object("X=0.00,4.00,移動量指定,4\n")), rate(60),
+                                                L"D:\\out\\retimed.aup2", true);
+        check(s.ok && s.precise && s.precise->skipped.size() == 1 &&
+                  s.precise->skipped[0].reason.find("uses mode 移動量指定; frame-counting modes are not re-sampled") !=
+                      std::string::npos,
+              "frame modes: precise skip reason for 移動量指定", s.precise && !s.precise->skipped.empty()
+                                                                    ? s.precise->skipped[0].reason
+                                                                    : refusal_message(s));
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -2578,6 +2783,7 @@ int main(int argc, char** argv) {
     test_time_control_precise();
     test_time_control_kept_scene();
     test_tcmode_and_payload();
+    test_frame_count_modes();
     std::printf("%s (%d failure%s)\n", g_failures == 0 ? "ALL PASS" : "FAILED", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures == 0 ? 0 : 1;

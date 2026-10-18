@@ -30,6 +30,13 @@ tc_curve_* projects (a curve in the 位置 row, コマ落ち K x k or the refusa
 User projects (read-only, copied first, skipped when absent): C:\\Users\\gaoha\\Desktop\\10 3.aup2, 神.aup2 and every
 D:\\ARZv2.0.1\\**\\output.aup2 at --target-fps 60, 66, 120 and --factor 2, with --precise off and on.
 
+Frame-counting modes (反復移動, ランダム移動, 移動量指定; always on): every .aup2 in test_kit/9_其他移动方式/ (read in
+place: the 底稿 M_底稿_30 and M_底稿_60 and B1-B8, not the out\ subfolder) at 60, 66, 120, 132, 60000/1001, 24 and 2x, precise
+off and on. Synthetic 30 fps projects: the refusals (a '|' payload on 移動量指定 or none on the other two, flag not 4, three
+values or three frame points, parameter 0.5, abc, ランダム 15.4, ランダム 30 at 60000/1001, the error bound with a 30000-frame
+object, a time control object overlapping the row) and the accepted conversions (反復移動, ランダム移動 and 移動量指定 at 60,
+66, 60000/1001 and 24, precise off and on, with a zero Y/Z step of 移動量指定 that must stay unchanged).
+
 Each case runs both tools one after the other with the same absolute --out path. Exit codes, stderr (the
 refusal text) and the .aup2 and .convert.json files must match exactly. The C++ and Python refusal texts are now
 identical (no known difference except a コマ落ち beyond 64 bits, which the port refuses and Python converts); any difference
@@ -62,6 +69,7 @@ MULTI_SCENE_DIR = os.path.join(REPO, "tests", "aup2_upconvert", "fixtures")
 HOST_SAMPLE = r"C:\Users\gaoha\Desktop\test 30 and 30or60.aup2"
 ARZ_TEMPLATE = r"D:\ARZv2.0.1\ARZv2.0.1\template\15_mer1\.aup2"
 PROBE_DIR = os.path.join(REPO, "test_kit", "5_抽帧探针")
+FRAME_MODE_DIR = os.path.join(REPO, "test_kit", "9_其他移动方式")
 
 SUBSCENE_POLICIES = ("auto", "follow", "keep")
 
@@ -545,6 +553,75 @@ def time_control_cases(template_copy, synthetic_dir):
     return cases
 
 
+FRAME_MODE_TARGETS = [["--target-fps", rate] for rate in ("60", "66", "120", "132", "60000/1001", "24")]
+FRAME_MODE_TARGETS += [["--factor", "2"]]
+FRAME_MODE_RANGE = "0,149"
+
+
+def fm_targets(*rates):
+    return [["--target-fps", rate] for rate in rates]
+
+
+def frame_mode_cases(synthetic_dir):
+    """The (label, path, arguments) cases of 反復移動, ランダム移動 and 移動量指定; see the module docstring."""
+    cases = []
+    inputs = sorted(glob.glob(os.path.join(FRAME_MODE_DIR, "*.aup2")))
+    if not inputs:
+        print("SKIP frame-mode inputs: no .aup2 in %s" % FRAME_MODE_DIR)
+    for path in inputs:
+        label = "9 probe " + os.path.basename(path)
+        for target in FRAME_MODE_TARGETS:
+            cases.append((label, path, target))
+            cases.append((label, path, target + ["--precise"]))
+
+    def write(name, text):
+        path = os.path.join(synthetic_dir, name + ".aup2")
+        with open(path, "wb") as fh:
+            fh.write(text.encode("utf-8"))
+        return "synthetic " + name, path
+
+    def one_object(*tracks, frames=FRAME_MODE_RANGE):
+        return synthetic_text(object_lines(1, frames, tracks=list(tracks)), rate=30)
+
+    overlap = tc_object(1, 0, "0,59", tc_row("0.000", "100.000")) + \
+        object_lines(2, "10,40", layer=1, tracks=["X=0.00,100.00,反復移動,4|15"])
+    refusals = [
+        ("fm_pipe_on_move", one_object("X=0.00,100.00,移動量指定,4|2"), ["--target-fps", "60"]),
+        ("fm_no_pipe_hanpuku", one_object("X=0.00,100.00,反復移動,4"), ["--target-fps", "60"]),
+        ("fm_no_pipe_random", one_object("X=0.00,100.00,ランダム移動,4"), ["--target-fps", "60"]),
+        ("fm_flag_3_hanpuku", one_object("X=0.00,100.00,反復移動,3|15"), ["--target-fps", "60"]),
+        ("fm_flag_0_move", one_object("X=0.00,4.00,移動量指定,0"), ["--target-fps", "60"]),
+        ("fm_three_values", one_object("X=0.00,50.00,100.00,反復移動,4|15"), ["--target-fps", "60"]),
+        ("fm_three_frames", one_object("X=0.00,100.00,反復移動,4|15", frames="0,10,59"), ["--target-fps", "60"]),
+        ("fm_param_half", one_object("X=0.00,100.00,反復移動,4|0.5"), ["--target-fps", "60"]),
+        ("fm_param_abc", one_object("X=0.00,100.00,反復移動,4|abc"), ["--target-fps", "60"]),
+        ("fm_random_15_4", one_object("X=0.00,100.00,ランダム移動,4|15.4"), ["--target-fps", "60"]),
+        ("fm_random_30_to_60000_1001", one_object("X=0.00,100.00,ランダム移動,4|30"),
+         ["--target-fps", "60000/1001"]),
+        ("fm_error_bound", synthetic_text(object_lines(1, "0,29999", tracks=["X=-100000.00,100000.00,反復移動,4|7"]),
+                                          rate=30), ["--target-fps", "60000/1001"]),
+        ("fm_overlaps_time_control", synthetic_text(overlap, rate=30), ["--target-fps", "60"]),
+    ]
+    for name, text, extra in refusals:
+        label, path = write(name, text)
+        cases.append((label, path, extra))
+
+    accepted = [
+        ("fm_accept_hanpuku", one_object("X=-600.00,600.00,反復移動,4|15", "Y=0.00,0.00,反復移動,4|15"),
+         fm_targets("60", "66", "60000/1001", "24")),
+        ("fm_accept_random_15", one_object("X=-600.00,600.00,ランダム移動,4|15"), fm_targets("60", "66", "24")),
+        ("fm_accept_random_1001", one_object("X=-600.00,600.00,ランダム移動,4|1001"), fm_targets("60", "60000/1001")),
+        ("fm_accept_move", one_object("X=-600.00,4.00,移動量指定,4", "Y=0.00,0.00,移動量指定,4", "Z=0.00,0.00,移動量指定,4"),
+         fm_targets("60", "66", "60000/1001", "24")),
+    ]
+    for name, text, targets in accepted:
+        label, path = write(name, text)
+        for target in targets:
+            cases.append((label, path, target))
+            cases.append((label, path, target + ["--precise"]))
+    return cases
+
+
 def user_project_sources():
     """(label, path) of the read-only user projects that exist: the desktop samples and every ARZ output.aup2."""
     found = [(os.path.splitext(os.path.basename(path))[0], path) for path in USER_PROJECTS if os.path.isfile(path)]
@@ -750,6 +827,7 @@ def main(argv=None):
         else:
             print("SKIP ARZ template: %s is missing" % ARZ_TEMPLATE)
         cases.extend(time_control_cases(template_copy, synthetic_dir))
+        cases.extend(frame_mode_cases(synthetic_dir))
         cases.extend(user_project_cases(work))
         for name, text, extra in REFUSAL_CASES + refusal_cases_extra:
             path = os.path.join(synthetic_dir, name + ".aup2")

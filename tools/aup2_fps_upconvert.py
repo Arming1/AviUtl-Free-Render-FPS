@@ -73,6 +73,21 @@ TRACK_PIPE_PAYLOADS = frozenset()
 TRACK_PAYLOAD_MODES = frozenset({"イージング（通常）@イージング", "直線移動", "直線移動(時間制御)", "補間移動(時間制御)"})
 # Modes exempt from the "value count equals frame count" check (study section 2).
 TRACK_COUNT_EXEMPT_MODES = frozenset({"再生範囲"})
+# Frame-counting modes, measured in AviUtl2 v2.1.12 (test_kit/9_其他移動方式/結果.zh-CN.md): the move is written per frame,
+# so the parameter (反復移動, ランダム移動) or the per-frame step (移動量指定) is divided or multiplied by k. Only the form
+# with flag FRAME_COUNT_FLAG, two values and two frame points is converted (see check_frame_count_trackbar).
+FRAME_COUNT_MODES = frozenset({"反復移動", "ランダム移動", "移動量指定"})
+FRAME_COUNT_RANDOM_MODE = "ランダム移動"
+FRAME_COUNT_REPEAT_MODE = "反復移動"
+FRAME_COUNT_STEP_MODE = "移動量指定"
+FRAME_COUNT_FLAG = "4"
+# A written parameter or step has at most this many decimals. It is refused when its rounding can move the value by more
+# than FRAME_COUNT_TOLERANCE over the object (the error bound of frame_count_rewrite); PI_UPPER bounds pi for that bound.
+FRAME_COUNT_MAX_PLACES = 6
+FRAME_COUNT_TOLERANCE = Fraction(1, 2)
+PI_UPPER = Fraction(355, 113)
+# --precise: frame-counting tracks are never re-sampled (their values are per frame, not on the keyframes).
+PRECISE_FRAME_MODE_REASON = "trackbar at line %d uses mode %s; frame-counting modes are not re-sampled"
 # --precise: a track is resampled exactly when it is this mode with this parameter, or when its values are constant.
 PRECISE_LINEAR_MODE = "直線移動"
 PRECISE_LINEAR_PARAM = "0"
@@ -343,6 +358,75 @@ def quantize(value, places):
     return units, sign + digits[:-places] + "." + digits[-places:]
 
 
+def frame_count_text(value, min_places):
+    """Exact value rounded to FRAME_COUNT_MAX_PLACES, then trailing zeros dropped down to min_places decimals.
+
+    frame_count_text(30, 0) is '30', frame_count_text(Fraction(30000, 1001), 0) is '29.97003' and
+    frame_count_text(Fraction(20, 11), 2) is '1.818182'.
+    """
+    whole, _, digits = quantize(value, FRAME_COUNT_MAX_PLACES)[1].partition(".")
+    while len(digits) > min_places and digits.endswith("0"):
+        digits = digits[:-1]
+    return whole + ("." + digits if digits else "")
+
+
+def check_frame_count_trackbar(line_no, mode, param, value_count, frame_points):
+    """Refuse a frame-counting trackbar that is not in the verified form. The first rule that fails is reported."""
+    base, bar, payload = param.partition("|")
+    if mode == FRAME_COUNT_STEP_MODE:
+        if bar:
+            raise Refusal(line_no, "%s takes no '|' payload, got %r" % (mode, param))
+    elif not bar:
+        raise Refusal(line_no, "%s needs a '|' parameter, got %r" % (mode, param))
+    if base != FRAME_COUNT_FLAG:
+        raise Refusal(line_no, "%s flag must be %s, got %r" % (mode, FRAME_COUNT_FLAG, base))
+    if value_count != 2 or frame_points != 2:
+        raise Refusal(line_no, "%s is accepted only with two frame points and two values (middle points are not verified)"
+                      % mode)
+    if mode == FRAME_COUNT_STEP_MODE:
+        return
+    if not RE_NUMBER.match(payload) or Fraction(payload) < 1:
+        raise Refusal(line_no, "%s parameter must be a number of at least 1, got %r" % (mode, payload))
+    if mode == FRAME_COUNT_RANDOM_MODE and Fraction(payload).denominator != 1:
+        raise Refusal(line_no, "%s parameter must be an integer, got %r" % (mode, payload))
+
+
+def frame_count_rewrite(line_no, key, texts, mode, param, k, span):
+    """New line and note of a frame-counting trackbar for the rate ratio k (exact; k != 1).
+
+    texts are the two values, param the flag and parameter ('4|15'). span is the object's new last frame minus its new
+    first frame. A 反復移動 parameter is refused when its written text can move the value by more than FRAME_COUNT_TOLERANCE
+    over the object (error bound E below; a written value of 0 is refused too, since the bound is then unbounded).
+    Raises Refusal; otherwise returns (new_line, note).
+    """
+    if mode == FRAME_COUNT_STEP_MODE:
+        exact = Fraction(texts[1]) / k
+        written = frame_count_text(exact, decimal_places(texts[1]))
+        if abs(Fraction(written) - exact) * span > FRAME_COUNT_TOLERANCE:
+            raise Refusal(line_no, "%s step %s cannot be written with %d decimals within %s"
+                          % (mode, texts[1], FRAME_COUNT_MAX_PLACES, "0.5"))
+        new_line = "%s=%s,%s,%s,%s" % (key, texts[0], written, mode, FRAME_COUNT_FLAG)
+        note = "trackbar at line %d: %s step %s -> %s" % (line_no, mode, texts[1], written)
+        return new_line, note
+    payload = param.partition("|")[2]
+    exact = Fraction(payload) * k
+    if mode == FRAME_COUNT_RANDOM_MODE and exact.denominator != 1:
+        raise Refusal(line_no, "%s parameter %s becomes %s at the target rate; a non-integer parameter is not verified"
+                      % (mode, payload, fraction_text(exact)))
+    written = frame_count_text(exact, 0)
+    rounded = Fraction(written)
+    if mode == FRAME_COUNT_REPEAT_MODE:
+        # Error bound E = |e - s| * PI_UPPER * span * |Q - P2| / (2 * min(Q, P2)^2), Q the written and P2 the exact parameter.
+        s, e = Fraction(texts[0]), Fraction(texts[1])
+        smaller = min(rounded, exact)
+        if smaller == 0 or abs(e - s) * PI_UPPER * span * abs(rounded - exact) / (2 * smaller ** 2) > FRAME_COUNT_TOLERANCE:
+            raise Refusal(line_no, "%s parameter %s cannot be written with %d decimals within %s"
+                          % (mode, payload, FRAME_COUNT_MAX_PLACES, "0.5"))
+    new_line = "%s=%s,%s,%s|%s" % (key, ",".join(texts), mode, FRAME_COUNT_FLAG, written)
+    note = "trackbar at line %d: %s parameter %s -> %s" % (line_no, mode, payload, written)
+    return new_line, note
+
+
 def segment_index(frames, t):
     """Index i of the segment [frames[i], frames[i+1]] that gives the value at frame t.
 
@@ -400,6 +484,8 @@ def precise_keyframes(frames, new, k):
 
 def precise_track_problem(line_no, mode, param, values):
     """Reason a trackbar blocks --precise for its object, or None when the track can be resampled exactly."""
+    if mode in FRAME_COUNT_MODES:
+        return PRECISE_FRAME_MODE_REASON % (line_no, mode)
     base, bar, _ = param.partition("|")
     if bar and mode not in PRECISE_PAYLOAD_MODES and mode != PRECISE_INTERP_TC_MODE:
         return "trackbar at line %d has a '|' payload" % line_no
@@ -858,6 +944,7 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
 
     time_controls.sort(key=lambda item: item[2])  # file order, whatever the object numbers are
     time_control_positions = {pos_idx for _, _, pos_idx, _ in time_controls}
+    frame_count_tracks = []  # (line index, object number, values, mode, param) of every frame-counting trackbar
     for idx in effect_lines:
         section = section_of[idx]
         if not plan_of(section[1]).follow:
@@ -884,13 +971,16 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
         if track is None:
             continue
         texts, mode, param = track
-        if mode not in TRACK_MODES:
+        obj_no = section[1]
+        if mode in FRAME_COUNT_MODES:
+            check_frame_count_trackbar(idx + 1, mode, param, len(texts), len(frame_values.get(obj_no, ())))
+            frame_count_tracks.append((idx, obj_no, texts, mode, param))
+        elif mode not in TRACK_MODES:
             raise Refusal(idx + 1, "trackbar mode %r is not on the whitelist" % mode)
-        if "|" in param:
+        elif "|" in param:
             payload = param.partition("|")[2]
             if mode not in TRACK_PAYLOAD_MODES and payload not in TRACK_PIPE_PAYLOADS:
                 raise Refusal(idx + 1, "trackbar '|' payload %r is not on the whitelist" % payload)
-        obj_no = section[1]
         if obj_no in frame_values and mode not in TRACK_COUNT_EXEMPT_MODES:
             count = len(texts)
             if count != len(frame_values[obj_no]):
@@ -905,6 +995,26 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
             shortened.add(idx + 1)
             notes.append("object at line %d shortened to 1 frame" % (idx + 1))
     check_layers(followed_frame_lines, object_layer, object_scene, frame_values, new_frames)
+
+    # Frame-counting trackbars (FRAME_COUNT_MODES): the parameter or step is written for the new rate. A time control
+    # object of the same scene whose frames overlap the object refuses it (not verified together); k = 1 is left alone.
+    frame_mode_bodies = {}  # line index -> rewritten trackbar line
+    for idx, obj_no, texts, mode, param in frame_count_tracks:
+        k_obj = object_k[obj_no]
+        if k_obj == 1:
+            continue
+        overlapping = [followed_frame_lines[tc_obj] for tc_obj, _, _, _ in time_controls
+                       if object_scene.get(tc_obj) == object_scene.get(obj_no)
+                       and frame_values[tc_obj][0] <= frame_values[obj_no][-1]
+                       and frame_values[obj_no][0] <= frame_values[tc_obj][-1]]
+        if overlapping:
+            raise Refusal(idx + 1, "%s is not verified together with %s (the time control object at line %d overlaps it)"
+                          % (mode, TIME_CONTROL_EFFECT_NAME, min(overlapping) + 1))
+        span = new_frames[obj_no][-1] - new_frames[obj_no][0]
+        new_line, note = frame_count_rewrite(idx + 1, lines[idx].partition("=")[0], texts, mode, param, k_obj, span)
+        if new_line != lines[idx]:
+            frame_mode_bodies[idx] = new_line
+            notes.append(note)
 
     # 時間制御(オブジェクト): 位置 is recomputed exactly (always, with or without --precise). A two-point line is kept when it is
     # exact (K = 1, or K x k and s x k are integers; and both new values are in 0..100), with コマ落ち K x k. Otherwise
@@ -1058,6 +1168,8 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
         })
     for idx in sorted(precise_bodies):
         set_line(idx, precise_bodies[idx])
+    for idx in sorted(frame_mode_bodies):
+        set_line(idx, frame_mode_bodies[idx])
     for idx in sorted(time_control_bodies):
         set_line(idx, time_control_bodies[idx])
     start_errors = [Fraction(o["start_error_s"]) for o in timing_objects]

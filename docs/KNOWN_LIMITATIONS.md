@@ -7,7 +7,10 @@ Conversion rules are in [RETIME_RULES.md](RETIME_RULES.md). Only limits that sti
 - **Low target rates.** When the target rate is very low (for example 66 → 10), an object shorter than one output frame
   is shortened to one frame. After rounding it can overlap its neighbour on the same layer. The conversion is refused. This is not supported yet.
 - **Short objects.** A shortened object's end can move by up to 3/(2·Rt). The tool never moves boundaries to keep a touching pair consistent.
-- **Unlisted move modes.** `ランダム移動`, `反復移動`, `移動量指定` and `イージング（補間移動）@イージング` are refused, not verified in AviUtl2.
+- **Unlisted move modes.** `イージング（補間移動）@イージング` is refused, not verified in AviUtl2.
+- **Frame-count moves** (`反復移動`, `ランダム移動`, `移動量指定`) are converted only in the form measured in AviUtl2: flag `4`, two frame points,
+  and no time control object over the same frames. `ランダム移動` is refused when the parameter is not an integer after × k (for example 30 → 59.94).
+  Converted values are written with up to 6 decimals; AviUtl2 has been measured with 1 decimal in the parameter and 2 in the step; more decimals are pending the third round of host tests.
 - **Ordinary `補間移動` and `瞬間移動` tracks** are accepted by the converter but have not been measured in AviUtl2 as ordinary tracks.
 - **Frame-dependent scripts** are refused unless `--allow-frame-scripts` is given. The animation then runs `k` times faster
   and per-frame random sequences change.

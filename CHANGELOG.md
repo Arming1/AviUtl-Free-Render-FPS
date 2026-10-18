@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- The frame-count move modes `反復移動`, `ランダム移動` and `移動量指定` (flag `4`, two frame points) are converted:
+  `反復移動` and `ランダム移動` parameters are multiplied by k, and the `移動量指定` per-frame step is divided by k.
+  Objects that overlap a time control object, or whose values cannot be written exactly, are refused.
+
+### Validation
+
+- Probe 9 (`test_kit/9_其他移动方式/`), AviUtl2 v2.1.12, two rounds: at the same instant, the largest position
+  difference between the original and the converted project is 0.24 px.
+
 ## [1.3.1] — 2026-10-18
 
 ### Added

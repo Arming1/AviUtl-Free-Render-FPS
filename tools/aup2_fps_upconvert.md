@@ -394,6 +394,33 @@ the same way as for `直線移動` (see "Motion endpoints").
   its values. A constant easing track without payload is eligible like any constant track and stays constant.
 - The order of the checks is unchanged: mode whitelist, then payload, then value count.
 
+## Frame-counting moves (`反復移動`, `ランダム移動`, `移動量指定`)
+
+Measured in AviUtl2 v2.1.12 (`test_kit/9_其他移动方式/結果.zh-CN.md`; parameter at k = 2 and 2.2, step at k = 2). With
+k = target rate / scene rate, the move is computed per frame:
+
+- `反復移動` and `ランダム移動`: the parameter is multiplied by k (`X=-600.00,600.00,反復移動,4|15` at k = 2 is `4|30`).
+- `移動量指定`: the second value is the move per frame and is divided by k (`X=-600.00,4.00,移動量指定,4` at k = 2 is `2.00`).
+
+Only the measured form is converted: flag `4`, exactly two values and two `frame=` points (middle points are not verified).
+The first failing check is reported, in this order: `移動量指定` takes no `|` and the other two need one; flag `4`;
+two values and two frame points; for `反復移動` and `ランダム移動` the parameter is a number of at least 1, and for
+`ランダム移動` an integer (`15.0` is 15). A `frame=` line that is missing counts as zero points.
+
+For a scene with k ≠ 1 (k = 1 is left alone):
+
+- A `時間制御(オブジェクト)` object of the same scene whose frames overlap the object refuses the line (not verified together).
+- `ランダム移動`: parameter × k must be an integer; otherwise it is refused (for example 30 → 60000/1001 gives `30000/1001`).
+- The new value is written with at most 6 decimals, trailing zeros dropped (`29.97003`, `1.818182`). For `反復移動` the
+  error bound is E = |e − s| × 355/113 × F × |Q − P| / (2 × min(Q, P)²), where F is the object's new frame span, P the exact
+  parameter and Q the written one. E above 1/2 refuses the line; so does a written value of 0 (the bound is then unbounded).
+  Example: 10 fps (k = 1/3), object 0..899 (F = 299), `X=-960.00,960.00,反復移動,4|1` gives E ≈ 2.7 and is refused;
+  a 0..59 object (F = 19) gives E ≈ 0.17 and is written as `4|0.333333`.
+- `移動量指定`: with D = step / k and Q the written step, E = |Q − D| × F; above 1/2 it is refused.
+
+`--precise` does not re-sample these tracks: the object is listed in `precise.skipped` with
+`trackbar at line N uses mode M; frame-counting modes are not re-sampled`. The parameter is still converted.
+
 ## Curve payloads and `直線移動(時間制御)` tracks
 
 Measured in AviUtl2 v2.1.12 (probes R1 and R2):

@@ -478,6 +478,15 @@ const std::string kColumnNoDrop = "1";
 const std::string kTimeControlEffect = "時間制御(オブジェクト)";
 const std::string kTimeControlPosition = "位置";
 const std::string kTimeControlRefusal = "time control 位置 must be a two-point 直線移動(時間制御) track";
+// Frame-counting modes: 反復移動 and ランダム移動 multiply their parameter (a frame count) by k; 移動量指定 divides its second
+// value (a step per frame) by k. Written as 'v0,v1,mode,4|parameter' (移動量指定: 'v0,step,mode,4', no '|').
+const std::string kFrameCountRepeat = "反復移動";
+const std::string kFrameCountRandom = "ランダム移動";
+const std::string kFrameCountStep = "移動量指定";
+const std::set<std::string> kFrameCountModes = {kFrameCountRepeat, kFrameCountRandom, kFrameCountStep};
+const std::string kFrameCountFlag = "4";
+constexpr std::size_t kFrameCountMaxPlaces = 6;
+const Rational kFrameCountTolerance{1, 2};  // a rewritten value may be off by at most half a frame (355/113 bounds pi above)
 
 // ---------------------------------------------------------------------------
 // Line structure
@@ -925,6 +934,9 @@ struct TrackLine {
 // for the end hold, which that mode cannot take, is in apply_precise).
 std::string precise_problem(const TrackLine& track, const std::vector<Rational>& vals, const std::vector<i64>& pts) {
     const std::string line = std::to_string(track.idx + 1);
+    if (kFrameCountModes.count(track.mode) != 0) {
+        return "trackbar at line " + line + " uses mode " + track.mode + "; frame-counting modes are not re-sampled";
+    }
     if (track.mode == kTimeControlMode) {
         if (track.payload || vals.size() != 2) {
             return "trackbar at line " + line + " uses mode " + track.mode +
@@ -1392,6 +1404,224 @@ std::map<std::size_t, std::string> plan_time_control(
     return bodies;
 }
 
+// ---------------------------------------------------------------------------
+// Frame-counting trackbar modes (反復移動, ランダム移動, 移動量指定), exact. The checks of phase 1 run in the trackbar loop
+// of convert() (file order, followed scenes only); the rewrite (phase 2) runs after check_layers and before the time control.
+// A row of a scene with k = 1 is checked in phase 1 only.
+// ---------------------------------------------------------------------------
+
+// A frame-counting row of a followed object, as checked in phase 1.
+struct FrameModeRow {
+    std::size_t idx = 0;
+    i64 obj = 0;
+    std::string mode;
+    std::vector<std::string> values;  // the values as written
+    std::string payload;              // 反復移動 and ランダム移動: the parameter after '|' as written (empty for 移動量指定)
+};
+
+// Phase 1 for one row. frames is the frame= list of its object (null when it has none). Refuses at the first rule that
+// fails. Returns the parameter after '|' (empty for 移動量指定).
+std::string check_frame_mode(std::size_t line, const TrackText& text, const std::vector<i64>* frames) {
+    const std::string& mode = text.mode;
+    // The Python tool's param: the text after the last comma of the value, '|' payload included.
+    const std::string param = text.param + (text.payload ? "|" + *text.payload : std::string());
+    const std::size_t bar = param.find('|');
+    const bool has_bar = bar != std::string::npos;
+    const std::string base = has_bar ? param.substr(0, bar) : param;
+    const std::string payload = has_bar ? param.substr(bar + 1) : std::string();
+    if (mode == kFrameCountStep && has_bar) {
+        refuse(line, mode + " takes no '|' payload, got " + "'" + param + "'");
+    }
+    if (mode != kFrameCountStep && !has_bar) {
+        refuse(line, mode + " needs a '|' parameter, got " + "'" + param + "'");
+    }
+    if (base != kFrameCountFlag) {
+        refuse(line, mode + " flag must be " + kFrameCountFlag + ", got " + "'" + base + "'");
+    }
+    if (text.values.size() != 2 || frames == nullptr || frames->size() != 2) {
+        refuse(line, mode + " is accepted only with two frame points and two values (middle points are not verified)");
+    }
+    if (mode == kFrameCountStep) {
+        return std::string();
+    }
+    std::size_t digits = 0;
+    if (!is_number(payload) || rat_less(parse_decimal(payload, digits), Rational{1, 1})) {
+        refuse(line, mode + " parameter must be a number of at least 1, got " + "'" + payload + "'");
+    }
+    if (mode == kFrameCountRandom && parse_decimal(payload, digits).den != 1) {
+        refuse(line, mode + " parameter must be an integer, got " + "'" + payload + "'");
+    }
+    return payload;
+}
+
+// Unsigned big integer (32-bit limbs, least significant first, no leading zero limbs). Used only by error_exceeds_half(),
+// where a product of several 64-bit factors can exceed 64 bits; it cannot overflow.
+using BigUint = std::vector<std::uint32_t>;
+
+BigUint big_from(std::uint64_t v) {
+    BigUint out;
+    while (v != 0) {
+        out.push_back(static_cast<std::uint32_t>(v));
+        v >>= 32;
+    }
+    return out;
+}
+
+void big_trim(BigUint& a) {
+    while (!a.empty() && a.back() == 0) {
+        a.pop_back();
+    }
+}
+
+BigUint big_mul(const BigUint& a, const BigUint& b) {
+    if (a.empty() || b.empty()) {
+        return BigUint();
+    }
+    BigUint out(a.size() + b.size(), 0);
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        std::uint64_t carry = 0;
+        for (std::size_t j = 0; j < b.size(); ++j) {
+            // a[i] * b[j] + out + carry is at most 2^64 - 1, so it fits.
+            const std::uint64_t t = static_cast<std::uint64_t>(a[i]) * b[j] + out[i + j] + carry;
+            out[i + j] = static_cast<std::uint32_t>(t);
+            carry = t >> 32;
+        }
+        out[i + b.size()] = static_cast<std::uint32_t>(carry);
+    }
+    big_trim(out);
+    return out;
+}
+
+// Trimmed values: -1, 0 or 1 as a < b, a == b, a > b.
+int big_cmp(const BigUint& a, const BigUint& b) {
+    if (a.size() != b.size()) {
+        return a.size() < b.size() ? -1 : 1;
+    }
+    for (std::size_t i = a.size(); i-- > 0;) {
+        if (a[i] != b[i]) {
+            return a[i] < b[i] ? -1 : 1;
+        }
+    }
+    return 0;
+}
+
+// Whether E > 1/2 for E = |x| x 355/113 x frames x |y| / (2 x m^2), the error bound of a 反復移動 / ランダム移動 row (SPEC:
+// |e - s| x PI_UPPER x F x |Q - P2| / (2 x min(Q, P2)^2), PI_UPPER = 355/113). Exact: with x = xn/xd, y = yn/yd and m = mn/md
+// (lowest terms, positive m), E > 1/2 is 355 x F x xn x yn x md^2 > 113 x mn^2 x xd x yd, compared as big integers.
+bool error_exceeds_half(const Rational& x, i64 frames, const Rational& y, const Rational& m) {
+    const auto magnitude = [](i64 v) { return static_cast<std::uint64_t>(v < 0 ? -v : v); };
+    const BigUint left = big_mul(big_mul(big_mul(big_from(355), big_from(static_cast<std::uint64_t>(frames))),
+                                         big_mul(big_from(magnitude(x.num)), big_from(magnitude(y.num)))),
+                                 big_mul(big_from(static_cast<std::uint64_t>(m.den)), big_from(static_cast<std::uint64_t>(m.den))));
+    const BigUint right = big_mul(big_mul(big_from(113), big_mul(big_from(magnitude(m.num)), big_from(magnitude(m.num)))),
+                                  big_mul(big_from(static_cast<std::uint64_t>(x.den)), big_from(static_cast<std::uint64_t>(y.den))));
+    return big_cmp(left, right) > 0;
+}
+
+// fmt() of the Python tool: value rounded to kFrameCountMaxPlaces decimals (halves away from zero), then trailing zeros
+// removed down to min_places decimals (the point too, when no decimal is left). 30 gives "30"; 2 with min_places 2 gives "2.00".
+std::string frame_count_text(const Rational& value, std::size_t min_places) {
+    const std::string text = format_fixed(quantize_scaled(value, kFrameCountMaxPlaces), kFrameCountMaxPlaces);
+    const std::size_t dot = text.find('.');
+    std::size_t end = text.size();
+    while (end > dot + 1 + min_places && text[end - 1] == '0') {
+        --end;
+    }
+    if (end == dot + 1) {
+        end = dot;
+    }
+    return text.substr(0, end);
+}
+
+// Phase 2 for the rows of followed scenes with k != 1, in file order. A row that overlaps a 時間制御(オブジェクト) object of
+// its scene (frame ranges, any layer) is refused. 反復移動 and ランダム移動: the parameter times k (exact); 移動量指定: the step
+// divided by k. Each rewrite is checked against the error bound E = |e - s| x PI_UPPER x F x |Q - P2| / (2 x min(Q, P2)^2)
+// (F = frames of the new object minus 1; for 移動量指定, E = |Q - D2| x F). Returns the new rows by line index and adds one
+// note per row that changes.
+std::map<std::size_t, std::string> plan_frame_modes(const std::vector<std::string>& lines,
+                                                    const std::vector<FrameModeRow>& rows,
+                                                    const std::vector<TimeControl>& time_controls,
+                                                    const std::map<i64, std::size_t>& frame_line_of,
+                                                    const std::map<i64, i64>& object_scene,
+                                                    const std::map<i64, std::vector<i64>>& frame_values,
+                                                    const std::map<i64, std::vector<i64>>& new_frames,
+                                                    const std::map<i64, Rational>& k_of, RetimeResult& res) {
+    std::map<std::size_t, std::string> bodies;
+    for (const FrameModeRow& row : rows) {
+        const Rational& k = k_of.at(row.obj);
+        if (rat_equal(k, Rational{1, 1})) {
+            continue;
+        }
+        const std::string line = std::to_string(row.idx + 1);
+        const std::vector<i64>& old = frame_values.at(row.obj);
+        const std::vector<i64>& nw = new_frames.at(row.obj);
+
+        std::optional<std::size_t> overlap;  // the frame= line of the first time control object that overlaps, if any
+        for (const TimeControl& tc : time_controls) {
+            if (object_scene.at(tc.obj) != object_scene.at(row.obj)) {
+                continue;
+            }
+            const std::vector<i64>& tc_frames = frame_values.at(tc.obj);
+            if (tc_frames.back() < old.front() || old.back() < tc_frames.front()) {
+                continue;
+            }
+            const std::size_t tc_line = frame_line_of.at(tc.obj) + 1;
+            if (!overlap || tc_line < *overlap) {
+                overlap = tc_line;
+            }
+        }
+        if (overlap) {
+            refuse(row.idx + 1, row.mode + " is not verified together with " + kTimeControlEffect +
+                                    " (the time control object at line " + std::to_string(*overlap) + " overlaps it)");
+        }
+
+        const i64 frames_new = checked_sub(nw.back(), nw.front());
+        const std::string key = key_of(lines[row.idx]);
+        std::size_t digits = 0;
+        std::string new_body;
+        std::string note;
+        if (row.mode == kFrameCountStep) {
+            std::size_t step_places = 0;  // the decimals of the second value as written: the written step keeps them
+            const Rational step2 = rat_div(parse_decimal(row.values[1], step_places), k);
+            const std::string text = frame_count_text(step2, step_places);
+            const Rational written = parse_decimal(text, digits);
+            const Rational error = rat_mul(rat_abs(rat_sub(written, step2)), Rational{frames_new, 1});
+            if (rat_less(kFrameCountTolerance, error)) {
+                refuse(row.idx + 1, row.mode + " step " + row.values[1] + " cannot be written with " +
+                                        std::to_string(kFrameCountMaxPlaces) + " decimals within 0.5");
+            }
+            new_body = key + "=" + row.values[0] + "," + text + "," + row.mode + "," + kFrameCountFlag;
+            note = "trackbar at line " + line + ": " + row.mode + " step " + row.values[1] + " -> " + text;
+        } else {
+            const Rational param2 = rat_mul(parse_decimal(row.payload, digits), k);
+            if (row.mode == kFrameCountRandom && param2.den != 1) {
+                refuse(row.idx + 1, row.mode + " parameter " + row.payload + " becomes " + fraction_text(param2) +
+                                        " at the target rate; a non-integer parameter is not verified");
+            }
+            const std::string text = frame_count_text(param2, 0);
+            const Rational written = parse_decimal(text, digits);
+            const Rational s = parse_decimal(row.values[0], digits);
+            const Rational e = parse_decimal(row.values[1], digits);
+            const Rational smaller = rat_less(written, param2) ? written : param2;
+            bool exceeds = smaller.num == 0;  // the bound is unbounded when the value rounds to zero
+            if (!exceeds) {
+                exceeds = error_exceeds_half(rat_abs(rat_sub(e, s)), frames_new, rat_abs(rat_sub(written, param2)), smaller);
+            }
+            if (exceeds) {
+                refuse(row.idx + 1, row.mode + " parameter " + row.payload + " cannot be written with " +
+                                        std::to_string(kFrameCountMaxPlaces) + " decimals within 0.5");
+            }
+            new_body = key + "=" + row.values[0] + "," + row.values[1] + "," + row.mode + "," + kFrameCountFlag + "|" + text;
+            note = "trackbar at line " + line + ": " + row.mode + " parameter " + row.payload + " -> " + text;
+        }
+        if (new_body != lines[row.idx]) {
+            bodies[row.idx] = new_body;
+            res.notes.push_back(note);
+        }
+    }
+    return bodies;
+}
+
 // Python convert(). Writes into res and returns the output bytes. Throws Refused or Overflow.
 std::string convert(std::string_view data, const Mode& mode, const std::string& out_utf8, RetimeResult& res) {
     if (mode.factor && mode.factor_k < 2) {
@@ -1764,6 +1994,7 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         time_control_positions.insert(tc.pos_idx);
     }
 
+    std::vector<FrameModeRow> frame_mode_rows;  // frame-counting rows of followed objects, file order
     for (std::size_t idx : effect_lines) {
         const Section sec = section_of[idx];
         if (!scene_of_object(sec.a).follow) {
@@ -1791,14 +2022,20 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
             continue;
         }
         const std::string& mode_name = text.mode;
-        if (kTrackModes.count(mode_name) == 0) {
-            refuse(idx + 1, "trackbar mode '" + mode_name + "' is not on the whitelist");
-        }
-        if (text.payload && kTrackPayloadModes.count(mode_name) == 0) {
-            refuse(idx + 1, "trackbar '|' payload '" + *text.payload + "' is not on the whitelist");
-        }
         const i64 obj = sec.a;
         const auto fv = frame_values.find(obj);
+        if (kFrameCountModes.count(mode_name) != 0) {
+            // The frame-counting modes have their own rules in place of the whitelist and the payload check.
+            const std::string payload = check_frame_mode(idx + 1, text, fv == frame_values.end() ? nullptr : &fv->second);
+            frame_mode_rows.push_back(FrameModeRow{idx, obj, mode_name, text.values, payload});
+        } else {
+            if (kTrackModes.count(mode_name) == 0) {
+                refuse(idx + 1, "trackbar mode '" + mode_name + "' is not on the whitelist");
+            }
+            if (text.payload && kTrackPayloadModes.count(mode_name) == 0) {
+                refuse(idx + 1, "trackbar '|' payload '" + *text.payload + "' is not on the whitelist");
+            }
+        }
         if (fv != frame_values.end() && kTrackCountExempt.count(mode_name) == 0) {
             const std::size_t count = text.values.size();
             if (count != fv->second.size()) {
@@ -1831,6 +2068,10 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         }
     }
     check_layers(followed_frame_lines, object_layer, object_scene, frame_values, new_frames);
+
+    // The frame-counting rows (their notes come before the time control notes, as in the Python tool).
+    const std::map<std::size_t, std::string> frame_mode_bodies = plan_frame_modes(
+        lines, frame_mode_rows, time_controls, frame_line_of, object_scene, frame_values, new_frames, object_k, res);
 
     // The rows of 時間制御 and, in precise mode, of the trackbars are worked out before anything is written: both can give
     // an object a longer frame= list (written_frames). The notes of the time control come before the precise notes.
@@ -1927,8 +2168,11 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
     res.max_start_error_s = fraction_str(max_start);
     res.max_end_error_s = fraction_str(max_end);
 
-    // The precise rows, then the 時間制御 rows (位置 and コマ落ち), each in line order.
+    // The precise rows, the frame-counting rows, then the 時間制御 rows (位置 and コマ落ち), each in line order.
     for (const auto& entry : precise_bodies) {
+        set_line(entry.first, entry.second);
+    }
+    for (const auto& entry : frame_mode_bodies) {
         set_line(entry.first, entry.second);
     }
     for (const auto& entry : time_control_bodies) {

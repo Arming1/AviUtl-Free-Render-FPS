@@ -15,13 +15,22 @@ test_kit/7_轨迹移动方式/data/ and test_kit/8_補間移動時間制御/data
                     R3c with a curve) follow object progress: 60 fps frame n (u = n/299) is compared at
                     30 fps position u*149, linear interpolation.
 
-Exit code 1 when the R1a vs R1b maximum difference is >= 0.5 px, or when the R3b progress-aligned maximum
-difference is >= 0.5 px; 2 when an input is missing.
+  test_kit/9_其他移动方式/data/*.csv (probe 9, frame, centroid_x, pixels, dx, run)
+                    round 1: 往复运动_60 against x = 360 + 600 (1 - cos(f pi / 15)) at every frame, and random_60
+                    frame m against random_30 frame m (m = 0..149): both prove the motions are per frame.
+                    round 2: the 60/66 fps renders against the 30 fps ones at the same time (B1[2n] / random_30[n],
+                    B2[11j] / random_30[5j], B3[2n] / 往复运动_30[n], B5[11j] / B4[5j], B8[2n] / B6[n]).
+                    A row with fewer than 1000 pixels is invalid (analyze_steps.py can take a grey spot for the
+                    circle); a comparison that uses one is FAIL.
+
+Exit code 1 when the R1a vs R1b maximum difference is >= 0.5 px, when the R3b progress-aligned maximum
+difference is >= 0.5 px, or when a probe 9 comparison is FAIL; 2 when an input is missing.
 Usage: python -I tests/host_results/host_results.py [--data-dir DIR] [--r3-data-dir DIR]
 """
 
 import argparse
 import csv
+import math
 import os
 import statistics
 import sys
@@ -45,6 +54,18 @@ R3_DATA_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir,
     "test_kit", "8_補間移動時間制御", "data")
 R3_GROUPS = ["R3a", "R3b", "R3c"]
+PROBE9_DATA_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir,
+    "test_kit", "9_其他移动方式", "data")
+PROBE9_FILES = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "random_30", "random_60", "往复运动_30", "往复运动_60"]
+PROBE9_MIN_PIXELS = 1000   # rows below this are not a circle (see the module docstring)
+PROBE9_ROUND2 = [          # (label, file A, A frame step, file B, B frame step, frames compared)
+    ("B1[2n] vs random_30[n]", "B1", 2, "random_30", 1, 150),
+    ("B2[11j] vs random_30[5j]", "B2", 11, "random_30", 5, 30),
+    ("B3[2n] vs 往复运动_30[n]", "B3", 2, "往复运动_30", 1, 150),
+    ("B5[11j] vs B4[5j]", "B5", 11, "B4", 5, 30),
+    ("B8[2n] vs B6[n]", "B8", 2, "B6", 1, 150),
+]
 
 
 def load_centroids(path):
@@ -125,18 +146,88 @@ def r3_summary(diffs):
     return worst, worst_n, statistics.median(values), over
 
 
-def build_report(data_dir, r3_dir=R3_DATA_DIR):
+def load_probe9(path):
+    """{frame: (centroid_x, pixels)} of one test_kit 9 csv."""
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        return {int(row["frame"]): (float(row["centroid_x"]), int(row["pixels"]))
+                for row in csv.DictReader(fh) if row["centroid_x"]}
+
+
+def probe9_model(series):
+    """往复运动_60 against x = 360 + 600 (1 - cos(f pi / 15)) at every frame: (frames, max diff, frame of max, invalid rows)."""
+    worst, worst_frame, invalid = None, None, 0
+    for frame, (x, pixels) in sorted(series.items()):
+        invalid += pixels < PROBE9_MIN_PIXELS
+        diff = abs(x - (360.0 + 600.0 * (1.0 - math.cos(frame * math.pi / 15))))
+        if worst is None or diff > worst:
+            worst, worst_frame = diff, frame
+    return len(series), worst, worst_frame, invalid
+
+
+def probe9_pairs(a, b, steps):
+    """(frames, max diff, frame of max in a, invalid rows used) over (frame in a, frame in b) steps.
+    A row is invalid when it is missing or below PROBE9_MIN_PIXELS; a pair with a missing row has no difference."""
+    worst, worst_frame, invalid = None, None, 0
+    for frame_a, frame_b in steps:
+        rows = [a.get(frame_a), b.get(frame_b)]
+        invalid += sum(1 for row in rows if row is None or row[1] < PROBE9_MIN_PIXELS)
+        if rows[0] is None or rows[1] is None:
+            continue
+        diff = abs(rows[0][0] - rows[1][0])
+        if worst is None or diff > worst:
+            worst, worst_frame = diff, frame_a
+    return len(steps), worst, worst_frame, invalid
+
+
+def probe9_verdict(worst, invalid):
+    return "PASS" if invalid == 0 and worst is not None and worst < THRESHOLD_PX else "FAIL"
+
+
+def probe9_section(p9):
+    """(markdown lines, verdicts) of test_kit 9. p9 maps each name of PROBE9_FILES to its loaded rows."""
+    lines = ["#### Probe 9 第 1 轮：按帧 / round 1: per-frame motion", "",
+             "| 比较 Comparison | 帧数 Frames | 最大差 Max diff (px) | 最大差帧 At frame | 无效行 Invalid rows | 判定 Verdict |",
+             "|---|---|---|---|---|---|"]
+    verdicts = []
+
+    def row(label, frames, worst, worst_frame, invalid):
+        verdict = probe9_verdict(worst, invalid)
+        verdicts.append(verdict)
+        lines.append("| %s | %d | %.4f | %s | %d | %s |"
+                     % (label, frames, worst, "-" if worst_frame is None else str(worst_frame), invalid, verdict))
+
+    row("往复运动_60 vs 360 + 600(1-cos(fπ/15)), all frames", *probe9_model(p9["往复运动_60"]))
+    row("random_60[m] vs random_30[m], m=0..149",
+        *probe9_pairs(p9["random_60"], p9["random_30"], [(m, m) for m in range(150)]))
+    lines += ["", "#### Probe 9 第 2 轮：同一时刻 / round 2: same moment, different fps", "",
+              "| 比较 Comparison | 对数 Pairs | 最大差 Max diff (px) | 最大差帧 At 60/66 fps frame | 无效行 Invalid rows | 判定 Verdict |",
+              "|---|---|---|---|---|---|"]
+    for label, name_a, step_a, name_b, step_b, count in PROBE9_ROUND2:
+        steps = [(step_a * i, step_b * i) for i in range(count)]
+        frames, worst, worst_frame, invalid = probe9_pairs(p9[name_a], p9[name_b], steps)
+        verdict = probe9_verdict(worst, invalid)
+        verdicts.append(verdict)
+        lines.append("| %s | %d | %.4f | %s | %d | %s |"
+                     % (label, frames, worst, "-" if worst_frame is None else str(worst_frame), invalid, verdict))
+    lines += ["", "Threshold: %.1f px. Rows with fewer than %d pixels are invalid; a comparison that uses one is FAIL."
+              % (THRESHOLD_PX, PROBE9_MIN_PIXELS), ""]
+    return lines, verdicts
+
+
+def build_report(data_dir, r3_dir=R3_DATA_DIR, p9_dir=PROBE9_DATA_DIR):
     """Return (markdown_text, exit_code)."""
     names = ["R1a", "R1b", "R1c", "R1d", "R2"]
     paths = {n: os.path.join(data_dir, n + ".csv") for n in names}
     aup2 = os.path.join(data_dir, "R2_曲线.aup2")
     r3_names = [g + suffix for g in R3_GROUPS for suffix in ("_30", "_60")]
     r3_paths = {n: os.path.join(r3_dir, n + ".csv") for n in r3_names}
-    for path in list(paths.values()) + list(r3_paths.values()) + [aup2]:
+    p9_paths = {n: os.path.join(p9_dir, n + ".csv") for n in PROBE9_FILES}
+    for path in list(paths.values()) + list(r3_paths.values()) + list(p9_paths.values()) + [aup2]:
         if not os.path.isfile(path):
             raise FileNotFoundError(path)
     c = {n: load_centroids(paths[n]) for n in names}
     r3 = {n: load_centroids(path) for n, path in r3_paths.items()}
+    p9 = {n: load_probe9(path) for n, path in p9_paths.items()}
 
     lines = ["### 宿主实测复算 / Host measurement recheck", "",
              "Source: `test_kit/7_轨迹移动方式/data/` (per-frame centroid of the host render)", ""]
@@ -207,7 +298,11 @@ def build_report(data_dir, r3_dir=R3_DATA_DIR):
               "and does not decide the exit code. Median and >0.5 px counts are reported for every row."
               % (THRESHOLD_PX, R3_EXCLUDE_FIRST, R3_EXCL_LIMIT_PX), ""]
 
-    exit_code = 1 if diff_ab >= THRESHOLD_PX or r3_worst[("R3b", 0)] >= THRESHOLD_PX else 0
+    p9_lines, p9_verdicts = probe9_section(p9)
+    lines += ["### 其他移动方式 / Other motion methods (test_kit 9)", "",
+              "Source: `test_kit/9_其他移动方式/data/` (per-frame centroid of the host render)", ""] + p9_lines
+
+    exit_code = 1 if diff_ab >= THRESHOLD_PX or r3_worst[("R3b", 0)] >= THRESHOLD_PX or "FAIL" in p9_verdicts else 0
     return "\n".join(lines) + "\n", exit_code
 
 

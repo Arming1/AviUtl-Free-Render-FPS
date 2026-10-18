@@ -2982,6 +2982,278 @@ def test_precise_interp_tc_mode_always_skips():
         assert lines_without_file(out_p) == lines_without_file(out_n), "%s: skipped object must keep the plain output" % label
 
 
+# ---------------------------------------------------------------------------
+# Frame-counting trackbars: 反復移動, ランダム移動, 移動量指定 (test_kit/9_其他移动方式, AviUtl2 v2.1.12)
+# ---------------------------------------------------------------------------
+
+FM_REPEAT = "反復移動"
+FM_RANDOM = "ランダム移動"
+FM_STEP = "移動量指定"
+
+
+def fm_project(name, rate, tracks, frames="0,119"):
+    """tc_project with one 標準描画 object (object [0], frames `frames`) whose effect holds the trackbar lines `tracks`."""
+    return tc_project(name, rate, [(frames, "effect.name=標準描画\n" + "".join(track + "\n" for track in tracks))])
+
+
+def fm_track_line(text, prefix):
+    """1-based line number of the trackbar starting with prefix ('X=', 'Y=' or 'Z=') in the effect of object [0]."""
+    return line_in_section(text, "[0.0]", prefix)
+
+
+def test_frame_mode_repeat_30_to_60_doubles_the_parameter():
+    # k = 2, frames 0,119 -> 0,239. Y and Z are 0.00,0.00 (E = 0) and are rewritten like X, each with its own note.
+    d, src, text = fm_project("fm_repeat_60", 30, ["X=-600.00,600.00,%s,4|15" % FM_REPEAT,
+                                                  "Y=0.00,0.00,%s,4|15" % FM_REPEAT,
+                                                  "Z=0.00,0.00,%s,4|15" % FM_REPEAT])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0, "exit %d: %s" % (code, err)
+    expected = merged(file_edit(text, out), edit_at(text, "[scene.0]", "video.rate=", "video.rate=60"),
+                      edit_at(text, "[0]", "frame=", "frame=0,239"),
+                      edit_at(text, "[0.0]", "X=", "X=-600.00,600.00,%s,4|30" % FM_REPEAT),
+                      edit_at(text, "[0.0]", "Y=", "Y=0.00,0.00,%s,4|30" % FM_REPEAT),
+                      edit_at(text, "[0.0]", "Z=", "Z=0.00,0.00,%s,4|30" % FM_REPEAT))
+    assert line_changes(read_bytes(src), read_bytes(out)) == expected
+    assert read_report(out)["notes"] == ["trackbar at line %d: %s parameter 15 -> 30" % (fm_track_line(text, p), FM_REPEAT)
+                                         for p in ("X=", "Y=", "Z=")], read_report(out)["notes"]
+
+
+def test_frame_mode_repeat_30_to_60000_1001_writes_29_97003_within_tolerance():
+    # k = 2000/1001: the exact parameter is 15 * 2000/1001 = 30000/1001 = 29.970029970..., written 29.97003 (6 decimals,
+    # trailing zero dropped). Error bound E = |600 - (-600)| * 355/113 * 239 * |29.97003 - 30000/1001| / (2 * (30000/1001)^2)
+    # with |29.97003 - 30000/1001| = 2.997e-8 gives E = 1.503e-05 <= 0.5, so it is accepted. Frames 0,119 -> 0,239.
+    d, src, text = fm_project("fm_repeat_ntsc", 30, ["X=-600.00,600.00,%s,4|15" % FM_REPEAT])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60000/1001")
+    assert code == 0, "exit %d: %s" % (code, err)
+    expected = merged(file_edit(text, out), edit_at(text, "[scene.0]", "video.rate=", "video.rate=60000"),
+                      edit_at(text, "[scene.0]", "video.scale=", "video.scale=1001"),
+                      edit_at(text, "[0]", "frame=", "frame=0,239"),
+                      edit_at(text, "[0.0]", "X=", "X=-600.00,600.00,%s,4|29.97003" % FM_REPEAT))
+    assert line_changes(read_bytes(src), read_bytes(out)) == expected
+    assert read_report(out)["notes"] == ["trackbar at line %d: %s parameter 15 -> 29.97003"
+                                         % (fm_track_line(text, "X="), FM_REPEAT)], read_report(out)["notes"]
+
+
+def test_frame_mode_repeat_error_bound_refuses_a_parameter_that_rounds_too_far():
+    # 10 fps (k = 1/3), object 0..899 -> 0..299 (span F = 299). Parameter 1 is written as 0.333333, |Q - P2| = 3.33e-7,
+    # min(Q, P2) = Q. E = 1920 * 355/113 * 299 * 3.33e-7 / (2 * 0.333333^2) = 2.705 > 0.5, so it is refused.
+    d, src, text = fm_project("fm_repeat_bound", 30, ["X=-960.00,960.00,%s,4|1" % FM_REPEAT], frames="0,899")
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "10")
+    expected = "REFUSED: line %d: %s parameter 1 cannot be written with 6 decimals within 0.5" % (
+        fm_track_line(text, "X="), FM_REPEAT)
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+    # The same parameter on a 2 second object (0..59 -> 0..19, F = 19): E = 0.17 <= 0.5, accepted as 0.333333.
+    d, src, text = fm_project("fm_repeat_bound_short", 30, ["X=-960.00,960.00,%s,4|1" % FM_REPEAT], frames="0,59")
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "10")
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert "X=-960.00,960.00,%s,4|0.333333" % FM_REPEAT in read_text_lf(out).split("\n")
+
+
+def test_frame_mode_random_30_to_66_scales_the_integer_parameter():
+    # k = 11/5: 15 -> 33 exactly. Frames 0,119 -> 0,263. A parameter written as 15.0 is an integer (Fraction) and gives 30.
+    d, src, text = fm_project("fm_random_66", 30, ["X=-600.00,600.00,%s,4|15" % FM_RANDOM,
+                                                  "Y=0.00,0.00,%s,4|15" % FM_RANDOM,
+                                                  "Z=0.00,0.00,%s,4|15" % FM_RANDOM])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "66")
+    assert code == 0, "exit %d: %s" % (code, err)
+    expected = merged(file_edit(text, out), edit_at(text, "[scene.0]", "video.rate=", "video.rate=66"),
+                      edit_at(text, "[0]", "frame=", "frame=0,263"),
+                      edit_at(text, "[0.0]", "X=", "X=-600.00,600.00,%s,4|33" % FM_RANDOM),
+                      edit_at(text, "[0.0]", "Y=", "Y=0.00,0.00,%s,4|33" % FM_RANDOM),
+                      edit_at(text, "[0.0]", "Z=", "Z=0.00,0.00,%s,4|33" % FM_RANDOM))
+    assert line_changes(read_bytes(src), read_bytes(out)) == expected
+    d, src, text = fm_project("fm_random_15_0", 30, ["X=-600.00,600.00,%s,4|15.0" % FM_RANDOM])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert "X=-600.00,600.00,%s,4|30" % FM_RANDOM in read_text_lf(out).split("\n")
+    assert read_report(out)["notes"] == ["trackbar at line %d: %s parameter 15.0 -> 30" % (fm_track_line(text, "X="), FM_RANDOM)]
+
+
+def test_frame_mode_random_non_integer_after_k_and_non_integer_parameter_refused():
+    # 30 -> 60000/1001: 15 * 2000/1001 = 30000/1001 is not an integer, so the move is refused (not verified).
+    d, src, text = fm_project("fm_random_ntsc", 30, ["X=-600.00,600.00,%s,4|15" % FM_RANDOM])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60000/1001")
+    expected = ("REFUSED: line %d: %s parameter 15 becomes 30000/1001 at the target rate; a non-integer parameter is not "
+                "verified" % (fm_track_line(text, "X="), FM_RANDOM))
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+    # 15.4 is not an integer parameter at all: refused by the parameter rule, whatever the rate.
+    d, src, text = fm_project("fm_random_decimal", 30, ["X=-600.00,600.00,%s,4|15.4" % FM_RANDOM])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    expected = "REFUSED: line %d: %s parameter must be an integer, got '15.4'" % (fm_track_line(text, "X="), FM_RANDOM)
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_frame_mode_step_30_to_60_halves_the_step_and_keeps_zero_steps():
+    # k = 2: 4.00 -> 2.00 (the written text keeps the source's 2 decimals). Y and Z 0.00 stay as they are, without a note.
+    d, src, text = fm_project("fm_step_60", 30, ["X=-600.00,4.00,%s,4" % FM_STEP, "Y=0.00,0.00,%s,4" % FM_STEP,
+                                                "Z=0.00,0.00,%s,4" % FM_STEP])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0, "exit %d: %s" % (code, err)
+    expected = merged(file_edit(text, out), edit_at(text, "[scene.0]", "video.rate=", "video.rate=60"),
+                      edit_at(text, "[0]", "frame=", "frame=0,239"),
+                      edit_at(text, "[0.0]", "X=", "X=-600.00,2.00,%s,4" % FM_STEP))
+    assert line_changes(read_bytes(src), read_bytes(out)) == expected
+    assert read_report(out)["notes"] == ["trackbar at line %d: %s step 4.00 -> 2.00" % (fm_track_line(text, "X="), FM_STEP)]
+
+
+def test_frame_mode_step_30_to_66_writes_six_decimals_within_tolerance():
+    # k = 11/5: 4.00 / k = 20/11 = 1.8181818..., written 1.818182 (at least 2 decimals). |1.818182 - 20/11| = 1.818e-7,
+    # E = 1.818e-7 * 263 = 4.8e-05 <= 0.5, accepted. Y and Z 0.00 are unchanged.
+    d, src, text = fm_project("fm_step_66", 30, ["X=-600.00,4.00,%s,4" % FM_STEP, "Y=0.00,0.00,%s,4" % FM_STEP,
+                                                "Z=0.00,0.00,%s,4" % FM_STEP])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "66")
+    assert code == 0, "exit %d: %s" % (code, err)
+    expected = merged(file_edit(text, out), edit_at(text, "[scene.0]", "video.rate=", "video.rate=66"),
+                      edit_at(text, "[0]", "frame=", "frame=0,263"),
+                      edit_at(text, "[0.0]", "X=", "X=-600.00,1.818182,%s,4" % FM_STEP))
+    assert line_changes(read_bytes(src), read_bytes(out)) == expected
+    assert read_report(out)["notes"] == ["trackbar at line %d: %s step 4.00 -> 1.818182" % (fm_track_line(text, "X="), FM_STEP)]
+
+
+def test_frame_mode_repeat_30_to_66_writes_a_non_integer_parameter():
+    # k = 11/5: 7 * 11/5 = 77/5 = 15.4 exactly, so it is written as 15.4 (not rounded).
+    d, src, text = fm_project("fm_repeat_66_15_4", 30, ["X=-600.00,600.00,%s,4|7" % FM_REPEAT])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "66")
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert "X=-600.00,600.00,%s,4|15.4" % FM_REPEAT in read_text_lf(out).split("\n")
+    assert read_report(out)["notes"] == ["trackbar at line %d: %s parameter 7 -> 15.4" % (fm_track_line(text, "X="), FM_REPEAT)]
+
+
+def test_frame_mode_refusals_name_the_first_failing_rule():
+    cases = (
+        (["X=-600.00,4.00,%s,4|1" % FM_STEP], "0,119", "%s takes no '|' payload, got '4|1'" % FM_STEP),
+        (["X=-600.00,600.00,%s,4" % FM_REPEAT], "0,119", "%s needs a '|' parameter, got '4'" % FM_REPEAT),
+        (["X=-600.00,600.00,%s,4" % FM_RANDOM], "0,119", "%s needs a '|' parameter, got '4'" % FM_RANDOM),
+        (["X=-600.00,600.00,%s,3|15" % FM_REPEAT], "0,119", "%s flag must be 4, got '3'" % FM_REPEAT),
+        (["X=-600.00,4.00,%s,0" % FM_STEP], "0,119", "%s flag must be 4, got '0'" % FM_STEP),
+        (["X=-600.00,600.00,%s,4|15" % FM_REPEAT], "0,59,119",
+         "%s is accepted only with two frame points and two values (middle points are not verified)" % FM_REPEAT),
+        (["X=-600.00,0.00,600.00,%s,4|15" % FM_REPEAT], "0,119",
+         "%s is accepted only with two frame points and two values (middle points are not verified)" % FM_REPEAT),
+        (["X=-600.00,600.00,%s,4|0.5" % FM_REPEAT], "0,119",
+         "%s parameter must be a number of at least 1, got '0.5'" % FM_REPEAT),
+        (["X=-600.00,600.00,%s,4|abc" % FM_REPEAT], "0,119",
+         "%s parameter must be a number of at least 1, got 'abc'" % FM_REPEAT),
+    )
+    for n, (tracks, frames, message) in enumerate(cases):
+        d, src, text = fm_project("fm_refuse_%d" % n, 30, tracks, frames=frames)
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert_target(src, out, "60")
+        expected = "REFUSED: line %d: %s" % (fm_track_line(text, "X="), message)
+        assert code == 2 and expected in err, "case %d: exit %d: %s" % (n, code, err)
+        assert_no_output(out)
+    # An object without a frame= line is refused by the same frame-point rule.
+    d, src, text = fm_project("fm_refuse_no_frame", 30, ["X=-600.00,600.00,%s,4|15" % FM_REPEAT])
+    no_frame_text = text.replace("frame=0,119\n", "", 1)  # removing the line shifts the X line up by one
+    no_frame = os.path.join(d, "no_frame.aup2")
+    write_bytes(no_frame, no_frame_text.encode("utf-8"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(no_frame, out, "60")
+    expected = ("REFUSED: line %d: %s is accepted only with two frame points and two values (middle points are not verified)"
+                % (fm_track_line(no_frame_text, "X="), FM_REPEAT))
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_frame_mode_overlapping_time_control_refused_and_apart_accepted():
+    # Two 時間制御(オブジェクト) objects on frames 0..119 and 30..149 (layers 0 and 1) and a 反復移動 object on 60..179
+    # (layer 2) of the same scene: refused, and the message names the frame= line of the earliest time control object.
+    blocks = [("0,119", tc_effect(TC_FORWARD)), ("30,149", tc_effect(TC_FORWARD)),
+              ("60,179", "effect.name=標準描画\nX=-600.00,600.00,%s,4|15\n" % FM_REPEAT)]
+    d, src, text = tc_project("fm_tc_overlap", 30, blocks)
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    expected = ("REFUSED: line %d: %s is not verified together with 時間制御(オブジェクト) (the time control object at line %d "
+                "overlaps it)" % (line_in_section(text, "[2.0]", "X="), FM_REPEAT, line_in_section(text, "[0]", "frame=")))
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+    # Frames 120..239 do not overlap 0..119: accepted, both objects are retimed.
+    blocks = [("0,119", tc_effect(TC_FORWARD)), ("120,239", "effect.name=標準描画\nX=-600.00,600.00,%s,4|15\n" % FM_REPEAT)]
+    d, src, text = tc_project("fm_tc_apart", 30, blocks)
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0, "exit %d: %s" % (code, err)
+    expected = merged(file_edit(text, out), edit_at(text, "[scene.0]", "video.rate=", "video.rate=60"),
+                      edit_at(text, "[0]", "frame=", "frame=0,239"),
+                      edit_at(text, "[1]", "frame=", "frame=240,479"),
+                      edit_at(text, "[1.0]", "X=", "X=-600.00,600.00,%s,4|30" % FM_REPEAT))
+    assert line_changes(read_bytes(src), read_bytes(out)) == expected
+    assert read_report(out)["notes"] == ["trackbar at line %d: %s parameter 15 -> 30" % (line_in_section(text, "[1.0]", "X="),
+                                                                                      FM_REPEAT)]
+
+
+def test_frame_mode_same_rate_is_unchanged():
+    # k = 1: the lines are copied, with no note (the phase-1 checks still pass for these valid lines).
+    d, src, text = fm_project("fm_same_30", 30, ["X=-600.00,600.00,%s,4|15" % FM_REPEAT, "Y=0.00,4.00,%s,4" % FM_STEP,
+                                                 "Z=0.00,0.00,%s,4|15" % FM_RANDOM])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "30")
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert set(line_changes(read_bytes(src), read_bytes(out))) == {line_in_section(text, "[project]", "file=")}
+    assert read_report(out)["notes"] == [], read_report(out)["notes"]
+
+
+def test_frame_mode_in_kept_scene_is_not_checked():
+    # Scene 1 (15 fps) is kept at its own rate by the auto policy, so its frame-counting line is copied and not checked:
+    # ランダム移動 with 15.4 would be refused in a followed scene. Scene 0 (the exported one) is followed: 反復移動 15.4 x 2 = 30.8.
+    head = "[project]\nversion=2010400\nfile=synthetic.aup2\ndisplay.scene=0\npreview.scene=0\n"
+
+    def scene(no, rate):
+        return ("[scene.%d]\nscene=%d\nname=s%d\nvideo.width=640\nvideo.height=360\nvideo.rate=%d\nvideo.scale=1\n"
+                "audio.rate=44100\ncursor.frame=0\ncursor.layer=0\npreview.frame=0\ndisplay.frame=0\ndisplay.layer=0\n"
+                % (no, no, no, rate))
+
+    text = (head + scene(0, 30) + "[0]\nlayer=0\nframe=0,119\n[0.0]\neffect.name=標準描画\nX=-600.00,600.00,%s,4|15.4\n"
+            % FM_REPEAT + scene(1, 15) + "[1]\nlayer=0\nscene=1\nframe=0,59\n[1.0]\neffect.name=標準描画\n"
+            "X=-600.00,600.00,%s,4|15.4\n" % FM_RANDOM)
+    d = case_dir("fm_kept_scene")
+    src = os.path.join(d, "src.aup2")
+    write_bytes(src, text.encode("utf-8"))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0, "exit %d: %s" % (code, err)
+    expected = merged(file_edit(text, out), edit_at(text, "[scene.0]", "video.rate=", "video.rate=60"),
+                      edit_at(text, "[0]", "frame=", "frame=0,239"),
+                      edit_at(text, "[0.0]", "X=", "X=-600.00,600.00,%s,4|30.8" % FM_REPEAT))
+    assert line_changes(read_bytes(src), read_bytes(out)) == expected
+    assert read_report(out)["notes"] == ["scene 1 kept at its own rate 15/1",
+                                         "trackbar at line %d: %s parameter 15.4 -> 30.8"
+                                         % (line_in_section(text, "[0.0]", "X="), FM_REPEAT)], read_report(out)["notes"]
+
+
+def test_frame_mode_precise_skips_the_object_and_still_converts_the_parameter():
+    d, src, text = fm_project("fm_precise", 30, ["X=-600.00,600.00,%s,4|15" % FM_REPEAT,
+                                                "Y=0.00,0.00,%s,4|15" % FM_REPEAT])
+    out_p = os.path.join(d, "precise.aup2")
+    out_n = os.path.join(d, "plain.aup2")
+    code, _, err = convert_target(src, out_p, "60", extra=["--precise"])
+    assert code == 0, "exit %d: %s" % (code, err)
+    code, _, err = convert_target(src, out_n, "60")
+    assert code == 0, "exit %d: %s" % (code, err)
+    report = read_report(out_p)["precise"]
+    x_line = fm_track_line(text, "X=")
+    assert report["applied"] == 0 and report["tracks"] == [], report
+    assert report["skipped"] == [{"line": line_in_section(text, "[0]", "frame="), "reason":
+                                  "trackbar at line %d uses mode %s; frame-counting modes are not re-sampled"
+                                  % (x_line, FM_REPEAT)}], report["skipped"]
+    assert lines_without_file(out_p) == lines_without_file(out_n), "a skipped object keeps the plain output"
+    assert "X=-600.00,600.00,%s,4|30" % FM_REPEAT in lines_without_file(out_p)
+
+
 TESTS = [
     test_target_fps_exact_values_30fps_fixture,
     test_target_fps_synthetic_60_to_66_and_72_to_60,
@@ -3086,6 +3358,19 @@ TESTS = [
     test_time_control_curve_precise_and_same_rate,
     test_interp_tc_mode_passes_keeps_payload_and_multi_point,
     test_precise_interp_tc_mode_always_skips,
+    test_frame_mode_repeat_30_to_60_doubles_the_parameter,
+    test_frame_mode_repeat_30_to_60000_1001_writes_29_97003_within_tolerance,
+    test_frame_mode_repeat_error_bound_refuses_a_parameter_that_rounds_too_far,
+    test_frame_mode_random_30_to_66_scales_the_integer_parameter,
+    test_frame_mode_random_non_integer_after_k_and_non_integer_parameter_refused,
+    test_frame_mode_step_30_to_60_halves_the_step_and_keeps_zero_steps,
+    test_frame_mode_step_30_to_66_writes_six_decimals_within_tolerance,
+    test_frame_mode_repeat_30_to_66_writes_a_non_integer_parameter,
+    test_frame_mode_refusals_name_the_first_failing_rule,
+    test_frame_mode_overlapping_time_control_refused_and_apart_accepted,
+    test_frame_mode_same_rate_is_unchanged,
+    test_frame_mode_in_kept_scene_is_not_checked,
+    test_frame_mode_precise_skips_the_object_and_still_converts_the_parameter,
 ]
 
 
