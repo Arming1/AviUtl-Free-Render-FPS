@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
-    [string]$ReleaseLabel = 'v1.2.1',
+    [string]$ReleaseLabel = 'v1.2.5',
     [string]$OutputRoot = '',
     [string]$ThirdPartyRoot = '',
     [string]$ThirdPartySourcesZip = '',

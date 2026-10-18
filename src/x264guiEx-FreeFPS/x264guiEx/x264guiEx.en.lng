@@ -599,6 +599,16 @@ AuoFreeFpsExportEncSummary=Encoder:
 AuoFreeFpsExportExtMismatch=The output file extension does not match the container in the encoder settings (%s). Continue anyway?
 AuoFreeFpsExportOK=OK
 AuoFreeFpsExportCancel=Cancel
+AuoFreeFpsExportSubsceneRate=Sub-scene frame rate:
+AuoFreeFpsExportSubsceneAuto=Auto (recommended)
+AuoFreeFpsExportSubsceneFollow=Follow the target rate for all scenes
+AuoFreeFpsExportSubsceneKeep=Keep the original rate for all scenes
+AuoFreeFpsExportScenePlanFollow=follow
+AuoFreeFpsExportScenePlanKeep=keep
+AuoFreeFpsExportScenePlanUnsaved=Save the project to preview
+AuoFreeFpsExportScenePlanMain=Main
+AuoFreeFpsExportScenePlanSub=Sub-scene
+AuoFreeFpsExportScenePlanPrefix=Preview from the saved project: 
 
 [AUO_CONFIG_CX]
 AUO_CONFIG_CX_X264_ENCMODE_SINGLE_CBR=Single Pass - Bitrate mode

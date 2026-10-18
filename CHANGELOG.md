@@ -2,6 +2,67 @@
 
 ## [Unreleased]
 
+## [1.2.5] — 2026-10-18
+
+> 1.2.2 was an internal test version number and was never publicly released.
+
+### Added
+
+- Free FPS Export accepts projects whose scenes have different frame rates. Version 1.2.1
+  refuses them.
+- **Subscene rate** option in the Free FPS Export dialog, with three choices:
+  - **Auto** (default): the exported scene always follows the target rate. Another scene
+    follows the target rate when its source rate is at least the exported scene's source
+    rate. A scene with a lower source rate keeps its own rate, so an intentional frame-rate
+    reduction (for example 15 fps inside a 30 fps project) is kept.
+  - **Follow all**: every scene is re-timed to the target rate.
+  - **Keep all**: only the exported scene is re-timed; every other scene keeps its own rate.
+- A scene plan line in the dialog lists each scene's source rate, target rate, policy and
+  whether it is the exported scene.
+- The exported scene is `display.scene` in `[project]` (default 0).
+- `tools/aup2_fps_upconvert.py --subscene-rate {auto,follow,keep}` (default `auto`), with the
+  same option in the C++ re-timer. The `.convert.json` sidecar adds `subscene_rate` and a
+  `scenes` list (`scene`, `name`, `source_rate`, `target_rate`, `k`, `policy`, `exported`),
+  and one `notes` line per kept scene.
+- Script easing tracks `イージング（通常）@イージング` are accepted. The `|` payload is kept byte for byte.
+  Precise motion skips objects with such tracks. `イージング（補間移動）@イージング` is still refused.
+
+### Changed
+
+- Scene objects (`シーン`) keep their playback position (seconds) and playback speed (%).
+  They are not rescaled.
+- A followed scene uses `k = target rate / source rate` for object frames, cursor, preview and
+  display frames, overlap checks and Precise motion. A kept scene is copied byte for byte.
+- If every scene has the same rate and the policy is Auto, the output `.aup2` is byte-identical
+  to earlier versions. Only the new sidecar keys are added.
+- `コマ落ち` (frame drop in 時間制御(オブジェクト)) is a number, not a switch. `コマ落ち=1` (no drop) is converted
+  and the line is kept unchanged. In a time control effect of a followed scene, `コマ落ち=K` (K ≥ 2) becomes K × k
+  when that is an integer. Otherwise the block is written as a staircase (see below) instead of being refused.
+  K ≥ 2 elsewhere and `コマ落ち=0` are still refused.
+- 時間制御(オブジェクト) `位置` (a two-point 直線移動(時間制御) track) is recomputed exactly in seconds for followed
+  scenes, with or without Precise motion. When the new end values fall outside 0..100 (the host clamps only the end
+  values) or a drop is not an integer multiple, the block becomes a `瞬間移動` staircase with one point per step
+  (at most 4096 points; the object's other trackbars must be constant), so the controlled frames stay exact.
+- Precise motion holds the end value after the original end instead of extrapolating past it. Extra keyframes are
+  added where the new object would outlive the original (see `tools/aup2_fps_upconvert.md`, "End hold").
+- The Free FPS Export dialog hides the **Precise motion** checkbox. Precise motion is always on in normal mode.
+  A `free_fps_export.ini` next to the plugin DLL with `[debug] enabled=1` shows the checkbox again and adds
+  `[debug]` settings: `precise`, `extra_decimals` (0 to 4) and `keep_temp` (keeps `retimed.aup2` and `.convert.json`).
+  The dialog title then shows `[Debug]`. The example file is `free_fps_export.ini.example` in `test_kit`.
+
+### Validation status
+
+- Sub-scene rate policy: the A/B/C cases of `test_kit/4_次合成/` passed in AviUtl2. The step checker is
+  `experiments/subscene_rate/analyze_steps.py`.
+- Time control and frame-drop probes (`test_kit/5_抽帧探针/`) ran in AviUtl2: the host clamps only the end values of
+  位置, the `コマ落ち` segment starts at the time control's own start, and in a `瞬間移動` track the last point is never
+  shown. P6 (66 → 132) per-frame error is at most 0.27 px. P7 (30 → 66, drop 2) segment starts match `ceil(4.4 j)` and
+  the error is at most 0.22 px. ARZ (66 → 132) minimum PSNR rose from 32.2 dB to 41.5 dB.
+- Precise motion end hold and its extra keyframes were run in AviUtl2: the P6 export (66 → 132) had the end hold on
+  and its per-frame error is at most 0.27 px.
+- Not yet run in AviUtl2: the converted time control files as a whole, and `--precise-extra-decimals` values above 0.
+  See `docs/KNOWN_LIMITATIONS.md`.
+
 ## [1.2.1] — 2026-10-17
 
 Patch release on 1.2.0: Free FPS Export encoding settings, localization and

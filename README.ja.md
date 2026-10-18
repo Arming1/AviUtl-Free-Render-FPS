@@ -13,6 +13,17 @@ FreeRenderFPS は x264guiEx をベースに、AviUtl2 と旧 AviUtl 1.x の
 1.5…というプロジェクトフレーム座標を実際に評価します。フレーム複製や
 メタデータ変更だけではありません。
 
+## v1.2.5 の変更点
+
+詳細は [CHANGELOG.md](CHANGELOG.md) を参照してください。
+
+- 次合成のフレームレート：複数シーンのプロジェクトで、書き出すシーンより元のフレームレートが低い次合成は元のレートを保ちます（A/B/C の 3 ケースを AviUtl2 で実機検証）。
+- 時間制御(オブジェクト)：位置と `コマ落ち` を秒単位で正確に再計算します。新しい終点値が 0..100 を超える場合や、非整数倍の丸め落ちの場合は「瞬間移動」の階段に切り替えます。
+- Precise motion：元の終点より後は終点の値を保持し、外挿しません。P6（66 → 132、終点保持を有効）は AviUtl2 で実行され、フレームごとの誤差は最大 0.27 px でした。
+- Precise motion のチェックボックスはダイアログに表示されません。通常モードでは常に有効です。プラグイン DLL の隣に `free_fps_export.ini` を置き `[debug] enabled=1` にすると、チェックボックスと `[debug]` 設定（`precise`、`extra_decimals` 0〜4、`keep_temp`）が表示されます。
+- `イージング（通常）@イージング` を受け付けます。
+- 既知の制限（低フレームレートの階段の最終フレーム、2 点直線の最終フレーム、位置の小数 3 桁）は [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) を参照してください。
+
 ## v1.2.1 の変更点
 
 v1.2.1 は v1.2.0 の修正版です。詳細は [CHANGELOG.md](CHANGELOG.md) を参照してください。
@@ -52,8 +63,8 @@ setup/portable 最終パッケージのみを使った実エンコードに合�
 
 ## One-click installation
 
-1. `AviUtl2-FreeRenderFPS-v1.2.1-setup.zip` を完全に展開します。
-2. `payload` の隣にある `AviUtl2-FreeRenderFPS-v1.2.1-setup.exe` を実行します。
+1. `AviUtl2-FreeRenderFPS-v1.2.5-setup.zip` を完全に展開します。
+2. `payload` の隣にある `AviUtl2-FreeRenderFPS-v1.2.5-setup.exe` を実行します。
 3. AviUtl2 を再起動します。
 4. `x264guiEx FreeRenderFPS` を選びます。
 
@@ -65,7 +76,7 @@ setup/portable 最終パッケージのみを使った実エンコードに合�
 
 ## Manual installation
 
-`AviUtl2-FreeRenderFPS-v1.2.1-portable.zip` を AviUtl2 ルートへ直接展開します。ZIP には
+`AviUtl2-FreeRenderFPS-v1.2.5-portable.zip` を AviUtl2 ルートへ直接展開します。ZIP には
 `data\Plugin\x264guiEx-FreeRenderFPS` が含まれます。正式な
 `x264guiEx-FreeRenderFPS.aux2` と 3 個の INI を保ち、
 Debug、PDB、Probe、watcher、ブレークポイント用ツールをコピーしないでください。
@@ -107,6 +118,8 @@ Free Render FPS を無効にすると元の整数フレーム経路を使用し�
 **Free FPS Export...** を追加します。AviUtl2 v2.1.12 でフリー描画 FPS を使う場合は
 こちらを使用してください。公開 SDK の API でプロジェクトのタイミングを組み直し、
 任意の有理数 FPS で出力します。出力前にプロジェクトをファイルとして保存してください。
+
+**複数シーン（1.2.5 から）：** シーンごとに異なるフレームレートを使えます。書き出すシーン（`[project]` の `display.scene`、既定は 0）は常に目標 FPS に従います。「サブシーンのFPS」が「自動（推奨）」（既定）のとき、書き出すシーン以上の元のフレームレートを持つ他のシーンは目標 FPS に従い、低いシーンは元のフレームレートを保つため、コマ落ちの効果が残ります。「すべてのシーンを出力FPSに追従」「すべてのシーンを元のFPSのまま維持」も選べます。シーン（`シーン`）オブジェクトの再生位置（秒）と再生速度（%）は換算しません。書き出し前のダイアログに各シーンの計画が表示されます。1.2.1 ではこの種のプロジェクトは拒否されます。
 
 ## FPS presets
 

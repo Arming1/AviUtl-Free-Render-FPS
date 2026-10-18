@@ -446,7 +446,7 @@ void setup_output_refused() {
     t_output_returns = false;
 }
 void setup_refused() {
-    t_saved_text = g_fixture30 + "コマ落ち=1\n";
+    t_saved_text = g_fixture30 + "コマ落ち=2\n";
 }
 void setup_stale_output() {}
 
@@ -458,10 +458,10 @@ void scenario_save_fails() {
 void scenario_refused() {
     reset_fake(ExportMode::kAsync);
     const Case c = load_case(L"refused");
-    t_saved_text = g_fixture30 + "コマ落ち=1\n";
+    t_saved_text = g_fixture30 + "コマ落ち=2\n";
     run_export(c, Rational{66, 1});
     check(!t_notify_ok.empty() && !t_notify_ok.back() && contains(last_text(), L"REFUSED: line ") &&
-              contains(last_text(), L"コマ落ち=1 is not supported"),
+              contains(last_text(), L"コマ落ち=2 (frame drop) is only converted inside a 時間制御(オブジェクト) effect"),
           "refused: result carries the line number", narrow(last_text()));
     check(t_opened.size() == 1 && t_opened[0] == c.original,
           "refused: the project is saved, no retimed copy opened, and the original reopened");

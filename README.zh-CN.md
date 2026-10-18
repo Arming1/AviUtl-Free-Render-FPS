@@ -8,6 +8,16 @@ FreeRenderFPS 基于 x264guiEx，同时提供 AviUtl2 和旧版 AviUtl 1.x 的�
 可让场景求值采样率独立于工程 FPS。例如 30 FPS 工程输出 60 FPS 时，会真实求值
 0.0、0.5、1.0、1.5……工程帧坐标，而不是复制帧或只修改容器 FPS 元数据。
 
+## v1.2.5 更新
+
+v1.2.5 的完整改动见 [CHANGELOG.md](CHANGELOG.md)：
+
+- 次合成帧率：多场景工程中，源帧率低于被导出场景的次合成可保留原帧率（已在 AviUtl2 上实测 A/B/C 三组）。
+- 时间控制(オブジェクト)：位置与 `コマ落ち` 按秒精确重算；超出 0..100 或非整数倍丢帧时改用“瞬間移動”台阶逐帧精确表达。
+- 精确运动：原终点之后保持终点值，不再外推。普通模式下不再显示复选框，精确运动始终开启；调试选项需 `free_fps_export.ini`（`[debug] enabled=1`）。
+- 放行 `イージング（通常）@イージング`。
+- 已知限制（低帧率台阶的末帧、两点直线的末帧、位置 3 位小数）见 [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)。
+
 ## v1.2.1 更新
 
 v1.2.1 是 v1.2.0 的修正版，详见 [CHANGELOG.md](CHANGELOG.md)：
@@ -43,7 +53,7 @@ AviUtl 宿主本体。
 
 ## 一键安装
 
-1. 完整解压 `AviUtl2-FreeRenderFPS-v1.2.1-setup.zip`。
+1. 完整解压 `AviUtl2-FreeRenderFPS-v1.2.5-setup.zip`。
 2. 双击其中与 `payload` 相邻的 setup EXE。
 3. 重启 AviUtl2。
 4. 选择 `x264guiEx FreeRenderFPS`。
@@ -56,7 +66,7 @@ AviUtl 宿主本体。
 
 ## 手动安装
 
-将 `AviUtl2-FreeRenderFPS-v1.2.1-portable.zip` 直接解压到 AviUtl2 根目录；包内已包含
+将 `AviUtl2-FreeRenderFPS-v1.2.5-portable.zip` 直接解压到 AviUtl2 根目录；包内已包含
 `data\Plugin\x264guiEx-FreeRenderFPS`。必须保持正式 `x264guiEx-FreeRenderFPS.aux2`
 与三个相邻 INI 同名同目录，不要复制 Debug、PDB、Probe、watcher 或断点工具，
 也不要重命名正式文件。
@@ -100,12 +110,14 @@ INI 放在一起；runtime 位于 `Plugins\exe_files`，预设位于
 **Free FPS Export...**。在 AviUtl2 v2.1.12 上请用它获得自由渲染帧率：插件用公开 SDK
 接口重新排布工程时间并导出，可输出任意有理数 FPS。导出前需先把工程保存为文件。2026-10-17 在 v2.1.12 上实测 8 组，见下文“Free FPS Export 实测”；按重定时后的运动模型，8 组运动检查全部通过（残差 0.146–0.192 px）。长时长漂移的宿主外测试（108 组）已通过；30 分钟音画同步已在宿主中导出并通过（见下文）。
 
+**多场景工程（从 1.2.5 起）：** 各场景可以有不同的源帧率。被导出的场景（`[project]` 中的 `display.scene`，缺省为 0）总是跟随目标帧率。界面中“次合成帧率”选“自动（推荐）”（默认）时，源帧率不低于被导出场景的其他场景跟随目标帧率；源帧率更低的场景保留原帧率，抽帧效果因此保留。也可以选“全部跟随目标帧率”或“全部保留原帧率”。“シーン”对象的再生位置（秒）和再生速度（%）不换算。导出前对话框会列出每个场景的计划。1.2.1 会拒绝这类工程。
+
 ### 精确模式（Precise motion）
 
-对话框的 **Precise motion (exact speed for linear motion)** 复选框默认勾选。勾选时，直线移动（`直線移動,0`）与常量轨迹的关键帧值会按原曲线在新时刻重新取值，因此直线运动速度与原工程一致；关键帧位置不变。其他模式（加減速、補間、時間制御、`|` 载荷、イージング 等）的对象保持不变，并列在 `.convert.json` 的 `precise.skipped` 中。
+自 1.2.5 起，普通模式下对话框不显示 **Precise motion (exact speed for linear motion)** 复选框，精确运动始终开启。要显示复选框和调试选项，需在插件 DLL 同目录放置 `free_fps_export.ini` 并设置 `[debug] enabled=1`（示例见 `test_kit`）；此时对话框标题带 `[Debug]`，还可设置 `precise`、`extra_decimals`（0 至 4）和 `keep_temp`（保留 `retimed.aup2` 与 `.convert.json`）。开启时，直线移动（`直線移動,0`）与常量轨迹的关键帧值会按原曲线在新时刻重新取值，因此直线运动速度与原工程一致；关键帧位置不变。其他模式（加減速、補間、時間制御、`|` 载荷、イージング 等）的对象保持不变，并列在 `.convert.json` 的 `precise.skipped` 中。
 
 - 数值保留原行的小数位。2 位小数时，短而幅度小的段速度误差最大约 0.025%；命令行 `--precise-extra-decimals 2` 时最大约 0.000076%。AviUtl2 是否接受额外小数位，尚未在宿主中验证。
-- 最后一个输出帧可能略微超过或不足原终点：30 → 60000/1001 终点为 201.74（超出 1.74 px），66 → 24 终点为 197.87。
+- 1.2.0 实测中，最后一个输出帧可能略微超过或不足原终点：30 → 60000/1001 终点为 201.74（超出 1.74 px），66 → 24 终点为 197.87。1.2.5 起原终点之后保持终点值，P6（66 → 132，启用终点保持）在 AviUtl2 中逐帧误差不超过 0.27 px。
 - 本模式自 1.2.0 起包含在插件中，已在 AviUtl2 v2.1.12 上实测通过（测试二进制 `x264guiEx-FreeRenderFPS.aux2`，版本资源 1.1.0，SHA256 114C3070…6076B，2026-10-17 17:52 重新打包，含 Precise motion，见下文）；首版 1.1.0 构建不含精确模式。测试计划见 [experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md](experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md)。
 - 规则与限制见 [tools/aup2_fps_upconvert.md](tools/aup2_fps_upconvert.md) 的“Precise mode”一节。
 

@@ -1,6 +1,7 @@
 // Command line wrapper around the pure re-timer, for tests/crosscheck.py.
 // Mirrors the Python tool's arguments and refusals:
 //   retime_cli.exe --in IN --out OUT (--factor K | --target-fps RATE) [--force] [--precise [--precise-extra-decimals N]]
+//                  [--subscene-rate auto|follow|keep]
 // Exit codes: 0 converted, 2 refused or usage error. Writes OUT and OUT.convert.json.
 
 #include <windows.h>
@@ -69,7 +70,7 @@ bool write_file(const std::wstring& path, const std::string& bytes) {
 
 int usage() {
     say("usage: retime_cli --in IN --out OUT (--factor K | --target-fps RATE) [--force] [--precise "
-        "[--precise-extra-decimals N]]");
+        "[--precise-extra-decimals N]] [--subscene-rate auto|follow|keep]");
     return 2;
 }
 
@@ -102,6 +103,7 @@ int wmain(int argc, wchar_t** argv) {
     bool precise = false;
     long long extra_decimals = 0;
     long long factor = 0;
+    free_fps::SubsceneRatePolicy subscene_rate = free_fps::SubsceneRatePolicy::Auto;
 
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
@@ -113,6 +115,17 @@ int wmain(int argc, wchar_t** argv) {
             std::string text;
             free_fps::wide_to_utf8(argv[++i]).swap(text);
             if (!parse_int(text, extra_decimals)) {
+                return usage();
+            }
+        } else if (i + 1 < argc && arg == L"--subscene-rate") {
+            const std::wstring value = argv[++i];
+            if (value == L"auto") {
+                subscene_rate = free_fps::SubsceneRatePolicy::Auto;
+            } else if (value == L"follow") {
+                subscene_rate = free_fps::SubsceneRatePolicy::Follow;
+            } else if (value == L"keep") {
+                subscene_rate = free_fps::SubsceneRatePolicy::Keep;
+            } else {
                 return usage();
             }
         } else if (i + 1 < argc && arg == L"--in") {
@@ -192,8 +205,9 @@ int wmain(int argc, wchar_t** argv) {
     }
 
     const std::size_t extra = static_cast<std::size_t>(extra_decimals);
-    RetimeResult result = have_factor ? free_fps::retime_factor(in_bytes, factor, out_path, precise, extra)
-                                      : free_fps::retime(in_bytes, target, out_path, precise, extra);
+    RetimeResult result = have_factor
+                              ? free_fps::retime_factor(in_bytes, factor, out_path, precise, extra, subscene_rate)
+                              : free_fps::retime(in_bytes, target, out_path, precise, extra, subscene_rate);
     if (!result.ok) {
         say(free_fps::refusal_message(result));
         return 2;

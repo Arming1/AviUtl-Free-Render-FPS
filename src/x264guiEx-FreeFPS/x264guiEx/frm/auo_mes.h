@@ -737,6 +737,16 @@ enum AuoMes {
         AuoFreeFpsExportExtMismatch,
         AuoFreeFpsExportOK,
         AuoFreeFpsExportCancel,
+        AuoFreeFpsExportSubsceneRate,
+        AuoFreeFpsExportSubsceneAuto,
+        AuoFreeFpsExportSubsceneFollow,
+        AuoFreeFpsExportSubsceneKeep,
+        AuoFreeFpsExportScenePlanFollow,
+        AuoFreeFpsExportScenePlanKeep,
+        AuoFreeFpsExportScenePlanUnsaved,
+        AuoFreeFpsExportScenePlanMain,
+        AuoFreeFpsExportScenePlanSub,
+        AuoFreeFpsExportScenePlanPrefix,
     AUO_CONFIG_FCG_SECTION_FIN,
 
     //section = AUO_CONFIG_CX

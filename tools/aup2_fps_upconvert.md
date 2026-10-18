@@ -6,7 +6,15 @@ modifies the input. Two ways to choose the target rate:
 - `--factor K` (integer): target = scene rate × K, for example 30 → 60 with K=2.
 - `--target-fps RATE` (exact): any positive rational rate, for example `66`, `24`, `120`, `59`, `60000/1001`.
 
+A project may have several scenes (sub-scenes, called compositions in the GUI) with different frame rates. The scene
+that is exported is the one named by `[project] display.scene`. The target rate is relative to that scene, and every
+other scene follows it or is kept as is, as `--subscene-rate` says. See "Scenes and sub-scenes".
+
 Background and the field table: `docs/aup2_fps_upconvert_feasibility.md`.
+
+Two things go beyond renumbering frames: the `位置` of a `時間制御(オブジェクト)` effect is always recomputed (a two-point line when
+that is exact, else a staircase of `瞬間移動` steps), and with `--precise` a track holds its end value after the original object ends.
+See "Time control" and "Precise mode".
 
 ## Usage
 
@@ -14,11 +22,12 @@ Background and the field table: `docs/aup2_fps_upconvert_feasibility.md`.
 python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --factor K [--force] [--allow-frame-scripts]
 python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --target-fps RATE [--force] [--allow-frame-scripts]
 python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 (--factor K | --target-fps RATE) [--precise [--precise-extra-decimals N]]
+python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 (--factor K | --target-fps RATE) [--subscene-rate {auto,follow,keep}]
 ```
 
 - Exactly one of `--factor` and `--target-fps` is required (argparse exits with code 2 if both or neither are given).
 - `--factor K`: `K` is an integer of at least 2. For integer `K` the output is byte-identical to the earlier
-  integer-only version of this tool.
+  integer-only version of this tool. With several scenes `K` applies to the exported scene (see "Scenes and sub-scenes").
 - `--target-fps RATE`: an integer (`66`) or a fraction `numerator/denominator` (`60000/1001`), positive.
   Decimal values such as `59.94` are refused; write the exact fraction instead.
 - Refuses if `OUT` exists (unless `--force`), if `OUT` is the same file as `IN`, or if the rate is invalid.
@@ -27,12 +36,16 @@ python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 (--factor K | 
 - On success it writes `OUT` and `OUT.aup2.convert.json` (the sidecar is `<OUT path>.convert.json`). The sidecar holds:
   - the input and output absolute paths with SHA-256;
   - `factor` (the integer, or `null` in `--target-fps` mode), `source_rate`, `target_rate` and `k`, each as an
-    exact `n/d` string (for example `"30/1"`, `"2000/1001"`);
+    exact `n/d` string (for example `"30/1"`, `"2000/1001"`). `source_rate` and `k` are those of the exported scene;
+  - `subscene_rate` (`"auto"`, `"follow"` or `"keep"`) and `scenes`, one entry per scene (see "Scenes and sub-scenes").
+    Both keys come right after `k`;
   - every changed line (`line`, `old`, `new`; an inserted line has `old: null` and `inserted: true`);
   - `timing`: the largest start and end error in seconds (exact `n/d` strings) and, per object, the start and end
     error and whether the object was shortened;
   - `notes`, a list that is empty when there is nothing to note;
   - `precise`, present only with `--precise` (see "Precise mode").
+- `--subscene-rate {auto,follow,keep}` (default `auto`) says what happens to the scenes other than the exported one.
+  See "Scenes and sub-scenes".
 - `--allow-frame-scripts` converts despite frame-dependent script (see below). Each occurrence is printed to
   stderr as `WARNING: line N: ...` and also written to `notes`.
 - `--precise` re-samples the trackbar values of linear moves so that their speed matches the original project. See
@@ -41,10 +54,12 @@ python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 (--factor K | 
 
 ## Rate arithmetic
 
-Let `Rp = video.rate / video.scale` be the scene rate and `Rt = rt / st` the target rate. Then `k = Rt / Rp`.
-All of it is exact (`fractions.Fraction`); no floats are used in the conversion.
+Let `Rp = video.rate / video.scale` be the rate of a scene and `Rt = rt / st` the target rate. Then `k = Rt / Rp` of
+that scene. All of it is exact (`fractions.Fraction`); no floats are used in the conversion. With one scene (or when all
+scenes share one rate) `Rp` is the same everywhere. With several rates each followed scene has its own `Rp` and `k`.
 
-- `--factor K`: `rt = video.rate × K` and `st = video.scale` (unchanged), so `k = K`.
+- `--factor K`: `rt = video.rate × K` and `st = video.scale` (unchanged), both of the exported scene, so `k = K` for
+  that scene.
 - `--target-fps`: `rt / st` is the given fraction in lowest terms.
 
 `round_half_up(x)` is the nearest integer to the exact value `x`, with halves rounded up (`floor(x + 1/2)`).
@@ -54,15 +69,19 @@ All of it is exact (`fractions.Fraction`); no floats are used in the conversion.
 | Where | Change |
 |---|---|
 | `[project] file=` | Set to the absolute `OUT` path. |
-| `[scene.N] video.rate=` | `rt`. |
+| `[scene.N] video.rate=` | `rt` (every followed scene; a kept scene is not touched). |
 | `[scene.N] video.scale=` | `st`, only when the value differs. If the line is missing, `video.scale=st` is inserted right after `video.rate` (see Scene requirements). |
-| `[scene.N] cursor.frame`, `preview.frame`, `display.frame` | `round_half_up(v × k)` |
-| `[N] frame=s,e` (object) | start `s' = round_half_up(s × k)`, end `e' = round_half_up((e+1) × k) − 1` (see Object rules). |
+| `[scene.N] cursor.frame`, `preview.frame`, `display.frame` | `round_half_up(v × k)`, with the `k` of that scene |
+| `[N] frame=s,e` (object) | start `s' = round_half_up(s × k)`, end `e' = round_half_up((e+1) × k) − 1`, with the `k` of the object's scene (see Object rules). |
 | `[N] frame=p0,p1,…,pn` (intermediate points) | `p0` uses the start rule, `pn` the end rule, each middle point `round_half_up(p × k)`. The result must be strictly increasing; otherwise the tool refuses. |
-| `[N] effect` trackbar values (only with `--precise`) | Re-sampled at the new keyframes for eligible objects. Other objects are unchanged. See "Precise mode". |
+| `[N] effect` trackbar values (only with `--precise`) | Re-sampled at the new keyframes (plus the points of the end hold) for eligible objects; the object's `frame=` line can get up to four more points. Other objects are unchanged. See "Precise mode". |
+| `[N.M] 位置=a,b,直線移動(時間制御),flag` (effect `時間制御(オブジェクト)`) | Recomputed exactly so that the controlled layers show the same content at the same time: a two-point line when that is exact, else a `瞬間移動` staircase (and the object's `frame=` and its constant trackbars get one point per step). Always, with or without `--precise`. See "Time control". |
+| `[N.M] コマ落ち=K` (same effect, K ≥ 2) | `K × k` with a two-point line; `1` with a staircase (the staircase holds each segment). See "Time control". |
 
-Everything else is copied byte-for-byte: encoding, BOM (kept if present), CRLF or LF per line, seconds-based values
-(`audio.rate`, `再生位置`, tempo, `display.grid.*`), trackbar values, and unknown lines.
+A scene that is kept (see "Scenes and sub-scenes") and all objects and effects in it are copied byte-for-byte. Everything
+else is copied byte-for-byte: encoding, BOM (kept if present), CRLF or LF per line, seconds-based values
+(`audio.rate`, `再生位置`, tempo, `display.grid.*`), trackbar values (except `位置` of a time control effect and, with `--precise`,
+the eligible tracks), `繰り返し`, `対象レイヤー数` and unknown lines.
 
 For integer `K`, the object rules reduce to `s × K` and `(e+1) × K − 1`, and the scene frame keys to `v × K`, which is
 the same as the earlier integer-only tool.
@@ -78,7 +97,8 @@ the same as the earlier integer-only tool.
 - **Same-layer checks.** Each scene has its own timeline. An object belongs to the scene named by its `scene=` line;
   if it has none, to the `[scene.N]` section above it (the real-world file and the fixtures agree with this: every
   object's `scene=` matches the section it is under; objects 0 and 1 of the real-world file have no `scene=` and sit
-  under `[scene.0]`). Objects are grouped by (scene, `layer=`). Within a group, the rewritten objects keep their order
+  under `[scene.0]`). An object whose scene has no `[scene.N]` section is converted with the exported scene's `k`.
+Objects are grouped by (scene, `layer=`). Within a group, the rewritten objects keep their order
   and never overlap. A pair that touched before must still touch after. If shortening breaks either rule (for example
   a 1-frame object whose neighbour's start rounds onto it), the tool refuses with the line of the later object. The
   tool does not move boundaries to keep such a pair consistent, because that would break the error bound below. Pairs
@@ -86,7 +106,7 @@ the same as the earlier integer-only tool.
 
 ## Timing error bounds
 
-For each object, with `Rp` and `Rt` as above and times in seconds:
+For each object, with `Rt` as above, `Rp` the rate of the object's own scene, and times in seconds:
 
 - start error `|s'/Rt − s/Rp|`
 - end error `|(e'+1)/Rt − (e+1)/Rp|`
@@ -148,41 +168,67 @@ AviUtl2 yet; the kit is in `experiments/long_av_sync/`.
 Without `--precise` no trackbar value is changed. Without it, the keyframe frames move but the values stay the same,
 so a linear move changes speed by the ratio of the old and new durations. With `--precise`, the values of eligible
 trackbars are re-sampled from the original curve at the new keyframe times, so a linear move keeps its original
-speed, apart from rounding.
+speed, apart from rounding. After the original object ends, a track holds its end value (as in AviUtl), which needs one or two
+more keyframes in the object (see "End hold").
 
 ```
 python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --target-fps 66 --precise
 python -I tools/aup2_fps_upconvert.py --in IN.aup2 --out OUT.aup2 --target-fps 66 --precise --precise-extra-decimals 2
 ```
 
-Rules (`precise_track_problem`, `precise_resample` in `tools/aup2_fps_upconvert.py`):
+Rules (`precise_track_problem`, `precise_keyframes`, `precise_resample` in `tools/aup2_fps_upconvert.py`):
 
-- Keyframe frames (`frame=`) are not changed. Only trackbar values are.
+- The rescaled keyframe frames (`frame=`) stay where they are. The list can get extra points (see "End hold"); nothing is
+  merged or removed. Every trackbar of the object then has one value per keyframe.
 - A trackbar is eligible when its move mode is `直線移動` with parameter `0` (`直線移動,0`), or when all of its values
-  are equal (a constant track). `再生範囲` trackbars are left unchanged and do not block their object.
+  are equal (a constant track). `再生範囲` trackbars are left unchanged and do not block their object. The `位置`
+  track of a `時間制御(オブジェクト)` effect does not take part: it is recomputed by its own rule (see "Time control"), is
+  not counted in `applied`, is not listed in `skipped`, and does not block its object.
 - For an eligible trackbar, the value at each new keyframe frame `f'` is the exact value of the original
-  piecewise-linear curve at original frame `f'/k` (`k` as in "Rate arithmetic"). After the original last keyframe the
-  last segment is extended linearly. The arithmetic is exact (`fractions.Fraction`).
+  piecewise-linear curve at original frame `f'/k` (`k` as in "Rate arithmetic", the `k` of the object's scene), held at the end
+  values: the curve at `s` for `f'/k < s` and at `e` for `f'/k > e`, with `s` and `e` the first and last original keyframe
+  (`held_curve_value`). The arithmetic is exact (`fractions.Fraction`).
 - Each value is rounded half away from zero to the decimal count of its own original line, plus
   `--precise-extra-decimals`. A track whose rounding error is above 0.01 % of its value range adds a note. This is
   not a refusal.
 - An object is skipped, with all its values unchanged, if any other trackbar is not eligible (for example a
-  trackbar with changing values in `加減速`, `補間移動`, `時間制御` or `イージング`, or any trackbar whose value has a
+  trackbar with changing values in `加減速`, `補間移動` or `イージング`, or any trackbar whose value has a
   `|` payload), or if its `frame=` is one frame (`frame=s,s`). Each skipped object is listed in `precise.skipped`
-  with its `frame=` line and a reason.
+  with its `frame=` line and a reason. An object that holds a `時間制御(オブジェクト)` effect is left alone, not listed: its
+  `frame=` list must stay two points (a staircase rewrites it itself, see "Time control").
 - `--precise-extra-decimals N` must be an integer from 0 to 4 and needs `--precise`. Otherwise the tool refuses.
 
-Endpoints. The value at the new last keyframe is the original curve at that time, so the motion does not always end
-at the original endpoint. For 66 → 24 it stops at 197.87 (the output ends at 4.958 s, before the original 4.985 s).
-For 30 → 60000/1001 it ends at 201.74, which is 1.74 px past the original 200 because the output's last frame is
-after the original end and the last segment is extended.
+### End hold
+
+AviUtl keeps the last value of a track after the object's last keyframe, and the object does not exist before its first frame. So
+new frame `n` shows `v(min(max(n/k, s), e))` (`v` = the original curve). Where the new object lasts longer than the original
+(`e'/k > e`, which is the rule for `k > 1.5`), the line must stop at `e` instead of running on, which takes keyframes of its own
+(`precise_keyframes`):
+
+- **End.** `m = floor(e × k)` is the last new frame whose time is not after `e`. The keyframes `m` and `m + 1` are added (only `m` when
+  `e × k` is an integer, because `m` then shows `v(e)`); `m + 1` and every later keyframe show `v(e)`. `m` is kept between `s'` and `e'`.
+- **Start.** If the new object starts before the original (`s'/k < s`, only possible when `s' < s × k`), its first frame shows `v(s)`.
+  `n0 = ceil(s × k)` is the first frame on the curve and is added (with `n0 − 1` if that lies after `s'`).
+- Nothing is merged, collinear points stay, and a one-frame object (`frame=s',s'`) gets none. The rescaled keyframes are never
+  removed. With `k ≤ 1` the new object usually ends inside the original one and nothing is added (the output is then byte-identical
+  to the version without the hold).
+
+Examples (FIX_30 fixture, `X=-200.00,200.00` over `frame=0,149`): 30 → 60 gives `frame=0,298,299` and
+`X=-200.00,200.00,200.00` (`Y` and `Z` repeat their constant); 30 → 60000/1001 gives `frame=0,297,298,299` and
+`X=-200.00,199.06,200.00,200.00`; 66 → 24 stops at 197.87 (the output ends at 4.958 s, before the original 4.985 s) and keeps
+`frame=0,119`.
+
+Whole-frame keyframes cannot put the corner at `e × k` when that is not a whole frame: inside the segment `m..m + 1` the new line is
+stretched. A layer shown at a fractional frame (a time control with `k` not an integer, see there) sees that.
 
 `.convert.json` gets a `precise` object only with `--precise`:
 
 - `enabled` (true), `extra_decimals` (only when N > 0), `applied` (number of re-sampled objects);
 - `skipped`: a list of `{line, reason}` where `line` is the object's `frame=` line;
 - `tracks`: one entry per re-sampled trackbar with `object_line`, `line`, `max_quant_error`,
-  `max_quant_error_pct`, `end_extrapolation`.
+  `max_quant_error_pct`, `end_extrapolation` (the written last value minus the original last value; the field keeps its name from
+  before the end hold: it is `0.000000` when the object is held at the end value, and negative or positive only when the new
+  object ends before the original does or the rounding moves it).
 
 Accuracy. The speed error comes only from rounding to the decimal count. The worst reported cases from the
 2026-10-17 checks are about 0.025 % for a short, low-amplitude segment at 2 decimals, and about 0.000076 % with
@@ -190,9 +236,10 @@ Accuracy. The speed error comes only from rounding to the decimal count. The wor
 
 Limits:
 
-- Verified only by the host-free tests (`tests/aup2_upconvert/test_upconvert.py`) and by the C++/Python cross-check
-  (160 of 160 outputs byte-identical). Not yet run in AviUtl2 v2.1.12. The plan is in
-  `experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md`.
+- Verified only by the host-free tests (`tests/aup2_upconvert/test_upconvert.py`, which also compare every new frame with the
+  original curve held at its ends) and by the C++/Python cross-check. Not yet run in AviUtl2 v2.1.12 (neither the hold nor the
+  extra keyframes). The plan is in `experiments/free_fps_matrix/PRECISE_TEST_PLAN.zh-CN.md`.
+- Objects of a kept scene are not processed and are not listed in `precise.skipped`.
 - Not verified in AviUtl2: whether it accepts values with more decimals than its GUI shows, and whether it rounds
   them again when the project is read.
 - Only linear moves and constant tracks become exact. Other effects keep their old values, so their speed changes as
@@ -201,13 +248,203 @@ Limits:
   64-bit exact arithmetic would overflow. The Python tool uses unbounded integers and does not. Only extreme inputs
   can differ.
 
-## Scene requirements
+## Time control (`時間制御(オブジェクト)`) and `コマ落ち`
 
-- All `[scene.N]` sections must share one `video.rate`/`video.scale`, otherwise the tool refuses.
-- `video.rate` is required. If `video.scale` is missing, the tool reads it as 1 and inserts `video.scale=st` right
-  after `video.rate`. The default of 1 is an assumption about the file format, not verified against AviUtl2. The fixtures and the
-  real-world file used here all write `video.scale`. The note `[scene.N] has no video.scale; ...` is recorded when the
-  default is used.
+A `時間制御(オブジェクト)` object sits on a lower layer number and controls the `対象レイヤー数` layers below it. Its effect
+section holds `位置=a,b,直線移動(時間制御),flag`, `繰り返し=N`, `コマ落ち=K` and `対象レイヤー数=N`. Measured in AviUtl2 v2.1.12
+(probe videos, frame by frame, error below 0.01 frame; see `docs/KNOWN_LIMITATIONS.md`):
+
+- Let the time control object have `frame=s,e` and `L = e − s + 1`. The host clamps the two **end values** of `位置` to
+  `[0, 100]` (`a_c`, `b_c`); it does not clamp frame by frame (`-50 → 100` over 30 frames behaves like `0 → 100`). For each timeline
+  frame `f` of the object, `p(f) = a_c + (b_c − a_c) × (f − s) / (L − 1)` (`p = a_c` when `L = 1`) is a percentage of the
+  object's **own** range, and the controlled layers show the timeline frame `τ(f) = s + p(f) / 100 × (L − 1)`.
+- `コマ落ち=K`: the picture updates once every `K` project frames and shows the state of the first frame of the segment:
+  at frame `f` the layers show `τ(g)` with `g = s + floor((f − s) / K) × K`. The segment origin is the start `s` of the time
+  control object (not timeline frame 0). `K = 1` is no drop.
+- `位置` can also be a `瞬間移動` track with many points (`frame=s,…,e` and `位置=v0,v1,…,vn,瞬間移動,0`): the value of point
+  `i` holds on `[p_i, p_(i+1))`, a middle point takes effect at its own frame, and **the value of the last point is never shown**: the
+  last frame shows the value of the point before it. The staircase below uses this.
+- `繰り返し` is a plain number and does not depend on the frame rate.
+- An ordinary `直線移動` track (not time control) with middle points works as usual.
+
+What the new project must do: at the new frame `n` it is the original time `f = n / k` (a fraction of a frame). The original object
+holds its last state after `e` and does not exist before `s`, so the original layers show `τ(g(f̂))` with `f̂ = min(max(f, s), e)`,
+and the new layers must show `T'(n) = k × τ(g(f̂))` new frames. With `p'(n) = 100 × (T'(n) − s') / (L' − 1)` this is `s' + p'(n) / 100 × (L' − 1)`.
+
+Rules (functions `parse_time_control_position`, `time_control_tau`, `retime_time_control`, `time_control_steps` in
+`tools/aup2_fps_upconvert.py`; they apply to objects of followed scenes only, a kept scene is copied byte for byte):
+
+- **Recognised** by `effect.name=時間制御(オブジェクト)`. Its `位置` line must be exactly two plain numbers, the mode
+  `直線移動(時間制御)` and a flag without a `|` payload, and the object must have exactly two `frame=` points (`s`, `e`).
+  Otherwise the tool refuses with `REFUSED: line N: time control 位置 must be a two-point 直線移動(時間制御) track`, `N`
+  being the `位置` line (the `effect.name` line when there is no `位置` line). The mode `直線移動(時間制御)` is accepted
+  only in the `位置` line of this effect; anywhere else it is refused by the trackbar whitelist as before.
+- **New range.** `s'`, `e'` follow the object rules above (start rounds `s × k`, end rounds `(e + 1) × k`, minus 1).
+  `L' = e' − s' + 1`.
+- **Scene with `k = 1`**: nothing is rewritten (`位置`, `コマ落ち` and the frame list stay as they are, no note).
+- **Two-point line** (when it is exact; the line keeps the `frame=s',e'` list). Used when both hold:
+  1. `K = 1`, or `K × k` and `s × k` are integers (the segments of `K' = K × k` frames then start on the same frames as the
+     original ones, counted from `s' = s × k`);
+  2. both `p'(s')` and `p'(e')` computed by the continued linear map are in `[0, 100]` (outside the host would clamp the end
+     value and bend the line):
+
+         shown(n) = k × τ_lin(n / k)     τ_lin(f) = s + p(f) / 100 × (L − 1)     (τ_lin = s when L = 1, f not held)
+         p'(s') = 100 × (shown(s') − s') / (L' − 1)        p'(e') = 100 × (shown(e') − s') / (L' − 1)
+
+     `p` here uses the clamped end values `a_c`, `b_c`. The values are rounded half away from zero to the decimal count of the
+     original line (the larger of the two values, the same `quantize` as the precise mode, without `--precise-extra-decimals`)
+     and written as `位置=p's,p'e,直線移動(時間制御),flag`. `コマ落ち=K` becomes `K × k` (`K = 1` stays). A forward block
+     `0 → 100` keeps its values (`shown(n) = n`); `-50 → 150` is written as `0 → 100`.
+  When `L' = 1` (one frame) the layers show `s'` whatever `p'` is: it is always a line, both values are written as the object's own
+  percentage at the new frame's time, `p(s' / k)`, and `コマ落ち` is `K × k` when that is an integer, else `1` (nothing to drop).
+- **Staircase** (otherwise): `位置` becomes a `瞬間移動` track with one point for every change. For each new frame
+  `n = s'..e'` the value is `p'(n)` above with `f̂` and `g` (so the held end, the clamp to `[0, 100]` and the exact
+  frame-drop segments are inside it), clamped to `[0, 100]` and rounded as above. The points are `s'`, every frame whose rounded value
+  differs from the frame before, and `e'` (when it is not one already); the value of a point is the `p'` of its frame.
+  `frame=` becomes `s',…,e'` (all the points), `位置=v0,…,vn,瞬間移動,0` (the key as in the file, flag `0`) and `コマ落ち=1` if it was
+  `K ≥ 2` (the staircase holds each segment itself). The steps of a drop start at `ceil((s + j × K) × k)`.
+  - At most **4096** points (first and last included); more is refused:
+    `REFUSED: time control at line N needs more than 4096 steps` (`N` = the `位置` line, no second `line` prefix).
+  - The frame list gets many points, so every other trackbar of the object must be constant (its value is repeated once per point,
+    with its mode and payload; `再生範囲` tracks are skipped). Otherwise:
+    `REFUSED: time control at line N: the object has other animated trackbars` (`N` = the `位置` line). This is checked before the point
+    count.
+  - The value of the last point is not shown. If `p'(e')` differs from `p'(e' − 1)` (after rounding) the last frame shows the step of
+    `e' − 1`, and the note says so.
+  - The result is not accepted as input again: its `位置` is a `瞬間移動` track, so a second conversion is refused with the
+    two-point message above.
+- **`コマ落ち`** must be a positive integer anywhere (`0`, negative numbers, decimals and the trackbar-style `a,b,mode,…` are refused
+  with `REFUSED: line N: コマ落ち=<value> (frame drop) must be a positive integer`). `K ≥ 2` outside a time control effect is refused
+  with `REFUSED: line N: コマ落ち=<value> (frame drop) is only converted inside a 時間制御(オブジェクト) effect`. In a time control effect
+  every `K` converts: a non-integer `K × k` (and a segment origin that is not on a new frame) no longer refuses, it becomes a staircase.
+  Other keys (`繰り返し`, `対象レイヤー数`) are not changed.
+- **`notes`**: one entry per time control effect whose lines were rewritten, in file order, after the
+  `object at line N shortened to 1 frame` entries and before the precise entries (`N` = the `frame=` line of the object, the
+  numbers are the text of the file and of the new line). An effect whose lines did not change gets none.
+  - line: `time control at line N: 位置 a,b -> a',b'`, plus `; コマ落ち K -> K'` when `コマ落ち` was rewritten;
+  - staircase: `time control at line N: 位置 a,b -> M steps (瞬間移動)` (`M` = the number of points), plus `; コマ落ち K -> 1` when
+    `K ≥ 2`, plus `; last frame shows the previous step` when the last frame cannot show its own value.
+- **`--precise`**: a time control effect does not take part (it is already exact) and is not listed in `precise.skipped`. An
+  object that holds a time control effect is not resampled at all (its `frame=` list must stay as it is), and is not listed.
+
+Worked examples.
+
+- 66 → 60 (`k = 10/11`), block `frame=588,599`, `位置=100.000,0.000,…`: `s' = 535`, `e' = 544`, `L' = 10`. Frame `n` (original `1.1 n`)
+  must show `11870/11 − n`, so `p'(n) = 100 × (11870/11 − n − 535) / 9` = 101.01 (clamped to 100), 89.899, 78.788, 67.677, 56.566,
+  45.455, 34.343, 23.232, 12.121, 1.010: a staircase of 10 points, `位置=100.000,89.899,…,1.010,瞬間移動,0` with `frame=535,536,…,544`
+  and the note `... -> 10 steps (瞬間移動); last frame shows the previous step`. The forward block `0 → 100` of the same project stays a
+  line (`p'(524) = 0`, `p'(534) = 100`) and is unchanged.
+- 30 → 66 (`k = 11/5`), `コマ落ち=2`, block `frame=0,9`, `0 → 100`: `K' = 4.4` is not an integer, so it is a staircase. The segments of the
+  original (frames 0, 2, 4, 6, 8) start at the new frames `ceil(4.4 j)` = 0, 5, 9, 14, 18: `frame=0,5,9,14,18,21`,
+  `位置=0.000,20.952,41.905,62.857,83.810,83.810,瞬間移動,0`, `コマ落ち=1`.
+- 30 → 60, `コマ落ち=2`, `0 → 100`: a line (`K' = 4`, `s × k = 0`), `コマ落ち=4`.
+
+Error bounds. At every new frame the controlled layers show the original content time of the same moment, up to
+the rounding of `位置` (half a unit of the last decimal, scaled by `(L' − 1) / 100` new frames; the staircase rounds each step
+itself). Exceptions, all at the first or last frames of a block (the largest values seen in the test sweep are given):
+
+- Staircase: the last frame shows the previous step when the note says so (the host never shows the last point). The deviation
+  is at most one step; with a drop a step is a whole segment of `K × k` new frames (3.6 new frames for `K = 4` at 66 → 60).
+- Staircase: `s'` and `e'` are rounded, so the wanted time of the first or last frame can lie a little outside `s'..e'`; the clamp
+  to `[0, 100]` then gives the first or last frame (at most one new frame in the sweep).
+- Line: a frame whose original time lies outside the original block (`n / k` past `e` or before `s`) follows the line instead of
+  holding. Only the first and last frames are concerned (as many as `k` rounded up at the end); at the last frame the deviation is
+  at most `k − 1/2` new frames (2.0 for 24 → 60; for `k = 2` the last frame of a forward block shows its own last frame, `e'`,
+  where the original holds `2 e`). It does not show in a controlled track that holds its end value (a `--precise` conversion),
+  only in content that moves with time (video).
+- Whole-frame keyframes: a controlled layer's own track, shown at a fractional frame (reversed blocks and drops when `k` is not an
+  integer), is linear between whole-frame keyframes. In the segment before an end hold (`m..m + 1` above) the original reaches its
+  end value at `e × k`, the new track at `m + 1`, so the value is off inside that one segment (about 9 px of a 1200 px move in a 66 → 60 block of
+  the test suite).
+
+Verified by the host-free tests with a model of the measurements above (`host_tau`, `host_display` in
+`tests/aup2_upconvert/test_upconvert.py`): 63 136 frames of 1 920 blocks (10 rate pairs × 8 `位置` × 6 frame ranges × 4 drops), the
+layers below circle blocks, and the P6 probe at 66 → 132 (`test_kit/5_抽帧探针`). Not yet run in AviUtl2: the converted files
+themselves. The measured pieces are the clamp of the end values, the segment origin of `コマ落ち`, and the `瞬間移動` track with
+its unseen last point (`docs/KNOWN_LIMITATIONS.md`). `繰り返し` is only copied.
+
+## Easing tracks (`イージング（通常）@イージング`)
+
+The mode `イージング（通常）@イージング` (a script-defined move mode, for example
+`X=-1917.00,0.00,イージング（通常）@イージング,0|27`) is on the whitelist. Evidence: the script
+`C:\ProgramData\aviutl2\Script\@イージング.tra` (lines 1-9) computes the value only from the fractional part of
+`obj.getpoint("index")` (the progress inside the object), the easing parameter and the two end values. It does not read the
+frame number, the frame rate or the time. So it is handled like `直線移動`: the object's `frame=` points are rescaled by the
+object rules (a multi-point object by the multi-point rule), and the values are kept. The end point is approximated in
+the same way as for `直線移動` (see "Motion endpoints").
+
+- The part after `|` (for example `27`, the easing parameter) is kept byte for byte, with any content. In every other mode a
+  `|` payload is still refused (`trackbar '|' payload '27' is not on the whitelist`).
+- The value count must still match the frame-point count (`trackbar has N values but object [M] has K frame points`).
+- `イージング（補間移動）@イージング` is not on the whitelist: it reads `obj.getpoint("time")`, which has not been verified, so
+  it is refused as `trackbar mode 'イージング（補間移動）@イージング' is not on the whitelist`.
+- `--precise` does not re-sample these tracks. The existing skip texts apply: a track with a `|` payload gives
+  `trackbar at line N has a '|' payload` (the payload check comes first, also for constant values), a track without payload
+  and with changing values gives `trackbar at line N uses mode イージング（通常）@イージング with parameter P and changing
+  values; only 直線移動,0 or constant values can be resampled exactly`. The object is listed in `precise.skipped` and keeps
+  its values. A constant easing track without payload is eligible like any constant track and stays constant.
+- The order of the checks is unchanged: mode whitelist, then payload, then value count.
+
+## Scenes and sub-scenes
+
+Every `[scene.N]` section has its own `video.rate`/`video.scale`. An object belongs to the scene named by its
+`scene=` line, else to the `[scene.N]` section above it. A scene object (`effect.name=シーン`, parameters
+`再生位置=0.000,5.000,再生範囲,0`, `再生速度=100.00`, `シーン=1`, `ループ再生=0`) in the main scene plays a sub-scene by time:
+its parameters are in seconds and a percentage, do not depend on the frame rate, and are never rewritten.
+
+**Exported scene.** It is the scene named by `[project] display.scene=` (0 when the line is absent). In `--factor` mode
+the target rate is the rate of that scene times `K`. The exported scene always follows the target rate. If the scene does
+not exist the tool refuses with `display.scene N does not exist` (no line number); a `display.scene` value that is not a
+non-negative integer is refused with its line.
+
+**Policy `--subscene-rate`** (default `auto`) for the other scenes `i`, with `R_i` the rate of scene `i` and `R_E` the rate
+of the exported scene:
+
+| Policy | Scene `i` |
+|---|---|
+| `auto` | follows when `R_i >= R_E` (exact comparison of the fractions), else is kept (a slower sub-scene is taken as a deliberate frame drop) |
+| `follow` | always follows |
+| `keep` | always kept |
+
+- A scene that follows is converted like a single-scene project, but with its own ratio `k_i = Rt / R_i`: its
+  `video.rate`/`video.scale` are written as the target rate (the same `rt`/`st` as for the exported scene), its
+  `cursor.frame`, `preview.frame` and `display.frame`, the `frame=` of its objects, the touching and overlap checks, and
+  the `--precise` re-sampling all use `k_i`.
+- A scene that is kept stays at its own rate. The scene section, its objects and their effects are copied byte-for-byte.
+  They are also not inspected: the refusals for scripts, trackbars, counters, `コマ落ち` and frame lists, the touching
+  and overlap checks, and `--precise` skip them. (Scene keys and `video.rate`/`video.scale` of every scene are still read
+  and checked, because the policy needs the rates.) Kept objects are not in `timing.objects` and not in the maximum
+  errors, because their error is 0 by construction.
+- When every scene has the same rate and the policy is `auto`, every scene follows and the output `.aup2` is byte-identical
+  to the output of the version without this option. Only the sidecar has new keys.
+- An object whose scene has no `[scene.N]` section is converted with the exported scene's `k`.
+- A kept scene and the exported scene may now have different rates in one output. Whether AviUtl2 renders a sub-scene at
+  its own rate when it is played by a scene object in a main scene at another rate is a property of the host, not
+  checked by this tool.
+
+Sidecar (`.convert.json`), right after `k`:
+
+```
+"subscene_rate": "auto",
+"scenes": [
+  {"scene": 0, "name": "Main", "source_rate": "30/1", "target_rate": "60/1", "k": "2/1", "policy": "follow", "exported": true},
+  {"scene": 1, "name": "Sub",  "source_rate": "15/1", "target_rate": "15/1", "k": "1/1", "policy": "keep",   "exported": false}
+]
+```
+
+- `scenes` has one entry per scene in ascending scene number (the order of the sections in a file written by AviUtl2).
+  `name` is the value of the first `name=` line of the scene, or an empty string. For a kept scene `target_rate` equals
+  `source_rate` and `k` is `1/1`.
+- Top-level `source_rate` and `k` are those of the exported scene.
+- For every kept scene `notes` gets `scene N kept at its own rate R` (`R` as `n/d`, for example `15/1`), in the scene
+  order. The note `[scene.N] has no video.scale; ...` is only written for followed scenes.
+
+Scene requirements:
+
+- `video.rate` is required in every scene. If `video.scale` is missing, the tool reads it as 1; for a followed scene it
+  inserts `video.scale=st` right after `video.rate`. The default of 1 is an assumption about the file format, not
+  verified against AviUtl2. The fixtures and the real-world file used here all write `video.scale`. The note
+  `[scene.N] has no video.scale; ...` is recorded when the default is used for a followed scene.
 
 ## Script in effects
 
@@ -236,19 +473,39 @@ Time-based uses (`obj.time`, `obj.totaltime`, `obj.getvalue`) are not markers an
 - Both `--factor` and `--target-fps`, or neither (argparse, exit 2).
 - `--factor` below 2, and `--target-fps` that is a decimal (such as `59.94`), zero, negative, or not `n` or `n/d`.
 - A `[scene.N]` key that is not on the known list and whose name contains `frame`, `mark`, or `range`.
-- A scene without `video.rate`, or scenes whose `video.rate`/`video.scale` differ.
+- A scene without `video.rate`.
+- A `[project] display.scene` that is not a non-negative integer, or that names a scene that does not exist.
 - A counter (`effect.name=カウンター`) with no `速度=` line, or with a `速度=` value that is not a plain number
   (`-?\d+(\.\d+)?`).
 - A frame-dependent script marker in an effect value (see above), unless `--allow-frame-scripts` is given.
-- A line `コマ落ち=1`.
-- A trackbar whose move mode is not on the whitelist (`直線移動`, `補間移動`, `瞬間移動`, `移動無し`, `回転`, `再生範囲`), or
-  that has a `|` payload (none are whitelisted, because the meaning is undocumented).
+- A line `コマ落ち=<value>` that is not a positive integer, for example `コマ落ち=0`, `コマ落ち=1.5`, `コマ落ち=-1` or
+  `コマ落ち=0,10,直線移動,0`: `REFUSED: line N: コマ落ち=<value> (frame drop) must be a positive integer`. `1` (no drop) is
+  kept; `K ≥ 2` is converted only in a `時間制御(オブジェクト)` effect (see "Time control"); elsewhere it is refused with
+  `... is only converted inside a 時間制御(オブジェクト) effect`.
+- A `時間制御(オブジェクト)` effect whose `位置` is not exactly two numbers with `直線移動(時間制御)` and no `|` payload, or
+  whose object does not have exactly two `frame=` points
+  (`time control 位置 must be a two-point 直線移動(時間制御) track`).
+- A time control staircase that needs more than 4096 points (`REFUSED: time control at line N needs more than 4096 steps`), or
+  whose object has another trackbar with changing values
+  (`REFUSED: time control at line N: the object has other animated trackbars`). `N` is the `位置` line. See "Time control". The old
+  refusal `コマ落ち=K cannot be kept exact at the target rate` is gone: such a block becomes a staircase.
+- A trackbar whose move mode is not on the whitelist (`直線移動`, `補間移動`, `瞬間移動`, `移動無し`, `回転`, `再生範囲`,
+  `イージング（通常）@イージング`), or that has a `|` payload in any mode but `イージング（通常）@イージング` (the meaning of
+  the payload is undocumented, so only that mode keeps it). `直線移動(時間制御)` is not on the whitelist; it is accepted only
+  as the `位置` of a `時間制御(オブジェクト)` effect, which has its own rules. `イージング（補間移動）@イージング` is refused
+  (its script reads `obj.getpoint("time")`; not verified).
 - A trackbar whose value count differs from its object's frame-point count (`再生範囲` is exempt).
 - Frame lists that are non-integer, have fewer than 2 values, have a duplicate `frame=`, or are not strictly increasing.
 - A multi-point frame list whose points collide or stop increasing after rescaling (for example `0,1,2,599` at 120 → 24
   FPS). The line is reported; points are never merged, so trackbar value counts keep matching.
 - A shortened object that breaks touching or overlap with a neighbour on the same layer (see Object rules).
 - Input that is not valid UTF-8.
+
+The refusals about counters, scripts, `コマ落ち`, `時間制御(オブジェクト)`, trackbars, frame list values and the touching and
+overlap checks apply to the objects and effects of followed scenes only (`コマ落ち` also to lines outside any object or
+effect, except in a kept scene's own section); the content of a kept scene is not inspected, so its time control effects
+are copied byte for byte. The refusals about `video.rate`/`video.scale`,
+unknown scene keys, a duplicate `frame=` and a non-integer `scene=` apply to every scene.
 
 The whitelists and deny-lists are the constants at the top of `tools/aup2_fps_upconvert.py`.
 
@@ -294,7 +551,13 @@ powershell -File tests/aup2_upconvert/run_long.ps1
 
 `tests/aup2_upconvert/test_upconvert.py` runs with plain `python -I`, prints PASS or FAIL per test, and exits
 non-zero on failure. Its temporary files go to `$AUP2_TEST_TMP` when set, or to a fresh system temp directory otherwise.
-It includes the `--precise` property checks and the worked-example end values.
+It includes the `--precise` property checks and the worked-example end values, the end hold frame by frame (30 → 60, 66, 60000/1001,
+66 → 132, 10 → 9, the start hold 25 → 37, multi-point objects), the time control values (hand-computed lines and staircases with
+`コマ落ち` for 30 → 60, 30 → 66, 30 → 45, 30 → 10, 66 → 60 and 30 → 90, `fixtures/time_control_66.aup2`), a host model of the measurements
+(`host_tau`, `host_display`) that compares every new frame with the original at the same moment (10 rate pairs × 8 `位置` × 6 frame
+ranges × 4 drops, circle blocks with `--precise`, the P6 probe `test_kit/5_抽帧探针/P6_66fps_ARZ式12帧交替_rep1.aup2` at 66 → 132 when
+present), their refusals (4096 points, other animated trackbars), and a check that projects without a time control effect, and
+`--precise` outputs that need no hold, produce the same bytes as the previous version (`UNCHANGED_GOLDEN`).
 `run_long.ps1` runs `tests/aup2_upconvert/test_long_duration.py` (30 and 60 minute synthetic projects, 108 cases of
 30/60 minutes × 6 source rates × 9 targets). It checks boundary error, drift, total duration and audio/picture start
 frames.
