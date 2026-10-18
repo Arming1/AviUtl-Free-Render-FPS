@@ -24,8 +24,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     env:
-      UNIT_LOG: ${{ runner.temp }}\upconvert_unit.log
-      LONG_LOG: ${{ runner.temp }}\long_duration.log
+      UNIT_LOG: ${{ github.workspace }}\upconvert_unit.log
+      LONG_LOG: ${{ github.workspace }}\long_duration.log
     steps:
       - name: run info (job summary header)
         shell: pwsh
@@ -113,7 +113,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     env:
-      CPP_LOG: ${{ runner.temp }}\free_fps_export.log
+      CPP_LOG: ${{ github.workspace }}\free_fps_export.log
     steps:
       - name: run info (job summary header)
         shell: pwsh
