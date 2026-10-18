@@ -1,4 +1,4 @@
-# Free FPS Export retime rules (v1.3.0)
+# Free FPS Export retime rules (v1.3.1)
 
 One table of what the retimer does with each object, track and scene. `k` is the rate of the object's scene times
 ratio: `k = Rt / Rp`. `Rp` is the source rate, `Rt` the target rate. "Precise" means `--precise` (on in the plugin).

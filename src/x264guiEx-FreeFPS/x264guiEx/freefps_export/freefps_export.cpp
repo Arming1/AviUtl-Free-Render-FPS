@@ -27,6 +27,13 @@
 //   9. Delete the temp folder. FREE_FPS_EXPORT_KEEP_TEMP=1 keeps it for debugging. The debug ini (keep_temp=1) keeps
 //      retimed.aup2 and its sidecar only.
 //
+// Separate-process mode (dialog check box; default on when the saved project uses SceneMotionBlur_K, whose
+// unload crashes AviUtl2 when the project is switched). The running host never switches project. Steps 1 to 5 are the
+// same, then: the plugin writes job.ini beside retimed.aup2 and starts a second aviutl2.exe (this host's own exe) with
+// the environment variable FREE_FPS_EXPORT_JOB=<job.ini>. In that process this DLL opens retimed.aup2, runs
+// output_file, writes result.ini and ends the process. The first host only polls the process handle, reads
+// result.ini, checks the output file again, and shows the result. The original project is neither closed nor reopened.
+//
 // Threading: as in experiments/auto_export. SDK calls run on the main thread (menu callback and timer). The
 // CHANGE_EDIT_STATE listener only sets an atomic flag. The project load and save handlers only store the path.
 //
@@ -60,6 +67,7 @@
 #pragma comment(lib, "comdlg32.lib")   // GetSaveFileNameW
 
 std::atomic<bool> g_freefps_menu_export_active{false};  // see freefps_export.h
+std::atomic<bool> g_freefps_child_process{false};       // see freefps_export.h
 
 namespace {
 
@@ -73,6 +81,8 @@ struct Timing {
     ULONGLONG load_timeout_ms = 30000;          // project load callback after open_project_file
     ULONGLONG export_start_timeout_ms = 30000;  // CHANGE_EDIT_STATE(SAVE) after output_file
     ULONGLONG export_timeout_ms = 3600000;      // whole export
+    ULONGLONG child_start_timeout_ms = 90000;   // second host: startup until the export timer first runs
+    ULONGLONG child_grace_ms = 120000;          // first host: extra wait for the second host (startup + report)
 };
 
 Timing g_timing;
@@ -84,6 +94,12 @@ constexpr wchar_t kKeepTempEnv[] = L"FREE_FPS_EXPORT_KEEP_TEMP";
 constexpr wchar_t kSrcName[] = L"src.aup2";
 constexpr wchar_t kRetimedName[] = L"retimed.aup2";
 constexpr wchar_t kSidecarName[] = L".convert.json";
+constexpr wchar_t kJobName[] = L"job.ini";
+constexpr wchar_t kResultName[] = L"result.ini";
+constexpr wchar_t kJobEnv[] = L"FREE_FPS_EXPORT_JOB";
+constexpr wchar_t kJobSection[] = L"job";
+constexpr wchar_t kResultSection[] = L"result";
+constexpr char kSceneMotionBlurMarker[] = "effect.name=SceneMotionBlur_K";
 // FAT volumes store write times with 2 s resolution. The export must have written the file at or after
 // start minus this slack.
 constexpr LONGLONG kWriteTimeSlack100ns = 20000000LL;
@@ -103,6 +119,8 @@ constexpr int kIdEncSettings = 108;
 constexpr int kIdSubsceneLabel = 109;
 constexpr int kIdSubsceneCombo = 110;
 constexpr int kIdScenePlan = 111;
+constexpr int kIdSeparate = 112;
+constexpr int kIdSeparateHint = 113;
 
 // Dialog metrics in dialog units. The content width is kBaseContentWidth, or wider when a text needs it (layout_dialog).
 constexpr int kMargin = 7;
@@ -305,6 +323,8 @@ void remove_work_dir(const std::wstring& dir, bool keep_outputs) {
     if (!keep_outputs) {
         names.push_back(kRetimedName);
         names.push_back(std::wstring(kRetimedName) + kSidecarName);
+        names.push_back(kJobName);
+        names.push_back(kResultName);
     }
     for (const std::wstring& name : names) {
         if (!DeleteFileW((dir + name).c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND) {
@@ -358,12 +378,16 @@ struct ExportRequest {
     free_fps::SubsceneRatePolicy policy = free_fps::SubsceneRatePolicy::Auto;
     std::size_t extra_decimals = 0;  // precise mode only; 0 outside debug mode
     bool keep_outputs = false;       // debug keep_temp: keep retimed.aup2 and its sidecar
+    bool separate_process = false;   // export in a second host process, no project switch in this one
     std::wstring output;
     std::wstring plugin;
     std::wstring original;  // the project file path, set by begin_export()
 };
 
-enum class Phase { kWaitReady, kSave, kOpen, kWaitLoad, kStart, kWaitExport, kRestore, kWaitRestoreLoad, kDone };
+enum class Phase {
+    kWaitReady, kSave, kOpen, kWaitLoad, kStart, kWaitExport, kRestore, kWaitRestoreLoad, kDone,
+    kSpawn, kWaitChild  // separate-process mode only
+};
 
 struct Run {
     ExportRequest request;
@@ -371,6 +395,10 @@ struct Run {
     std::wstring src_path;
     std::wstring retimed_path;
     std::wstring json_path;
+    std::wstring job_path;     // separate-process mode: job.ini and result.ini in work_dir
+    std::wstring result_path;
+    HANDLE child = nullptr;    // separate-process mode: the second host process
+    std::wstring child_encoder;  // encoder summary the second host reported
     Phase phase = Phase::kWaitReady;
     ULONGLONG phase_started = 0;
     unsigned load_seq_before = 0;
@@ -390,17 +418,143 @@ void enter(Run& run, Phase phase) {
     run.phase_started = GetTickCount64();
 }
 
-// Records the first failure. The original project is reopened afterwards, on every outcome once confirmed.
+// Records the first failure. The original project is reopened afterwards, on every outcome once confirmed. In
+// separate-process mode this host never switched project, so there is nothing to reopen.
 void fail(Run& run, const std::wstring& reason) {
     if (run.failure.empty()) {
         run.failure = reason;
     }
     log(true, reason);
-    enter(run, Phase::kRestore);
+    enter(run, run.request.separate_process ? Phase::kDone : Phase::kRestore);
 }
 
 std::wstring rate_label(const Rational& r) {
     return std::to_wstring(r.num) + L"/" + std::to_wstring(r.den);
+}
+
+// ---- job.ini and result.ini (separate-process mode) ----
+// Both are UTF-16 ini files: created with a BOM so that Get/WritePrivateProfileStringW keep non-ANSI path characters.
+
+bool create_unicode_ini(const std::wstring& path) {
+    return write_file_bytes(path, std::string("\xFF\xFE", 2));
+}
+
+bool ini_put(const std::wstring& file, const wchar_t* section, const wchar_t* key, const std::wstring& value) {
+    std::wstring flat = value;
+    std::replace(flat.begin(), flat.end(), L'\r', L' ');
+    std::replace(flat.begin(), flat.end(), L'\n', L' ');
+    return WritePrivateProfileStringW(section, key, flat.c_str(), file.c_str()) != FALSE;
+}
+
+std::wstring ini_get(const std::wstring& file, const wchar_t* section, const wchar_t* key) {
+    std::vector<wchar_t> buffer(8192, L'\0');
+    GetPrivateProfileStringW(section, key, L"", buffer.data(), static_cast<DWORD>(buffer.size()), file.c_str());
+    return std::wstring(buffer.data());
+}
+
+// True if the project text has an effect named SceneMotionBlur_K (the whole name, not a longer one).
+bool uses_scene_motion_blur(const std::string& bytes) {
+    const std::string marker = kSceneMotionBlurMarker;
+    for (std::size_t at = bytes.find(marker); at != std::string::npos; at = bytes.find(marker, at + 1)) {
+        const std::size_t end = at + marker.size();
+        if (end >= bytes.size() || bytes[end] == '\r' || bytes[end] == '\n') {
+            return true;
+        }
+    }
+    return false;
+}
+
+// This process's environment plus FREE_FPS_EXPORT_JOB=<job>, as a double-NUL terminated block for CreateProcessW.
+std::vector<wchar_t> make_child_environment(const std::wstring& job_path) {
+    std::vector<wchar_t> block;
+    wchar_t* env = GetEnvironmentStringsW();
+    if (env == nullptr) {
+        return block;
+    }
+    const std::size_t key_length = wcslen(kJobEnv);
+    for (const wchar_t* entry = env; *entry != L'\0';) {
+        const std::size_t length = wcslen(entry);
+        const bool stale = length > key_length && _wcsnicmp(entry, kJobEnv, key_length) == 0 && entry[key_length] == L'=';
+        if (!stale) {
+            block.insert(block.end(), entry, entry + length + 1);
+        }
+        entry += length + 1;
+    }
+    FreeEnvironmentStringsW(env);
+    const std::wstring added = std::wstring(kJobEnv) + L"=" + job_path;
+    block.insert(block.end(), added.c_str(), added.c_str() + added.size() + 1);
+    block.push_back(L'\0');
+    return block;
+}
+
+// Starts the host's own exe (GetModuleFileNameW(nullptr)) with the job in the environment. Sets run.child.
+bool spawn_child(Run& run, std::wstring& why) {
+    std::vector<wchar_t> module(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, module.data(), static_cast<DWORD>(module.size()));
+    if (length == 0 || length >= module.size()) {
+        why = L"cannot find the host executable";
+        return false;
+    }
+    const std::wstring exe(module.data(), length);
+    std::wstring command_line = L"\"" + exe + L"\"";
+    std::vector<wchar_t> command(command_line.begin(), command_line.end());
+    command.push_back(L'\0');
+    std::vector<wchar_t> environment = make_child_environment(run.job_path);
+    if (environment.empty()) {
+        why = L"cannot build the environment for the export process";
+        return false;
+    }
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION info{};
+    if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_UNICODE_ENVIRONMENT,
+                        environment.data(), nullptr, &startup, &info)) {
+        why = L"cannot start the export process (error " + std::to_wstring(GetLastError()) + L"): " + exe;
+        return false;
+    }
+    CloseHandle(info.hThread);
+    run.child = info.hProcess;
+    log(false, L"export process started: " + exe);
+    return true;
+}
+
+// Ends the second host if it still runs, and closes the handle.
+void release_child(Run& run) {
+    if (run.child == nullptr) {
+        return;
+    }
+    if (WaitForSingleObject(run.child, 0) == WAIT_TIMEOUT) {
+        TerminateProcess(run.child, 1);
+        WaitForSingleObject(run.child, 5000);  // let it release its files
+    }
+    CloseHandle(run.child);
+    run.child = nullptr;
+}
+
+// The second host has ended: read result.ini and check the output file again.
+void collect_child_result(Run& run, DWORD exit_code) {
+    const bool has_result = file_exists(run.result_path);
+    const std::wstring reported_ok = ini_get(run.result_path, kResultSection, L"ok");
+    const std::wstring error = ini_get(run.result_path, kResultSection, L"error");
+    run.child_encoder = ini_get(run.result_path, kResultSection, L"encoder");
+    if (reported_ok == L"1") {
+        std::wstring why;
+        if (output_written(run.request.output, run.export_since, run.output_bytes, why)) {
+            run.export_ok = true;
+            log(false, L"export OK (separate process): " + run.request.output);
+        } else {
+            run.failure = L"the export process reported success, but " + why;
+            log(true, run.failure);
+        }
+        return;
+    }
+    if (!has_result) {
+        run.failure = L"the export process ended (exit code " + std::to_wstring(exit_code) +
+                      L") without writing a result";
+    } else {
+        run.failure = L"the export process failed: " + (error.empty() ? std::wstring(L"(no reason given)") : error);
+    }
+    log(true, run.failure);
 }
 
 void finish_run() {
@@ -417,12 +571,19 @@ void finish_run() {
     if (ok) {
         text = L"Export finished.\nOutput: " + run->request.output + L"\nSize: " +
                std::to_wstring(run->output_bytes) + L" bytes\nRate: " + run->rate_text;
+        if (run->request.separate_process) {
+            text += L"\nExported in a separate process.";
+            if (!run->child_encoder.empty()) {
+                text += L"\nEncoder: " + run->child_encoder;
+            }
+        }
     } else {
         text = L"Export failed.\n" + run->failure;
     }
     if (!run->restore_note.empty()) {
         text += L"\n\n" + run->restore_note;
     }
+    release_child(*run);  // the temp files below are deleted only once the second host no longer holds them
     const bool keep = keep_temp_requested();
     if (keep) {
         text += L"\n\nTemp files kept (" + std::wstring(kKeepTempEnv) + L"=1): " + run->work_dir;
@@ -489,7 +650,7 @@ void tick(Run& run) {
             return;
         }
         log(false, L"retimed to " + run.rate_text + L": " + run.retimed_path);
-        enter(run, Phase::kOpen);
+        enter(run, run.request.separate_process ? Phase::kSpawn : Phase::kOpen);
         return;
     }
 
@@ -588,6 +749,43 @@ void tick(Run& run) {
         }
         return;
 
+    case Phase::kSpawn: {
+        // The job: everything the second host needs. The encoder settings travel inside retimed.aup2
+        // (freerenderfps_config=, kept by retime()), not here.
+        std::wstring why;
+        if (!create_unicode_ini(run.job_path) ||
+            !ini_put(run.job_path, kJobSection, L"retimed", run.retimed_path) ||
+            !ini_put(run.job_path, kJobSection, L"output", run.request.output) ||
+            !ini_put(run.job_path, kJobSection, L"plugin", run.request.plugin) ||
+            !ini_put(run.job_path, kJobSection, L"original", original) ||
+            !ini_put(run.job_path, kJobSection, L"rate", run.rate_text) ||
+            !ini_put(run.job_path, kJobSection, L"timeout_ms", std::to_wstring(g_timing.export_timeout_ms))) {
+            fail(run, L"cannot write " + run.job_path);
+            return;
+        }
+        DeleteFileW(run.result_path.c_str());
+        GetSystemTimeAsFileTime(&run.export_since);
+        if (!spawn_child(run, why)) {
+            fail(run, why);
+            return;
+        }
+        enter(run, Phase::kWaitChild);
+        return;
+    }
+
+    case Phase::kWaitChild:
+        if (WaitForSingleObject(run.child, 0) == WAIT_OBJECT_0) {
+            DWORD exit_code = 0;
+            GetExitCodeProcess(run.child, &exit_code);
+            collect_child_result(run, exit_code);
+            enter(run, Phase::kDone);
+        } else if (waited > g_timing.export_timeout_ms + g_timing.child_grace_ms) {
+            run.failure = L"the export process timed out";  // release_child() in finish_run() ends it
+            log(true, run.failure);
+            enter(run, Phase::kDone);
+        }
+        return;
+
     case Phase::kDone:
         run.done = true;
         return;
@@ -620,6 +818,8 @@ bool start_export(const ExportRequest& request, const std::wstring& work_dir) {
     run->src_path = work_dir + kSrcName;
     run->retimed_path = work_dir + kRetimedName;
     run->json_path = run->retimed_path + kSidecarName;
+    run->job_path = work_dir + kJobName;
+    run->result_path = work_dir + kResultName;
     run->rate_text = rate_label(request.target);
     if (SetTimer(nullptr, kTimerId, g_timing.tick_ms, on_timer) == 0) {
         log(true, L"cannot start the export timer");
@@ -658,6 +858,217 @@ bool begin_export(ExportRequest request) {
 }
 
 // ---------------------------------------------------------------------------
+// Second host process (FREE_FPS_EXPORT_JOB set): open retimed.aup2, export, write result.ini, end the process.
+// ---------------------------------------------------------------------------
+// Started from the first project load callback (see on_project_load): the host has finished its own start-up by then,
+// and the timer is created on the thread that runs the host's message loop for project events. RegisterPlugin only
+// records the job and starts a watchdog thread that ends the process with an error if the timer never runs, or the
+// export takes too long. The process ends with TerminateProcess on itself, so no plugin (SceneMotionBlur_K) runs its
+// unload code, and nothing is written to the user's host settings.
+
+struct ChildJob {
+    bool active = false;
+    std::wstring job_path;
+    std::wstring result_path;
+    std::wstring retimed;
+    std::wstring output;
+    std::wstring plugin;
+    ULONGLONG timeout_ms = 3600000;
+};
+
+enum class ChildPhase { kWaitReady, kOpen, kWaitLoad, kStart, kWaitExport };
+
+ChildJob g_child_job;
+ChildPhase g_child_phase = ChildPhase::kWaitReady;
+ULONGLONG g_child_phase_started = 0;
+unsigned g_child_load_seq_before = 0;
+FILETIME g_child_export_since{};
+std::wstring g_child_encoder;
+std::atomic<bool> g_child_timer_started{false};
+std::atomic<bool> g_child_ticked{false};
+std::atomic<bool> g_child_result_written{false};
+
+// Writes result.ini (once) and ends the process. Whoever gets here first writes; a second caller waits to be ended.
+void child_finish(bool ok, const std::wstring& error, long long bytes) {
+    if (g_child_result_written.exchange(true)) {
+        Sleep(INFINITE);
+    }
+    const std::wstring& path = g_child_job.result_path;
+    create_unicode_ini(path);
+    ini_put(path, kResultSection, L"ok", ok ? L"1" : L"0");
+    ini_put(path, kResultSection, L"output", g_child_job.output);
+    ini_put(path, kResultSection, L"bytes", std::to_wstring(bytes));
+    ini_put(path, kResultSection, L"encoder", g_child_encoder);
+    ini_put(path, kResultSection, L"error", error);
+    log(!ok, std::wstring(L"export process finished: ") + (ok ? L"OK" : L"FAILED " + error));
+    TerminateProcess(GetCurrentProcess(), ok ? 0 : 1);
+    Sleep(INFINITE);
+}
+
+void child_fail(const std::wstring& reason) {
+    child_finish(false, reason, -1);
+}
+
+void child_enter(ChildPhase phase) {
+    g_child_phase = phase;
+    g_child_phase_started = GetTickCount64();
+}
+
+void child_tick() {
+    g_child_ticked = true;
+    const ULONGLONG waited = GetTickCount64() - g_child_phase_started;
+    const int state = g_edit->get_edit_state();
+
+    switch (g_child_phase) {
+    case ChildPhase::kWaitReady:
+        if (state == kStateEdit) {
+            child_enter(ChildPhase::kOpen);
+        } else if (waited > g_timing.ready_timeout_ms) {
+            child_fail(L"the host did not return to the edit state before the export");
+        }
+        return;
+
+    case ChildPhase::kOpen:
+        g_child_load_seq_before = g_load_seq.load();
+        if (!g_edit->open_project_file(g_child_job.retimed.c_str(), false)) {
+            child_fail(L"open_project_file returned false");
+        }
+        child_enter(ChildPhase::kWaitLoad);
+        return;
+
+    case ChildPhase::kWaitLoad:
+        if (g_load_seq.load() != g_child_load_seq_before) {
+            std::wstring loaded;
+            {
+                std::lock_guard<std::mutex> lock(g_path_mutex);
+                loaded = g_loaded_path;
+            }
+            if (_wcsicmp(loaded.c_str(), g_child_job.retimed.c_str()) != 0) {
+                child_fail(L"the loaded project differs from the retimed copy: " + loaded);
+            }
+            child_enter(ChildPhase::kStart);
+        } else if (waited > g_timing.load_timeout_ms) {
+            child_fail(L"the project load callback was not observed");
+        }
+        return;
+
+    case ChildPhase::kStart: {
+        wchar_t summary[512] = {};
+        freefps_get_encoder_summary(summary, sizeof(summary) / sizeof(summary[0]), g_child_job.output.c_str());
+        g_child_encoder = summary;
+        log(false, L"export process encoder: " + g_child_encoder);
+        g_save_seen = false;
+        GetSystemTimeAsFileTime(&g_child_export_since);
+        g_freefps_menu_export_active = true;  // the project is already re-timed: the built-in FreeRenderFPS stays off
+        if (!g_edit->output_file(g_child_job.output.c_str(), g_child_job.plugin.c_str(), nullptr, nullptr)) {
+            child_fail(L"output_file returned false");
+        }
+        child_enter(ChildPhase::kWaitExport);
+        return;
+    }
+
+    case ChildPhase::kWaitExport:
+        if (state == kStateSave) {
+            g_save_seen = true;
+        }
+        if (g_save_seen && state == kStateEdit) {
+            std::wstring why;
+            long long bytes = -1;
+            if (output_written(g_child_job.output, g_child_export_since, bytes, why)) {
+                child_finish(true, std::wstring(), bytes);
+            }
+            child_fail(why);
+        } else if (!g_save_seen && waited > g_timing.export_start_timeout_ms) {
+            child_fail(L"the export start (CHANGE_EDIT_STATE) was not observed");
+        } else if (waited > g_timing.export_timeout_ms) {
+            child_fail(L"the export timed out");
+        }
+        return;
+    }
+}
+
+void CALLBACK on_child_timer(HWND, UINT, UINT_PTR, DWORD) {
+    child_tick();
+}
+
+// Called by the project load callback; only the first call starts the timer.
+void child_start_timer_once() {
+    if (!g_child_job.active || g_child_timer_started.exchange(true)) {
+        return;
+    }
+    child_enter(ChildPhase::kWaitReady);
+    // With a null window the timer id passed in is ignored; the id is never needed, as the process ends itself.
+    if (SetTimer(nullptr, 0, g_timing.tick_ms, on_child_timer) == 0) {
+        child_fail(L"cannot start the export timer");
+    }
+    log(false, L"export process: timer started");
+}
+
+DWORD WINAPI child_watchdog(LPVOID) {
+    const ULONGLONG begin = GetTickCount64();
+    for (;;) {
+        Sleep(500);
+        const ULONGLONG waited = GetTickCount64() - begin;
+        if (!g_child_ticked.load() && waited > g_timing.child_start_timeout_ms) {
+            child_fail(g_child_timer_started.load()
+                           ? L"the export timer never ran (the project load callback is not on the message loop thread)"
+                           : L"the host never called the project load callback, so the export could not start");
+        }
+        if (waited > g_child_job.timeout_ms + g_timing.child_start_timeout_ms) {
+            child_fail(L"the export process timed out");
+        }
+    }
+}
+
+// Reads FREE_FPS_EXPORT_JOB and job.ini. Runs first in RegisterPlugin, because x264guiEx.cpp reads
+// g_freefps_child_process while it prepares the output plugin. A variable that does not name an existing file is
+// ignored (an ordinary start).
+void detect_child_job() {
+    std::vector<wchar_t> value(32768, L'\0');
+    const DWORD length = GetEnvironmentVariableW(kJobEnv, value.data(), static_cast<DWORD>(value.size()));
+    if (length == 0 || length >= value.size()) {
+        return;
+    }
+    const std::wstring job_path(value.data(), length);
+    if (!file_exists(job_path)) {
+        return;
+    }
+    const std::size_t slash = job_path.find_last_of(L'\\');
+    ChildJob job;
+    job.active = true;
+    job.job_path = job_path;
+    job.result_path = (slash == std::wstring::npos ? std::wstring() : job_path.substr(0, slash + 1)) + kResultName;
+    job.retimed = ini_get(job_path, kJobSection, L"retimed");
+    job.output = ini_get(job_path, kJobSection, L"output");
+    job.plugin = ini_get(job_path, kJobSection, L"plugin");
+    const UINT timeout = GetPrivateProfileIntW(kJobSection, L"timeout_ms", 0, job_path.c_str());
+    if (timeout > 0) {
+        job.timeout_ms = timeout;
+    }
+    g_child_job = job;
+    g_freefps_child_process = true;
+}
+
+// Checks the job and starts the watchdog. Ends the process with a result on a bad job.
+void start_child_watchdog() {
+    if (!g_child_job.active) {
+        return;
+    }
+    if (g_child_job.plugin.empty()) {
+        g_child_job.plugin = g_output_name;
+    }
+    if (g_child_job.retimed.empty() || g_child_job.output.empty() || !file_exists(g_child_job.retimed)) {
+        child_fail(L"the job file is incomplete or the retimed project is missing: " + g_child_job.job_path);
+    }
+    HANDLE thread = CreateThread(nullptr, 0, child_watchdog, nullptr, 0, nullptr);
+    if (thread == nullptr) {
+        child_fail(L"cannot start the watchdog thread");
+    }
+    CloseHandle(thread);
+    log(false, L"export process: job " + g_child_job.job_path);
+}
+
+// ---------------------------------------------------------------------------
 // Dialog (built in memory, no resource file)
 // ---------------------------------------------------------------------------
 
@@ -666,6 +1077,8 @@ struct DialogValues {
     std::wstring output;
     bool precise = true;
     free_fps::SubsceneRatePolicy policy = free_fps::SubsceneRatePolicy::Auto;
+    bool separate = false;           // export in a separate process (check box)
+    bool separate_detected = false;  // the saved project uses SceneMotionBlur_K: the check box starts on, with a hint
     DebugConfig debug;
     // The scene plan reads the saved project. It is read once when the dialog opens: the path and the bytes, or no
     // path when the project has no file yet.
@@ -806,7 +1219,8 @@ void layout_dialog(HWND dlg) {
     int content = kBaseContentWidth;
     for (const int need : {text_width_dlu(dlg, kIdRateLabel, 0), text_width_dlu(dlg, kIdOutputLabel, 0),
                            precise_shown ? text_width_dlu(dlg, kIdPrecise, kCheckPadding) : 0,
-                           text_width_dlu(dlg, kIdSubsceneLabel, 0), text_width_dlu(dlg, kIdSummary, 0)}) {
+                           text_width_dlu(dlg, kIdSubsceneLabel, 0), text_width_dlu(dlg, kIdSummary, 0),
+                           text_width_dlu(dlg, kIdSeparate, kCheckPadding)}) {
         content = (std::max)(content, need);
     }
     const int browse_w = (std::max)(44, text_width_dlu(dlg, kIdBrowse, kButtonPadding));
@@ -832,6 +1246,13 @@ void layout_dialog(HWND dlg) {
         const int plan_h = wrapped_height_dlu(dlg, kIdScenePlan, content);
         place_item(dlg, kIdScenePlan, kMargin, row_y, content, plan_h);
         row_y += plan_h + 6;
+    }
+    place_item(dlg, kIdSeparate, kMargin, row_y, content, 12);
+    row_y += 16;
+    if (is_shown(dlg, kIdSeparateHint)) {
+        const int hint_h = wrapped_height_dlu(dlg, kIdSeparateHint, content);
+        place_item(dlg, kIdSeparateHint, kMargin, row_y, content, hint_h);
+        row_y += hint_h + 6;
     }
     place_item(dlg, kIdSummary, kMargin, row_y, content, 10);
     place_item(dlg, kIdEncSettings, kMargin, row_y + 16, enc_w, 14);
@@ -994,6 +1415,15 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
         SetDlgItemTextW(dlg, IDOK, mes(AuoFreeFpsExportOK, L"OK"));
         SetDlgItemTextW(dlg, IDCANCEL, mes(AuoFreeFpsExportCancel, L"Cancel"));
         SetDlgItemTextW(dlg, kIdSubsceneLabel, mes(AuoFreeFpsExportSubsceneRate, L"Sub-scene frame rate:"));
+        SetDlgItemTextW(dlg, kIdSeparate,
+                        mes(AuoFreeFpsExportSeparateProcess,
+                            L"Export in a separate process (avoids a crash when switching projects)"));
+        SetDlgItemTextW(dlg, kIdSeparateHint,
+                        mes(AuoFreeFpsExportSeparateProcessHint,
+                            L"This project uses SceneMotionBlur_K, which crashes AviUtl2 when the project is "
+                            L"switched. Exporting in a separate process by default."));
+        CheckDlgButton(dlg, kIdSeparate, init->separate ? BST_CHECKED : BST_UNCHECKED);
+        ShowWindow(GetDlgItem(dlg, kIdSeparateHint), init->separate_detected ? SW_SHOW : SW_HIDE);
         init_policy_combo(dlg);
         CheckDlgButton(dlg, kIdPrecise, init->precise ? BST_CHECKED : BST_UNCHECKED);
         if (!init->debug.enabled) {
@@ -1097,6 +1527,7 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
             values->output = output;
             values->precise = values->debug.enabled ? IsDlgButtonChecked(dlg, kIdPrecise) == BST_CHECKED : true;
             values->policy = selected_policy(dlg);
+            values->separate = IsDlgButtonChecked(dlg, kIdSeparate) == BST_CHECKED;
             EndDialog(dlg, IDOK);
             return TRUE;
         }
@@ -1112,7 +1543,7 @@ bool ask_for_request(HWND owner, DialogValues& values) {
     const DWORD style = DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU;
     t.dword(style);
     t.dword(0);
-    t.word(13);  // item count
+    t.word(15);  // item count
     t.word(0);
     t.word(0);
     t.word(static_cast<WORD>(2 * kMargin + kBaseContentWidth));
@@ -1137,6 +1568,8 @@ bool ask_for_request(HWND owner, DialogValues& values) {
     add_item(t, static_style, 7, 84, 248, 10, kIdSubsceneLabel, 0x0082, L"");
     add_item(t, combo_style, 7, 95, 248, kSubsceneComboHeight, kIdSubsceneCombo, 0x0085, L"");
     add_item(t, static_style, 7, 139, 248, 10, kIdScenePlan, 0x0082, L"");
+    add_item(t, button_style | BS_AUTOCHECKBOX, 7, 139, 248, 12, kIdSeparate, 0x0080, L"");
+    add_item(t, static_style, 7, 139, 248, 10, kIdSeparateHint, 0x0082, L"");
     add_item(t, static_style, 7, 84, 248, 10, kIdSummary, 0x0082, L"");
     add_item(t, button_style, 7, 100, 90, 14, kIdEncSettings, 0x0080, L"");
     add_item(t, button_style | BS_DEFPUSHBUTTON, 146, 120, 50, 14, IDOK, 0x0080, L"");
@@ -1166,6 +1599,8 @@ void on_menu(void*) {
     if (!values.project_path.empty()) {
         values.project_read = read_file_bytes(values.project_path, values.project_bytes);
     }
+    values.separate_detected = values.project_read && uses_scene_motion_blur(values.project_bytes);
+    values.separate = values.separate_detected;
     if (!ask_for_request(g_edit->get_host_app_window(), values)) {
         return;
     }
@@ -1181,6 +1616,7 @@ void on_menu(void*) {
     request.policy = values.policy;
     request.extra_decimals = static_cast<std::size_t>(values.debug.extra_decimals);
     request.keep_outputs = values.debug.keep_temp;
+    request.separate_process = values.separate;
     request.output = values.output;
     request.plugin = g_output_name;
     begin_export(request);
@@ -1201,6 +1637,7 @@ void on_project_load(PROJECT_FILE* project) {
         g_project_path = path;
     }
     g_load_seq.fetch_add(1);
+    child_start_timer_once();  // second host only: the first load callback starts the export
 }
 
 // Project save callback: the path the project is saved to (covers Save As).
@@ -1242,6 +1679,7 @@ __declspec(dllexport) void RegisterPlugin(HOST_APP_TABLE* host) {
     if (host == nullptr) {
         return;
     }
+    detect_child_job();  // before prepare_output_plugin_table: x264guiEx.cpp reads g_freefps_child_process
     // Instance handle for the in-memory dialog template: this DLL, found from one of its own exports.
     HMODULE self = nullptr;
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -1257,11 +1695,16 @@ __declspec(dllexport) void RegisterPlugin(HOST_APP_TABLE* host) {
     host->register_project_save_handler(on_project_save);
     host->register_event_listener(EVENT_TYPE::CHANGE_EDIT_STATE, nullptr, on_edit_state_event);
     host->register_edit_menu_param(kMenuName, nullptr, on_menu);
+    start_child_watchdog();  // second host only
 }
 
 __declspec(dllexport) void UninitializePlugin() {
     if (g_run) {
         KillTimer(nullptr, kTimerId);
+        if (g_run->child != nullptr) {
+            CloseHandle(g_run->child);  // the second host, if it still runs, finishes its export on its own
+            g_run->child = nullptr;
+        }
         g_run.reset();
     }
     g_freefps_menu_export_active = false;

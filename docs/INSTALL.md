@@ -1,9 +1,9 @@
-# Installing FreeRenderFPS v1.3.0
+# Installing FreeRenderFPS v1.3.1
 
-The v1.3.0 packages are `AviUtl2-FreeRenderFPS-v1.3.0-setup.zip`,
-`AviUtl2-FreeRenderFPS-v1.3.0-setup.exe`, and
-`AviUtl2-FreeRenderFPS-v1.3.0-portable.zip`. See [CHANGELOG.md](../CHANGELOG.md)
-for what changed in 1.3.0.
+The v1.3.1 packages are `AviUtl2-FreeRenderFPS-v1.3.1-setup.zip`,
+`AviUtl2-FreeRenderFPS-v1.3.1-setup.exe`, and
+`AviUtl2-FreeRenderFPS-v1.3.1-portable.zip`. See [CHANGELOG.md](../CHANGELOG.md)
+for what changed in 1.3.1.
 
 Close AviUtl2 before installation.
 
@@ -27,7 +27,7 @@ INI files together under the same name.
 
 ## Setup package
 
-Extract the complete `AviUtl2-FreeRenderFPS-v1.3.0-setup.zip` and keep the setup
+Extract the complete `AviUtl2-FreeRenderFPS-v1.3.1-setup.zip` and keep the setup
 EXE beside its `payload` directory. Run the EXE, then start AviUtl2. On first
 discovery, review the host warning, trust `x264guiEx-FreeRenderFPS.aux2`, and
 restart AviUtl2 if requested.
@@ -39,7 +39,7 @@ uninstall, rollback, preservation, logging, dry-run and non-interactive options.
 
 ## Portable package
 
-Extract `AviUtl2-FreeRenderFPS-v1.3.0-portable.zip` directly over the AviUtl2 root.
+Extract `AviUtl2-FreeRenderFPS-v1.3.1-portable.zip` directly over the AviUtl2 root.
 It already contains `data\Plugin\x264guiEx-FreeRenderFPS`. Do not create a
 second root-level `Plugin` copy. Exactly one `x264guiEx-FreeRenderFPS.aux2`
 should load.

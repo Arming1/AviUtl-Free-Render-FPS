@@ -11,7 +11,11 @@ FreeRenderFPS は x264guiEx をベースに、プロジェクト FPS とは独�
 30 FPS のプロジェクトを 60 FPS で出力する場合は、0.0、0.5、1.0…というプロジェクトフレーム座標を
 実際に評価します。フレーム複製やメタデータの変更ではありません。
 
-## v1.3.0 の変更点
+## v1.3.1 の変更点
+
+- Free FPS Export に「別プロセスで出力」チェックボックスを追加しました。元のウィンドウはプロジェクトを保持し、プロジェクト切替時のクラッシュを避けます（SceneMotionBlur_K を使う場合）。
+- プロジェクトが SceneMotionBlur_K（MotionBlur_K.aux2）を使用している場合、このチェックボックスは自動でオンになります。
+- サードパーティのプラグインやスクリプトを使うプロジェクトでは、プロジェクト切替時のフリーズや強制終了を避けるため、できるだけ「別プロセスで出力」をオンにしてください。
 
 - 直線移動(時間制御) を任意のトラックで使用できるようにしました。補間移動(時間制御) も許可します。
 - 時間制御の編集カーブ（行末の `|` パラメータ）と、「位置」にカーブが付いた場合をそのまま保持します。
@@ -28,8 +32,8 @@ FreeRenderFPS は x264guiEx をベースに、プロジェクト FPS とは独�
 
 ## ダウンロードとインストール
 
-- **推奨：** `AviUtl2-FreeRenderFPS-v1.3.0-setup.zip` を完全に展開し、`payload` の隣にある `setup` EXE を実行してから AviUtl2 を再起動します。
-- 手動インストール：`AviUtl2-FreeRenderFPS-v1.3.0-portable.zip` を AviUtl2 のルートへ展開します。
+- **推奨：** `AviUtl2-FreeRenderFPS-v1.3.1-setup.zip` を完全に展開し、`payload` の隣にある `setup` EXE を実行してから AviUtl2 を再起動します。
+- 手動インストール：`AviUtl2-FreeRenderFPS-v1.3.1-portable.zip` を AviUtl2 のルートへ展開します。
 
 詳しい手順、更新、アンインストールは [docs/INSTALL.md](docs/INSTALL.md) を参照してください。
 

@@ -747,6 +747,8 @@ enum AuoMes {
         AuoFreeFpsExportScenePlanMain,
         AuoFreeFpsExportScenePlanSub,
         AuoFreeFpsExportScenePlanPrefix,
+        AuoFreeFpsExportSeparateProcess,
+        AuoFreeFpsExportSeparateProcessHint,
     AUO_CONFIG_FCG_SECTION_FIN,
 
     //section = AUO_CONFIG_CX

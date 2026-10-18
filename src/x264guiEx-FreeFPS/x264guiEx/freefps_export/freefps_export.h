@@ -15,6 +15,11 @@ struct OUTPUT_PLUGIN_TABLE;
 // by the menu, so the built-in FreeRenderFPS must not run for this export.
 extern std::atomic<bool> g_freefps_menu_export_active;
 
+// True in the second host process that Free FPS Export starts in separate-process mode (environment variable
+// FREE_FPS_EXPORT_JOB names an existing job file). Set in RegisterPlugin before prepare_output_plugin_table(). That
+// process must not rewrite the user's settings: func_output skips saving the last output settings.
+extern std::atomic<bool> g_freefps_child_process;
+
 // Receives the logger from InitializeLogger (x264guiEx.cpp). Logging is optional: without it nothing is written.
 void freefps_export_set_logger(LOG_HANDLE* logger);
 
