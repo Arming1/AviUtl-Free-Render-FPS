@@ -3108,19 +3108,68 @@ def test_frame_mode_step_30_to_60_halves_the_step_and_keeps_zero_steps():
     assert read_report(out)["notes"] == ["trackbar at line %d: %s step 4.00 -> 2.00" % (fm_track_line(text, "X="), FM_STEP)]
 
 
-def test_frame_mode_step_30_to_66_writes_six_decimals_within_tolerance():
-    # k = 11/5: 4.00 / k = 20/11 = 1.8181818..., written 1.818182 (at least 2 decimals). |1.818182 - 20/11| = 1.818e-7,
-    # E = 1.818e-7 * 263 = 4.8e-05 <= 0.5, accepted. Y and Z 0.00 are unchanged.
-    d, src, text = fm_project("fm_step_66", 30, ["X=-600.00,4.00,%s,4" % FM_STEP, "Y=0.00,0.00,%s,4" % FM_STEP,
-                                                "Z=0.00,0.00,%s,4" % FM_STEP])
+def test_frame_mode_step_30_to_66_two_decimals_refused():
+    # k = 11/5: 4.00 / k = 20/11 = 1.8181818..., written with the 2 decimals of 4.00 as 1.82. Frames 0,149 -> 0,329 (F = 329).
+    # |1.82 - 20/11| = 1/550, E = 329/550 = 0.598 > 0.5, so it is refused.
+    d, src, text = fm_project("fm_step_66_2dp", 30, ["X=-600.00,4.00,%s,4" % FM_STEP], frames="0,149")
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "66")
+    expected = "REFUSED: line %d: %s step 4.00 cannot be written with 2 decimals within 0.5" % (fm_track_line(text, "X="), FM_STEP)
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_frame_mode_step_30_to_66_three_decimals_within_tolerance():
+    # k = 11/5: 4.000 / k = 20/11, written with the 3 decimals of 4.000 as 1.818. |1.818 - 20/11| = 1/5500, with F = 329
+    # E = 329/5500 = 0.0598 <= 0.5, accepted. Y and Z 0.00 are unchanged.
+    d, src, text = fm_project("fm_step_66_3dp", 30, ["X=-600.00,4.000,%s,4" % FM_STEP, "Y=0.00,0.00,%s,4" % FM_STEP,
+                                                     "Z=0.00,0.00,%s,4" % FM_STEP], frames="0,149")
     out = os.path.join(d, "out.aup2")
     code, _, err = convert_target(src, out, "66")
     assert code == 0, "exit %d: %s" % (code, err)
     expected = merged(file_edit(text, out), edit_at(text, "[scene.0]", "video.rate=", "video.rate=66"),
-                      edit_at(text, "[0]", "frame=", "frame=0,263"),
-                      edit_at(text, "[0.0]", "X=", "X=-600.00,1.818182,%s,4" % FM_STEP))
+                      edit_at(text, "[0]", "frame=", "frame=0,329"),
+                      edit_at(text, "[0.0]", "X=", "X=-600.00,1.818,%s,4" % FM_STEP))
     assert line_changes(read_bytes(src), read_bytes(out)) == expected
-    assert read_report(out)["notes"] == ["trackbar at line %d: %s step 4.00 -> 1.818182" % (fm_track_line(text, "X="), FM_STEP)]
+    assert read_report(out)["notes"] == ["trackbar at line %d: %s step 4.000 -> 1.818" % (fm_track_line(text, "X="), FM_STEP)]
+
+
+def test_frame_mode_step_30_to_60000_1001_two_decimals_refused():
+    # k = 2000/1001: 4 / k = 2.002, written 2.00 with 2 decimals. Frames 0,149 -> 0,299 (F = 299): E = 0.002 * 299 = 0.598 > 0.5.
+    d, src, text = fm_project("fm_step_ntsc_2dp", 30, ["X=-600.00,4.00,%s,4" % FM_STEP], frames="0,149")
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60000/1001")
+    expected = "REFUSED: line %d: %s step 4.00 cannot be written with 2 decimals within 0.5" % (fm_track_line(text, "X="), FM_STEP)
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_frame_mode_step_written_with_no_decimals_when_source_has_none():
+    # k = 2: 4 / 2 = 2, written with the 0 decimals of the source text "4" as 2. E = 0.
+    d, src, text = fm_project("fm_step_int", 30, ["X=-600.00,4,%s,4" % FM_STEP])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert "X=-600.00,2,%s,4" % FM_STEP in read_text_lf(out).split("\n")
+    assert read_report(out)["notes"] == ["trackbar at line %d: %s step 4 -> 2" % (fm_track_line(text, "X="), FM_STEP)]
+
+
+def test_frame_mode_random_starting_after_frame_0_refused_and_same_rate_kept():
+    # Round 3 C3: the random path of ランダム移動 depends on the start frame, so an object starting at frame 10 is refused
+    # at k = 2 (checked after the time control overlap rule, before the integer rule).
+    d, src, text = fm_project("fm_random_start_10", 30, ["X=-600.00,600.00,%s,4|15" % FM_RANDOM], frames="10,149")
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    expected = ("REFUSED: line %d: %s is accepted only for objects that start at frame 0 (its random path depends on the "
+                "start frame)" % (fm_track_line(text, "X="), FM_RANDOM))
+    assert code == 2 and expected in err, "exit %d: %s" % (code, err)
+    assert_no_output(out)
+    # At the same rate (k = 1) the line is left alone, so the start frame is not checked.
+    out = os.path.join(d, "same.aup2")
+    code, _, err = convert_target(src, out, "30")
+    assert code == 0, "exit %d: %s" % (code, err)
+    assert set(line_changes(read_bytes(src), read_bytes(out))) == {line_in_section(text, "[project]", "file=")}
+    assert read_report(out)["notes"] == [], read_report(out)["notes"]
 
 
 def test_frame_mode_repeat_30_to_66_writes_a_non_integer_parameter():
@@ -3364,7 +3413,11 @@ TESTS = [
     test_frame_mode_random_30_to_66_scales_the_integer_parameter,
     test_frame_mode_random_non_integer_after_k_and_non_integer_parameter_refused,
     test_frame_mode_step_30_to_60_halves_the_step_and_keeps_zero_steps,
-    test_frame_mode_step_30_to_66_writes_six_decimals_within_tolerance,
+    test_frame_mode_step_30_to_66_two_decimals_refused,
+    test_frame_mode_step_30_to_66_three_decimals_within_tolerance,
+    test_frame_mode_step_30_to_60000_1001_two_decimals_refused,
+    test_frame_mode_step_written_with_no_decimals_when_source_has_none,
+    test_frame_mode_random_starting_after_frame_0_refused_and_same_rate_kept,
     test_frame_mode_repeat_30_to_66_writes_a_non_integer_parameter,
     test_frame_mode_refusals_name_the_first_failing_rule,
     test_frame_mode_overlapping_time_control_refused_and_apart_accepted,

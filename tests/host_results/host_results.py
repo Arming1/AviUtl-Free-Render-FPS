@@ -20,6 +20,9 @@ test_kit/7_轨迹移动方式/data/ and test_kit/8_補間移動時間制御/data
                     frame m against random_30 frame m (m = 0..149): both prove the motions are per frame.
                     round 2: the 60/66 fps renders against the 30 fps ones at the same time (B1[2n] / random_30[n],
                     B2[11j] / random_30[5j], B3[2n] / 往复运动_30[n], B5[11j] / B4[5j], B8[2n] / B6[n]).
+                    round 3 A: claims about the C files (object-local frame, intermediate points ignored,
+                    decimal precision, reproducible); round 3 B: end-to-end E files against formulas or B files.
+                    E5 is INFO only and does not decide the exit code.
                     A row with fewer than 1000 pixels is invalid (analyze_steps.py can take a grey spot for the
                     circle); a comparison that uses one is FAIL.
 
@@ -57,7 +60,8 @@ R3_GROUPS = ["R3a", "R3b", "R3c"]
 PROBE9_DATA_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir,
     "test_kit", "9_其他移动方式", "data")
-PROBE9_FILES = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "random_30", "random_60", "往复运动_30", "往复运动_60"]
+PROBE9_FILES = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "random_30", "random_60", "往复运动_30", "往复运动_60",
+                "C1", "C2", "C4", "C5", "C6", "C7", "C8", "C10", "E1", "E2_60", "E3_5994", "E4", "E5", "E6", "E7"]
 PROBE9_MIN_PIXELS = 1000   # rows below this are not a circle (see the module docstring)
 PROBE9_ROUND2 = [          # (label, file A, A frame step, file B, B frame step, frames compared)
     ("B1[2n] vs random_30[n]", "B1", 2, "random_30", 1, 150),
@@ -214,6 +218,74 @@ def probe9_section(p9):
     return lines, verdicts
 
 
+def probe9_formula(series, frames, expected):
+    """series against expected(frame) over frames: (frames, max diff, frame of max, invalid rows used).
+    A frame missing from series is invalid and has no difference."""
+    worst, worst_frame, invalid = None, None, 0
+    for frame in frames:
+        row = series.get(frame)
+        invalid += row is None or row[1] < PROBE9_MIN_PIXELS
+        if row is None:
+            continue
+        diff = abs(row[0] - expected(frame))
+        if worst is None or diff > worst:
+            worst, worst_frame = diff, frame
+    return len(frames), worst, worst_frame, invalid
+
+
+def probe9_round3_section(p9):
+    """(markdown lines, verdicts) of probe 9 round 3. E5 is INFO: its row is printed but adds no verdict."""
+    def c1(f): return 360.0 + 600.0 * (1.0 - math.cos((f - 10) * math.pi / 15))
+    def c2(f): return 360.0 + 4.0 * (f - 10)                       # X = -600 + 4(f-10) in project coordinates
+    def c7(f): return 360.0 + 600.0 * (1.0 - math.cos(f * math.pi / 7.123457))
+    def c8(f): return 360.0 + 4.00 * f                             # X = -600 + 4.00 f in project coordinates
+    def e2(f): return 360.0 + 600.0 * (1.0 - math.cos(math.pi * (f / 60) * 30 / 7))
+    def e3(f): return 360.0 + 600.0 * (1.0 - math.cos(math.pi * (f * 1001 / 60000) * 30 / 7))
+    def e5(f): return 360.0 + 120.0 * f * 1001 / 60000             # X = -600 + 120 f 1001/60000 in project coordinates
+    def e7(f): return 360.0 + 600.0 * (1.0 - math.cos(math.pi * (f / 132) * 66 / 15.4))
+
+    head = ["| 比较 Comparison | 帧数 Frames | 最大差 Max diff (px) | 最大差帧 At frame | 无效行 Invalid rows | 判定 Verdict |",
+            "|---|---|---|---|---|---|"]
+    verdicts = []
+
+    def row(label, result, verdict=None):
+        frames, worst, worst_frame, invalid = result
+        if verdict is None:
+            verdict = probe9_verdict(worst, invalid)
+            verdicts.append(verdict)
+        lines.append("| %s | %d | %.4f | %s | %d | %s |"
+                     % (label, frames, worst, "-" if worst_frame is None else str(worst_frame), invalid, verdict))
+
+    lines = ["#### Probe 9 第 3 轮 A：结论 / round 3 A: claims", "",
+             "Claims: 对象内帧号 / 忽略中间点 / 小数精度 / 可复现 (object-local frame, intermediate points ignored, "
+             "decimal precision, reproducible). PASS means the measurement agrees with the claim.", ""] + head
+    row("C1 vs 360 + 600(1-cos((f-10)π/15)), f=10..149", probe9_formula(p9["C1"], range(10, 150), c1))
+    row("C2 vs X = -600 + 4(f-10), f=10..149", probe9_formula(p9["C2"], range(10, 150), c2))
+    row("C4[f] vs 往复运动_30[f], f=0..149",
+        probe9_pairs(p9["C4"], p9["往复运动_30"], [(f, f) for f in range(150)]))
+    row("C5[f] vs random_30[f], f=0..149",
+        probe9_pairs(p9["C5"], p9["random_30"], [(f, f) for f in range(150)]))
+    row("C6[f] vs B6[f], f=0..149",
+        probe9_pairs(p9["C6"], p9["B6"], [(f, f) for f in range(150)]))
+    row("C7 vs 360 + 600(1-cos(fπ/7.123457)), f=0..149", probe9_formula(p9["C7"], range(150), c7))
+    row("C8 vs X = -600 + 4.00f, f=0..299", probe9_formula(p9["C8"], range(300), c8))
+    row("C10[f] vs random_30[f], f=0..149",
+        probe9_pairs(p9["C10"], p9["random_30"], [(f, f) for f in range(150)]))
+    lines += ["", "#### Probe 9 第 3 轮 B：端到端 / round 3 B: end to end", ""] + head
+    row("E1[f] vs B1[f], f=0..299", probe9_pairs(p9["E1"], p9["B1"], [(f, f) for f in range(300)]))
+    row("E2_60 vs 360 + 600(1-cos(π(f/60)30/7)), f=0..299", probe9_formula(p9["E2_60"], range(300), e2))
+    row("E3_5994 vs 360 + 600(1-cos(π t 30/7)), t = f·1001/60000, f=0..299",
+        probe9_formula(p9["E3_5994"], range(300), e3))
+    row("E4[f] vs B8[f], f=0..299", probe9_pairs(p9["E4"], p9["B8"], [(f, f) for f in range(300)]))
+    row("E6[2m] vs B2[m], m=0..329", probe9_pairs(p9["E6"], p9["B2"], [(2 * m, m) for m in range(330)]))
+    row("E7 vs 360 + 600(1-cos(π(f/132)66/15.4)), f=0..659", probe9_formula(p9["E7"], range(660), e7))
+    row("E5 vs X = -600 + 120·f·1001/60000, f=0..299", probe9_formula(p9["E5"], range(300), e5),
+        "INFO（已知偏差，转换器现在拒绝此情况）")
+    lines += ["", "Threshold: %.1f px. Round 3 A and B are judged like rounds 1 and 2; E5 is INFO and does not "
+              "decide the exit code." % THRESHOLD_PX, ""]
+    return lines, verdicts
+
+
 def build_report(data_dir, r3_dir=R3_DATA_DIR, p9_dir=PROBE9_DATA_DIR):
     """Return (markdown_text, exit_code)."""
     names = ["R1a", "R1b", "R1c", "R1d", "R2"]
@@ -299,8 +371,10 @@ def build_report(data_dir, r3_dir=R3_DATA_DIR, p9_dir=PROBE9_DATA_DIR):
               % (THRESHOLD_PX, R3_EXCLUDE_FIRST, R3_EXCL_LIMIT_PX), ""]
 
     p9_lines, p9_verdicts = probe9_section(p9)
+    r3_p9_lines, r3_p9_verdicts = probe9_round3_section(p9)
+    p9_verdicts += r3_p9_verdicts
     lines += ["### 其他移动方式 / Other motion methods (test_kit 9)", "",
-              "Source: `test_kit/9_其他移动方式/data/` (per-frame centroid of the host render)", ""] + p9_lines
+              "Source: `test_kit/9_其他移动方式/data/` (per-frame centroid of the host render)", ""] + p9_lines + r3_p9_lines
 
     exit_code = 1 if diff_ab >= THRESHOLD_PX or r3_worst[("R3b", 0)] >= THRESHOLD_PX or "FAIL" in p9_verdicts else 0
     return "\n".join(lines) + "\n", exit_code

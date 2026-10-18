@@ -1535,9 +1535,10 @@ std::string frame_count_text(const Rational& value, std::size_t min_places) {
 
 // Phase 2 for the rows of followed scenes with k != 1, in file order. A row that overlaps a 時間制御(オブジェクト) object of
 // its scene (frame ranges, any layer) is refused. 反復移動 and ランダム移動: the parameter times k (exact); 移動量指定: the step
-// divided by k. Each rewrite is checked against the error bound E = |e - s| x PI_UPPER x F x |Q - P2| / (2 x min(Q, P2)^2)
-// (F = frames of the new object minus 1; for 移動量指定, E = |Q - D2| x F). Returns the new rows by line index and adds one
-// note per row that changes.
+// divided by k. ランダム移動 is refused for an object that does not start at frame 0. Each rewrite is checked against the error
+// bound E = |e - s| x PI_UPPER x F x |Q - P2| / (2 x min(Q, P2)^2) (F = frames of the new object minus 1; for 移動量指定,
+// the step is written with the decimals of its second value and E = |Q - D2| x F). Returns the new rows by line index and
+// adds one note per row that changes.
 std::map<std::size_t, std::string> plan_frame_modes(const std::vector<std::string>& lines,
                                                     const std::vector<FrameModeRow>& rows,
                                                     const std::vector<TimeControl>& time_controls,
@@ -1574,6 +1575,10 @@ std::map<std::size_t, std::string> plan_frame_modes(const std::vector<std::strin
             refuse(row.idx + 1, row.mode + " is not verified together with " + kTimeControlEffect +
                                     " (the time control object at line " + std::to_string(*overlap) + " overlaps it)");
         }
+        if (row.mode == kFrameCountRandom && old.front() != 0) {
+            refuse(row.idx + 1, row.mode +
+                                    " is accepted only for objects that start at frame 0 (its random path depends on the start frame)");
+        }
 
         const i64 frames_new = checked_sub(nw.back(), nw.front());
         const std::string key = key_of(lines[row.idx]);
@@ -1581,14 +1586,14 @@ std::map<std::size_t, std::string> plan_frame_modes(const std::vector<std::strin
         std::string new_body;
         std::string note;
         if (row.mode == kFrameCountStep) {
-            std::size_t step_places = 0;  // the decimals of the second value as written: the written step keeps them
+            std::size_t step_places = 0;  // the decimals of the second value as written: the written step has exactly that many
             const Rational step2 = rat_div(parse_decimal(row.values[1], step_places), k);
-            const std::string text = frame_count_text(step2, step_places);
+            const std::string text = format_fixed(quantize_scaled(step2, step_places), step_places);
             const Rational written = parse_decimal(text, digits);
             const Rational error = rat_mul(rat_abs(rat_sub(written, step2)), Rational{frames_new, 1});
             if (rat_less(kFrameCountTolerance, error)) {
                 refuse(row.idx + 1, row.mode + " step " + row.values[1] + " cannot be written with " +
-                                        std::to_string(kFrameCountMaxPlaces) + " decimals within 0.5");
+                                        std::to_string(step_places) + " decimals within 0.5");
             }
             new_body = key + "=" + row.values[0] + "," + text + "," + row.mode + "," + kFrameCountFlag;
             note = "trackbar at line " + line + ": " + row.mode + " step " + row.values[1] + " -> " + text;

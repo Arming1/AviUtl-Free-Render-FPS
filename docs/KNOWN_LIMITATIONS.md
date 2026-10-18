@@ -9,8 +9,10 @@ Conversion rules are in [RETIME_RULES.md](RETIME_RULES.md). Only limits that sti
 - **Short objects.** A shortened object's end can move by up to 3/(2·Rt). The tool never moves boundaries to keep a touching pair consistent.
 - **Unlisted move modes.** `イージング（補間移動）@イージング` is refused, not verified in AviUtl2.
 - **Frame-count moves** (`反復移動`, `ランダム移動`, `移動量指定`) are converted only in the form measured in AviUtl2: flag `4`, two frame points,
-  and no time control object over the same frames. `ランダム移動` is refused when the parameter is not an integer after × k (for example 30 → 59.94).
-  Converted values are written with up to 6 decimals; AviUtl2 has been measured with 1 decimal in the parameter and 2 in the step; more decimals are pending the third round of host tests.
+  and no time control object over the same frames. `ランダム移動` also needs the object to start at frame 0 (its random path depends on the start frame),
+  and is refused when the parameter is not an integer after × k (for example 30 → 59.94).
+  `反復移動` parameters are written with up to 6 decimals; the host reads at least 5 (C7, E3). `移動量指定` steps are written with the source's decimal count,
+  because the host reads only that track's precision (C8, E5); a step that cannot be written within 0.5 is refused (for example 30 → 59.94 with `4.00`).
 - **Ordinary `補間移動` and `瞬間移動` tracks** are accepted by the converter but have not been measured in AviUtl2 as ordinary tracks.
 - **Frame-dependent scripts** are refused unless `--allow-frame-scripts` is given. The animation then runs `k` times faster
   and per-frame random sequences change.

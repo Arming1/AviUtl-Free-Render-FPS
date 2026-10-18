@@ -2589,6 +2589,20 @@ void test_frame_count_modes() {
         expect_refused("frame modes: ランダム移動 15.4 is refused", frac, rate(60), line_of_first(frac, "X="),
                        "ランダム移動 parameter must be an integer, got '15.4'");
     }
+    // 5b. ランダム移動 is refused for an object that does not start at frame 0 (its random path depends on the start frame).
+    //     The same row at the source rate is not checked, and 反復移動 is not limited by this rule.
+    {
+        const std::string late = project(scene30(), frame_mode_object("X=-600.00,600.00,ランダム移動,4|15\n", "10,149"));
+        expect_refused("frame modes: ランダム移動 starting at frame 10 is refused", late, rate(60), line_of_first(late, "X="),
+                       "ランダム移動 is accepted only for objects that start at frame 0 (its random path depends on the start frame)");
+        const RetimeResult same = retime_target(late, rate(30));
+        check(same.ok && first_row(same, "X=") == "X=-600.00,600.00,ランダム移動,4|15", "frame modes: ランダム移動 at the source rate is not refused",
+              refusal_or_converted(same));
+        const RetimeResult from10 = retime_target(
+            project(scene30(), frame_mode_object("X=-600.00,600.00,反復移動,4|15\n", "10,149")), rate(60));
+        check(from10.ok && first_row(from10, "X=") == "X=-600.00,600.00,反復移動,4|30", "frame modes: 反復移動 starting at frame 10 is converted",
+              refusal_or_converted(from10));
+    }
     // 6. 移動量指定 30 -> 60: the step is halved (4.00 -> 2.00), written with the decimals of the original; Y and Z stay (0.00).
     {
         const std::string text = project(scene30(), frame_mode_object("X=-600.00,4.00,移動量指定,4\nY=0.00,0.00,移動量指定,4\n"
@@ -2603,11 +2617,21 @@ void test_frame_count_modes() {
         check(whole.ok && first_row(whole, "X=") == "X=-600,2,移動量指定,4", "frame modes: a step without decimals is written without them",
               refusal_or_converted(whole));
     }
-    // 7. 移動量指定 30 -> 66: 4 x 5/11 = 20/11, written with 6 decimals (1.818182); the error stays below half a frame.
+    // 7. 移動量指定 30 -> 66: 4 x 5/11 = 20/11, written with the 2 decimals of the original (1.82). Over 0,29 (65 frames) the
+    //    error (1.82 - 20/11) x 65 = 0.118 is accepted; over 0,149 (329 frames) it is 0.598 and refused.
     {
         const RetimeResult r = retime_target(project(scene30(), frame_mode_object("X=-600.00,4.00,移動量指定,4\n")), rate(66));
-        check(r.ok && first_row(r, "X=") == "X=-600.00,1.818182,移動量指定,4", "frame modes: 移動量指定 30 -> 66 writes 1.818182",
+        check(r.ok && first_row(r, "X=") == "X=-600.00,1.82,移動量指定,4", "frame modes: 移動量指定 30 -> 66 writes 1.82",
               refusal_or_converted(r));
+        const std::string long_text = project(scene30(), frame_mode_object("X=-600.00,4.00,移動量指定,4\n", "0,149"));
+        expect_refused("frame modes: 移動量指定 30 -> 66 over 150 frames is refused", long_text, rate(66),
+                       line_of_first(long_text, "X="), "移動量指定 step 4.00 cannot be written with 2 decimals within 0.5");
+    }
+    // 7b. 移動量指定 30 -> 60000/1001: 4 x 1001/2000 = 2.002, written as 2.00; over 0,149 (299 frames) the error is 0.598: refused.
+    {
+        const std::string text = project(scene30(), frame_mode_object("X=-600.00,4.00,移動量指定,4\n", "0,149"));
+        expect_refused("frame modes: 移動量指定 30 -> 60000/1001 with 4.00 is refused", text, rate(60000, 1001),
+                       line_of_first(text, "X="), "移動量指定 step 4.00 cannot be written with 2 decimals within 0.5");
     }
     // 8. Error bound: 反復移動 30 -> 10 (k = 1/3) writes 0.333333 for 1, which is within half a frame for small values and not
     //    for large ones.
@@ -2673,6 +2697,14 @@ void test_frame_count_modes() {
         const RetimeResult r = retime_target(apart, rate(60));
         check(r.ok && first_row(r, "X=") == "X=-600.00,600.00,反復移動,4|30", "frame modes: no overlap, converted",
               refusal_or_converted(r));
+        // The overlap rule comes before the ランダム移動 start-frame rule: the overlap reason is the one given.
+        const std::string late_overlap = tc_project(30, tc_object(0, 1, "0,29", tc_row("0.000", "100.000")) +
+                                                             plain_object(1, 0, "10,149") +
+                                                             "X=-600.00,600.00,ランダム移動,4|15\n");
+        expect_refused("frame modes: overlap is checked before the ランダム移動 start-frame rule", late_overlap, rate(60),
+                       line_of_first(late_overlap, "X="),
+                       "ランダム移動 is not verified together with 時間制御(オブジェクト) (the time control object at line " +
+                           std::to_string(line_of_first(late_overlap, "frame=0,29\n[0.0]\neffect.name=時間制御")) + " overlaps it)");
         const std::string two = tc_project(30, tc_object(2, 1, "0,29", tc_row("0.000", "100.000")) +
                                                    tc_object(1, 2, "0,29", tc_row("0.000", "100.000")) +
                                                    plain_object(3, 0, "0,29") + x_row);

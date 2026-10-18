@@ -5,13 +5,15 @@
 ### Added
 
 - The frame-count move modes `反復移動`, `ランダム移動` and `移動量指定` (flag `4`, two frame points) are converted:
-  `反復移動` and `ランダム移動` parameters are multiplied by k, and the `移動量指定` per-frame step is divided by k.
-  Objects that overlap a time control object, or whose values cannot be written exactly, are refused.
+  `反復移動` and `ランダム移動` parameters are multiplied by k, and the `移動量指定` per-frame step is divided by k, written with the source's decimal count.
+  `ランダム移動` is converted only for objects that start at frame 0. Objects that overlap a time control object, or whose values cannot be written exactly, are refused.
 
 ### Validation
 
 - Probe 9 (`test_kit/9_其他移动方式/`), AviUtl2 v2.1.12, two rounds: at the same instant, the largest position
   difference between the original and the converted project is 0.24 px.
+- Probe 9 round 3, end to end (Free FPS Export, test plugin 7F3CC96B): E1–E4, E6, E7 pass (≤ 0.24 px against the original or the formula).
+  `移動量指定` 30 → 59.94 (written as 2.002, host reads 2.00, 0.59 px at the last frame) failed; that step now uses the source's decimal count.
 
 ## [1.3.1] — 2026-10-18
 

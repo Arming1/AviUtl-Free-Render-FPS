@@ -411,12 +411,15 @@ For a scene with k ≠ 1 (k = 1 is left alone):
 
 - A `時間制御(オブジェクト)` object of the same scene whose frames overlap the object refuses the line (not verified together).
 - `ランダム移動`: parameter × k must be an integer; otherwise it is refused (for example 30 → 60000/1001 gives `30000/1001`).
-- The new value is written with at most 6 decimals, trailing zeros dropped (`29.97003`, `1.818182`). For `反復移動` the
+- The new parameter of `反復移動` and `ランダム移動` is written with at most 6 decimals, trailing zeros dropped (`29.97003`). For `反復移動` the
   error bound is E = |e − s| × 355/113 × F × |Q − P| / (2 × min(Q, P)²), where F is the object's new frame span, P the exact
   parameter and Q the written one. E above 1/2 refuses the line; so does a written value of 0 (the bound is then unbounded).
   Example: 10 fps (k = 1/3), object 0..899 (F = 299), `X=-960.00,960.00,反復移動,4|1` gives E ≈ 2.7 and is refused;
   a 0..59 object (F = 19) gives E ≈ 0.17 and is written as `4|0.333333`.
-- `移動量指定`: with D = step / k and Q the written step, E = |Q − D| × F; above 1/2 it is refused.
+- `移動量指定`: with D = step / k and Q the written step, E = |Q − D| × F; above 1/2 it is refused. The step is written with
+  the decimals of its source text (`4.00` gives 2 decimals, `4` gives an integer; round 3, C8 and E5: `4.00` at 30 → 66 gives
+  1.82, E ≈ 0.6, refused).
+- `ランダム移動`: only an object that starts at frame 0 is accepted (round 3, C3: its random path depends on the start frame).
 
 `--precise` does not re-sample these tracks: the object is listed in `precise.skipped` with
 `trackbar at line N uses mode M; frame-counting modes are not re-sampled`. The parameter is still converted.

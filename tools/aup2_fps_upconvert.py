@@ -81,8 +81,10 @@ FRAME_COUNT_RANDOM_MODE = "ランダム移動"
 FRAME_COUNT_REPEAT_MODE = "反復移動"
 FRAME_COUNT_STEP_MODE = "移動量指定"
 FRAME_COUNT_FLAG = "4"
-# A written parameter or step has at most this many decimals. It is refused when its rounding can move the value by more
-# than FRAME_COUNT_TOLERANCE over the object (the error bound of frame_count_rewrite); PI_UPPER bounds pi for that bound.
+# A written parameter has at most this many decimals (a 移動量指定 step keeps the decimals of its source text instead). It is
+# refused when its rounding can move the value by more than FRAME_COUNT_TOLERANCE over the object (the error bound of
+# frame_count_rewrite); PI_UPPER bounds pi for that bound. Round 3 (test_kit/9, AviUtl2 v2.1.12): C8 and E5 show the host
+# reads a 移動量指定 step only to its own 2 decimals; C3 shows ランダム移動 depends on the start frame, so only frame 0 is kept.
 FRAME_COUNT_MAX_PLACES = 6
 FRAME_COUNT_TOLERANCE = Fraction(1, 2)
 PI_UPPER = Fraction(355, 113)
@@ -401,10 +403,11 @@ def frame_count_rewrite(line_no, key, texts, mode, param, k, span):
     """
     if mode == FRAME_COUNT_STEP_MODE:
         exact = Fraction(texts[1]) / k
-        written = frame_count_text(exact, decimal_places(texts[1]))
+        places = decimal_places(texts[1])
+        written = quantize(exact, places)[1]
         if abs(Fraction(written) - exact) * span > FRAME_COUNT_TOLERANCE:
             raise Refusal(line_no, "%s step %s cannot be written with %d decimals within %s"
-                          % (mode, texts[1], FRAME_COUNT_MAX_PLACES, "0.5"))
+                          % (mode, texts[1], places, "0.5"))
         new_line = "%s=%s,%s,%s,%s" % (key, texts[0], written, mode, FRAME_COUNT_FLAG)
         note = "trackbar at line %d: %s step %s -> %s" % (line_no, mode, texts[1], written)
         return new_line, note
@@ -1010,6 +1013,9 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
         if overlapping:
             raise Refusal(idx + 1, "%s is not verified together with %s (the time control object at line %d overlaps it)"
                           % (mode, TIME_CONTROL_EFFECT_NAME, min(overlapping) + 1))
+        if mode == FRAME_COUNT_RANDOM_MODE and frame_values[obj_no][0] != 0:
+            raise Refusal(idx + 1, "%s is accepted only for objects that start at frame 0 (its random path depends on the "
+                          "start frame)" % mode)
         span = new_frames[obj_no][-1] - new_frames[obj_no][0]
         new_line, note = frame_count_rewrite(idx + 1, lines[idx].partition("=")[0], texts, mode, param, k_obj, span)
         if new_line != lines[idx]:
