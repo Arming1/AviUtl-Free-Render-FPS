@@ -11,6 +11,12 @@
 > the early stages, then Anthropic Claude / Claude Code). The author planned and
 > reviewed the work and tested it on real AviUtl2 installations.
 
+> **Development status: preview (beta).** The version number is 1.x, but the plugin is still being tested.
+> It is verified on AviUtl2 v2.1.12 only (newer versions such as 2.1.13 and 2.1.14 are not verified yet); the checks
+> and their results are in [test_kit/](test_kit/). The AviUtl 1.x adapter has only been checked with a simple project.
+> When a project uses something that cannot be converted exactly, the plugin refuses it and says why instead of writing
+> a possibly wrong video. Check the result before using it for important work. Please report problems in Issues or on X.
+
 FreeRenderFPS is an x264guiEx-based output plugin that re-evaluates the real scene at output-FPS time points independent of the project FPS, so a 30 FPS project can render genuine 60 FPS states. It does not copy frames or only change FPS metadata.
 
 ## v1.3.1 highlights
