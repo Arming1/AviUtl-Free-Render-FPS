@@ -34,10 +34,12 @@ Full specification, formulas and sidecar fields: [tools/aup2_fps_upconvert.md](.
 | `カウンター` (`速度=`) | Must be a plain number (`-?\d+(\.\d+)?`), passed through | — | Time-based; not rescaled | spec "What it refuses" |
 | シーン object (`effect.name=シーン`) | `再生位置` (seconds), `再生速度` (%) unchanged | — | — | spec "Scenes and sub-scenes"; v1.2.5 |
 | Scene frame rate policy (`[project] display.scene`, `--subscene-rate`) | Exported scene always follows the target. `auto`: other scene follows if `R_i ≥ R_E`, else kept. `follow` / `keep` explicit. Kept scenes are copied byte for byte | Kept scenes are not inspected or re-sampled | Whether AviUtl2 plays a kept sub-scene at its own rate is a host property, not checked. Which sub-scene frame is shown is not verified | v1.2.5 A/B/C cases (`test_kit/4_次合成/`) |
+| Sub-scene alignment (`シーン` object plays a followed sub-scene) | A followed sub-scene played by exactly one scene object in the exported scene (speed 100, no loop, start at a whole frame at both rates, no time control in the sub-scene) is rescaled on the timeline of that scene object, so its object boundaries land on the same output frames as the exported scene's objects at the same moment. Otherwise a WARNING is written | Re-sampled keyframes shift with the frames | Only when `k` is not an integer. Boundaries inside an unaligned sub-scene may be one frame off | Evidence: user project `10 3` (66 → 60), a sub-scene cut and a radial blur started one frame apart after conversion. Host probe pending (`test_kit/10_次合成对齐`) |
 | `cursor.frame`, `preview.frame`, `display.frame` | `round_half_up(v·k)` with the scene's `k` | — | — | spec "What it changes" |
 | `video.rate`, `video.scale` | Followed scene: set to `rt/st`. Missing `video.scale` is read as 1 and written | — | Default 1 is an assumption, not verified | spec "Scene requirements" |
 | Frame-dependent script (`obj.frame`, `obj.totalframe`, `obj.index`, `obj.rand`, `rand(`, `math.random(`, `math.randomseed`) | Refused by default. With `--allow-frame-scripts`: converted, warning and note | — | Such animation runs `k` times faster; per-frame random sequences change | spec "Script in effects" |
 | Short object overlap (low target rate) | Shortened to one frame; if that breaks touching or overlap with a neighbour on the same layer, refused with the later object's line | — | Tool never moves boundaries to fix it. See KNOWN_LIMITATIONS | spec "Object rules"; host-free tests (`tests/aup2_upconvert/`) |
+| Frame-dependent effect `手ぶれ`, `振動`, `ラスター`, `フレア`, `ノイズ` | Refused when the object's `k` ≠ 1 (per-frame random or frame-based animation). Object at `k` = 1 is kept | — | `手ぶれ`, `ラスター`, `フレア` differ from the original at another rate. `振動`, `ノイズ` not measured, refused until probed | Local comparison of user project `10 3` (not in repo) |
 | `繰り返し`, `対象レイヤー数`, seconds-based values (`audio.rate`, tempo, `display.grid.*`), unknown lines | Copied unchanged | — | — | spec "What it changes" |
 
 ## When the tool refuses
@@ -45,6 +47,8 @@ Full specification, formulas and sidecar fields: [tools/aup2_fps_upconvert.md](.
 Refusals print `REFUSED: line N: reason` to stderr, exit with code 2 and write no output file.
 
 - **Frame-dependent script.** Remove the marker from the effect text, or convert with `--allow-frame-scripts` and accept that the animation runs `k` times faster.
+- **Frame-dependent effect** (`手ぶれ`, `振動`, `ラスター`, `フレア`, `ノイズ`) at a rate other than the project's. Remove or replace the effect, or export at the project's own rate.
+- **Sub-scene alignment warning.** Use a target rate that is an integer multiple of the source rate (for example 66 → 132).
 - **`コマ落ち` not a positive integer.** Set it to `1` (no drop) or a whole number of 2 or more. Drops other than in 時間制御(オブジェクト) are not converted.
 - **時間制御 `位置` not two plain numbers with `直線移動(時間制御)`, or object not two frame points.** Fix the source project so the effect has exactly that form.
 - **More than 4096 staircase points, or other animated trackbars.** Make the other trackbars constant. The tool has no option for the 4096 limit; shorten the block in the source project.

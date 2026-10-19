@@ -7,6 +7,18 @@
 - The frame-count move modes `反復移動`, `ランダム移動` and `移動量指定` (flag `4`, two frame points) are converted:
   `反復移動` and `ランダム移動` parameters are multiplied by k, and the `移動量指定` per-frame step is divided by k, written with the source's decimal count.
   `ランダム移動` is converted only for objects that start at frame 0. Objects that overlap a time control object, or whose values cannot be written exactly, are refused.
+- A sub-scene played by one scene object in the exported scene is rescaled on that scene object's timeline when the rate ratio is not an integer, so its object boundaries land on the same output frames as the exported scene. Otherwise a WARNING is written. Host probe pending.
+
+### Changed
+
+- Frame-dependent effects `手ぶれ`, `振動`, `ラスター`, `フレア` and `ノイズ` are refused when the object's rate changes (k ≠ 1). Projects that use them are now refused at other rates; remove the effects or export at the project's own rate.
+
+### Fixed
+
+- Scenes are identified by the `scene=` value inside `[scene.N]`, not by the section number N. Objects and `シーン=`
+  refer to that value, and the two differ in real projects (for example `[scene.4]` with `scene=9`). Before, an object
+  could get the rate plan of another scene when the scenes had different rates. A `display.scene` that names a
+  different scene by value and by section number is refused as ambiguous.
 
 ### Validation
 

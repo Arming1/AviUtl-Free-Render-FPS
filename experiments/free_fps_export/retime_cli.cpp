@@ -212,6 +212,9 @@ int wmain(int argc, wchar_t** argv) {
         say(free_fps::refusal_message(result));
         return 2;
     }
+    for (const std::string& warning : result.warnings) {
+        say(warning);
+    }
     if (!write_file(out_path, result.output) ||
         !write_file(json_path, free_fps::sidecar_json(result, in_path, out_path))) {
         say("REFUSED: cannot write output files");

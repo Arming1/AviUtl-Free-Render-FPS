@@ -3303,6 +3303,288 @@ def test_frame_mode_precise_skips_the_object_and_still_converts_the_parameter():
     assert "X=-600.00,600.00,%s,4|30" % FM_REPEAT in lines_without_file(out_p)
 
 
+# ---------------------------------------------------------------------------
+# Sub-scene alignment (scene objects), frame-dependent effects and scene ids
+# ---------------------------------------------------------------------------
+
+PROJECT_HEAD = "[project]\nversion=2010400\nfile=synthetic.aup2\ndisplay.scene=%d\npreview.scene=0\n"
+FRAME_EFFECT_NAMES = ["手ぶれ", "振動", "ラスター", "フレア", "ノイズ"]
+FRAME_EFFECT_TEXT = ("REFUSED: line %d: effect '%s' depends on the frame number or a per-frame random value "
+                     "and is not verified at another frame rate; refused")
+ALIGN_WARNING = ("WARNING: scene %d cannot be aligned to the exported scene (%s); object boundaries inside it may be "
+                 "one frame off at this rate")
+ALIGN_NOTE = "scene %d is rescaled on the timeline of its scene object at line %d"
+# sha256 of the integer-k output (66 -> 132, USER_CASE below) written by the version before scene ids and alignment.
+ALIGN_INTEGER_GOLDEN = "3a23a8ebcb30d39e1288d6d036e620c2bed4455393521cd474be3c0e62d360a6"
+
+
+def scene_object(played, position="0.000,5.819,再生範囲,0", speed="100.00", loop="0"):
+    """Body of a シーン effect section playing scene `played`; a line whose value is None is left out."""
+    body = "effect.name=シーン\n"
+    if position is not None:
+        body += "再生位置=%s\n" % position
+    if speed is not None:
+        body += "再生速度=%s\n" % speed
+    body += "シーン=%s\n" % played
+    if loop is not None:
+        body += "ループ再生=%s\n" % loop
+    return body
+
+
+def scene_section(number, scene_id, rate):
+    """[scene.N] section; without scene_id it has no scene= line and its id is N."""
+    head = "[scene.%d]\n" % number
+    if scene_id is not None:
+        head += "scene=%d\n" % scene_id
+    ident = number if scene_id is None else scene_id
+    return head + ("name=scene %d\nvideo.width=640\nvideo.height=360\nvideo.rate=%d\nvideo.scale=1\naudio.rate=44100\n"
+                   "cursor.frame=0\ncursor.layer=0\npreview.frame=0\ndisplay.frame=0\ndisplay.layer=0\n" % (ident, rate))
+
+
+def align_project(name, sections, objects, display_scene=0):
+    """Write a project into a new case dir. Returns (dir, src_path, text).
+
+    sections: (section number, scene id or None, video.rate) in file order. objects: (scene id, layer, frames, effect
+    bodies); the object number is its index. Each object is written with its scene= line right after the section of its
+    scene id, followed by its effect sections (each body is the text after its [n.j] header).
+    """
+    parts = [PROJECT_HEAD % display_scene]
+    placed = set()  # an object is written once, after the first section of its scene id
+    for number, scene_id, rate in sections:
+        parts.append(scene_section(number, scene_id, rate))
+        ident = number if scene_id is None else scene_id
+        for no, (obj_scene, layer, frames, effects) in enumerate(objects):
+            if obj_scene == ident and no not in placed:
+                placed.add(no)
+                parts.append("[%d]\nlayer=%d\nscene=%d\nfocus=0\nframe=%s\n" % (no, layer, obj_scene, frames))
+                for j, body in enumerate(effects):
+                    parts.append("[%d.%d]\n%s" % (no, j, body))
+    assert len(placed) == len(objects), "an object has no section with its scene id"
+    text = "".join(parts)
+    d = case_dir(name)
+    src = os.path.join(d, "src.aup2")
+    write_bytes(src, text.encode("utf-8"))
+    return d, src, text
+
+
+def frames_of(path):
+    return {no: obj["frames"] for no, obj in parse_objects(read_text_lf(path)).items()}
+
+
+# The 66 fps case of the user report: scene 0 has a scene object at frames 480,863 playing scene 1 and a 552,575 object;
+# scene 1 (66 fps) has 0,71 and 72,143. Objects 2 and 3 are scene 1's.
+USER_CASE_SECTIONS = [(0, None, 66), (1, None, 66)]
+
+
+def user_case_objects(player_body, player_frames="480,863"):
+    return [
+        (0, 6, player_frames, [player_body]),
+        (0, 11, "552,575", []),
+        (1, 0, "0,71", []),
+        (1, 0, "72,143", []),
+    ]
+
+
+def test_scene_object_aligns_the_sub_scene_user_case():
+    d, src, text = align_project("align_user", USER_CASE_SECTIONS, user_case_objects(scene_object(1)))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0 and err == "", "exit %d: %s" % (code, err)
+    # Scene 1 is shown from frame 480 of scene 0, so its frames are rounded on that timeline: frame 72 starts at 66
+    # (plain rounding gives 65, one frame before the scene object's own change at 502).
+    assert frames_of(out) == {0: [436, 784], 1: [502, 523], 2: [0, 65], 3: [66, 130]}, frames_of(out)
+    player_line = line_in_section(text, "[0]", "frame=")
+    assert read_report(out)["notes"] == [ALIGN_NOTE % (1, player_line)], read_report(out)["notes"]
+
+
+def test_two_scene_objects_playing_one_scene_warn_and_keep_plain_rounding():
+    objects = user_case_objects(scene_object(1)) + [
+        (0, 7, "100,200", [scene_object(1, position="0.000,1.000,再生範囲,0")])]
+    d, src, _ = align_project("align_two_players", USER_CASE_SECTIONS, objects)
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    warning = ALIGN_WARNING % (1, "it is played by 2 scene objects")
+    assert code == 0 and warning in err, "exit %d: %s" % (code, err)
+    assert read_report(out)["notes"] == [warning], read_report(out)["notes"]
+    assert frames_of(out)[2] == [0, 64] and frames_of(out)[3] == [65, 130], frames_of(out)
+
+
+def test_scene_object_rules_name_the_first_failed_rule():
+    user = USER_CASE_SECTIONS
+    plain = {2: [0, 64], 3: [65, 130]}
+    cases = [
+        ("R2 player outside the exported scene", [(0, None, 66), (1, None, 66), (2, None, 66)],
+         [(0, 6, "480,863", []), (0, 11, "552,575", []), (2, 6, "480,863", [scene_object(1)]),
+          (1, 0, "0,71", []), (1, 0, "72,143", [])],
+         "its scene object is not in the exported scene", {3: [0, 64], 4: [65, 130]}),
+        ("R3 three frame points", user, user_case_objects(scene_object(1), player_frames="480,600,863"),
+         "its scene object has more than two frame points", plain),
+        ("R4 speed 200", user, user_case_objects(scene_object(1, speed="200.00")),
+         "its scene object does not play at speed 100 without loop", plain),
+        ("R4 loop 1", user, user_case_objects(scene_object(1, loop="1")),
+         "its scene object does not play at speed 100 without loop", plain),
+        ("R5 position 0.010", user, user_case_objects(scene_object(1, position="0.010")),
+         "its scene object starts at a position that is not a whole frame at both rates", plain),
+        ("R5 negative position", user, user_case_objects(scene_object(1, position="-0.010")),
+         "its scene object starts at a position that is not a whole frame at both rates", plain),
+        ("R5 trackbar in another mode", user, user_case_objects(scene_object(1, position="0.000,5.819,直線移動,0")),
+         "its scene object starts at a position that is not a whole frame at both rates", plain),
+        ("R6 time control in the scene", user, user_case_objects(scene_object(1)) + [(1, 3, "0,71", [tc_effect()])],
+         "it contains a time control object", plain),
+    ]
+    for n, (label, sections, objects, reason, expected) in enumerate(cases):
+        d, src, _ = align_project("align_rule_%d" % n, sections, objects)
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert_target(src, out, "60")
+        warning = ALIGN_WARNING % (1, reason)
+        assert code == 0 and warning in err, "%s: exit %d: %s" % (label, code, err)
+        notes = read_report(out)["notes"]
+        assert [n for n in notes if not n.startswith("time control")] == [warning], "%s: %r" % (label, notes)
+        got = frames_of(out)
+        assert {no: got[no] for no in expected} == expected, "%s: %r" % (label, got)
+
+
+def test_scene_object_with_integer_k_is_not_aligned_and_matches_the_previous_output():
+    d, src, _ = align_project("align_integer", USER_CASE_SECTIONS, user_case_objects(scene_object(1)))
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "132")
+    assert code == 0 and err == "", "exit %d: %s" % (code, err)
+    assert frames_of(out) == {0: [960, 1727], 1: [1104, 1151], 2: [0, 143], 3: [144, 287]}, frames_of(out)
+    assert read_report(out)["notes"] == [], read_report(out)["notes"]
+    got = hashlib.sha256(without_file_line(read_bytes(out))).hexdigest()
+    assert got == ALIGN_INTEGER_GOLDEN, "output differs from the previous version (sha256 %s)" % got
+
+
+def test_scene_object_precise_shifts_the_keyframes_of_the_aligned_scene():
+    d, src, text = align_project("align_precise", USER_CASE_SECTIONS, [
+        (0, 6, "480,863", [scene_object(1)]),
+        (0, 11, "552,575", []),
+        (1, 0, "0,71", ["effect.name=標準描画\nX=0.00,100.00,直線移動,0\n"]),
+    ])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60", extra=("--precise",))
+    assert code == 0 and err == "", "exit %d: %s" % (code, err)
+    # Scene 1 frame v is shown at scene 0 frame 480 + v. The keyframes are those of the plain rescale on the shifted
+    # timeline: 0, 1 and 64 (the line is held at its end value from 64 on) and 65 (the last frame).
+    assert frames_of(out)[2] == [0, 1, 64, 65], frames_of(out)[2]
+    out_text = read_text_lf(out)
+    assert line_text_value(out_text, "[2.0]", "X=") == "0.00,0.99,98.59,100.00,直線移動,0", \
+        line_text_value(out_text, "[2.0]", "X=")
+    assert read_report(out)["notes"] == [ALIGN_NOTE % (1, line_in_section(text, "[0]", "frame="))], \
+        read_report(out)["notes"]
+
+
+def test_frame_dependent_effects_are_refused_when_k_is_not_one():
+    for n, name in enumerate(FRAME_EFFECT_NAMES):
+        d = case_dir("frame_effect_refused_%d" % n)
+        src = os.path.join(d, "src.aup2")
+        text = read_text_lf(FIX_30).replace("effect.name=標準描画", "effect.name=%s" % name, 1)
+        write_bytes(src, text.encode("utf-8"))
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert(src, out, 2)
+        line = line_number_of(src, "effect.name=%s" % name)
+        assert code == 2 and err.strip() == FRAME_EFFECT_TEXT % (line, name), "%s: exit %d: %s" % (name, code, err)
+        assert_no_output(out)
+
+
+def test_frame_dependent_effects_pass_at_the_same_rate_and_in_kept_scenes():
+    for n, name in enumerate(FRAME_EFFECT_NAMES):
+        d = case_dir("frame_effect_same_%d" % n)
+        src = os.path.join(d, "src.aup2")
+        text = read_text_lf(FIX_30).replace("effect.name=標準描画", "effect.name=%s" % name, 1)
+        write_bytes(src, text.encode("utf-8"))
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert_target(src, out, "30")
+        assert code == 0 and err == "", "%s: exit %d: %s" % (name, code, err)
+        assert "effect.name=%s" % name in read_text_lf(out), name
+    d, src, _ = align_project("frame_effect_kept", [(0, None, 30), (1, None, 15)],
+                              [(0, 0, "0,119", []), (1, 0, "0,59", ["effect.name=手ぶれ\n"])])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0 and err == "", "exit %d: %s" % (code, err)
+    assert "effect.name=手ぶれ" in read_text_lf(out) and frames_of(out)[1] == [0, 59], frames_of(out)
+    assert read_report(out)["notes"] == ["scene 1 kept at its own rate 15/1"], read_report(out)["notes"]
+
+
+# Scene ids: [scene.1] is scene 2 and [scene.2] is scene 1 (rates 15 and 60); scene 0 is the exported 30 fps scene.
+ID_SECTIONS = [(0, 0, 30), (1, 2, 15), (2, 1, 60)]
+ID_OBJECTS = [(0, 0, "0,119", []), (2, 0, "0,59", []), (1, 0, "0,59", [])]
+
+
+def test_scene_id_selects_the_plan_of_each_object():
+    d, src, _ = align_project("ids_swapped", ID_SECTIONS, ID_OBJECTS)
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60", extra=("--subscene-rate", "follow"))
+    assert code == 0 and err == "", "exit %d: %s" % (code, err)
+    # Scene 2 (15 fps, k = 4) and scene 1 (60 fps, k = 1): the objects written with scene=2 and scene=1 follow them.
+    assert frames_of(out) == {0: [0, 239], 1: [0, 239], 2: [0, 59]}, frames_of(out)
+    assert_subscene_report(read_report(out), "follow", [
+        (0, "scene 0", "30/1", "60/1", "2/1", "follow", True),
+        (1, "scene 1", "60/1", "60/1", "1/1", "follow", False),
+        (2, "scene 2", "15/1", "60/1", "4/1", "follow", False),
+    ], [])
+
+
+def test_scene_id_object_uses_its_scene_when_the_section_number_differs():
+    d, src, _ = align_project("ids_5", [(0, 0, 30), (1, 5, 15)], [(0, 0, "0,119", []), (5, 0, "0,59", [])])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0 and err == "", "exit %d: %s" % (code, err)
+    # Scene 5 is kept at 15 fps; an object that wrongly took the exported plan would become 0,239.
+    assert frames_of(out) == {0: [0, 239], 1: [0, 59]}, frames_of(out)
+    assert_subscene_report(read_report(out), "auto", [
+        (0, "scene 0", "30/1", "60/1", "2/1", "follow", True),
+        (5, "scene 5", "15/1", "15/1", "1/1", "keep", False),
+    ], ["scene 5 kept at its own rate 15/1"])
+
+
+def test_display_scene_naming_another_section_is_ambiguous():
+    d, src, text = align_project("ids_ambiguous", ID_SECTIONS, ID_OBJECTS, display_scene=1)
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    line = line_in_section(text, "[project]", "display.scene=")
+    assert code == 2 and err.strip() == ("REFUSED: line %d: display.scene 1 is ambiguous: [scene.1] has scene=2" % line), \
+        "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+
+def test_scene_id_must_be_a_non_negative_integer_and_unique():
+    d, src, text = align_project("ids_bad_value", [(0, 0, 30), (1, 1, 15)], [(0, 0, "0,119", []), (1, 0, "0,59", [])])
+    out = os.path.join(d, "out.aup2")
+    edited = text.replace("[scene.1]\nscene=1\n", "[scene.1]\nscene=abc\n", 1)
+    assert edited != text
+    src_bad = os.path.join(d, "bad.aup2")
+    write_bytes(src_bad, edited.encode("utf-8"))
+    code, _, err = convert_target(src_bad, out, "60")
+    line = line_in_section(edited, "[scene.1]", "scene=")
+    assert code == 2 and err.strip() == ("REFUSED: line %d: scene= in [scene.1] must be a non-negative integer, got 'abc'"
+                                         % line), "exit %d: %s" % (code, err)
+    assert_no_output(out)
+
+    d2, _, text2 = align_project("ids_dup_line", [(0, 0, 30), (1, 0, 15)], [(0, 0, "0,119", [])])
+    code, _, err = convert_target(os.path.join(d2, "src.aup2"), os.path.join(d2, "out.aup2"), "60")
+    line = line_in_section(text2, "[scene.1]", "scene=")
+    assert code == 2 and err.strip() == ("REFUSED: line %d: scene id 0 is used by more than one [scene.N] section"
+                                         % line), "exit %d: %s" % (code, err)
+
+    d3, _, _ = align_project("ids_dup_default", [(0, 1, 30), (1, None, 15)], [(1, 0, "0,119", [])])
+    code, _, err = convert_target(os.path.join(d3, "src.aup2"), os.path.join(d3, "out.aup2"), "60")
+    assert code == 2 and err.strip() == "REFUSED: scene id 1 is used by more than one [scene.N] section", \
+        "exit %d: %s" % (code, err)
+
+
+def test_section_without_scene_line_has_the_section_number_as_id():
+    d, src, _ = align_project("ids_default", [(0, None, 30), (1, None, 15)], [(0, 0, "0,119", []), (1, 0, "0,59", [])])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60", extra=("--subscene-rate", "follow"))
+    assert code == 0 and err == "", "exit %d: %s" % (code, err)
+    assert frames_of(out) == {0: [0, 239], 1: [0, 239]}, frames_of(out)
+    assert_subscene_report(read_report(out), "follow", [
+        (0, "scene 0", "30/1", "60/1", "2/1", "follow", True),
+        (1, "scene 1", "15/1", "60/1", "4/1", "follow", False),
+    ], [])
+
+
 TESTS = [
     test_target_fps_exact_values_30fps_fixture,
     test_target_fps_synthetic_60_to_66_and_72_to_60,
@@ -3424,6 +3706,18 @@ TESTS = [
     test_frame_mode_same_rate_is_unchanged,
     test_frame_mode_in_kept_scene_is_not_checked,
     test_frame_mode_precise_skips_the_object_and_still_converts_the_parameter,
+    test_scene_object_aligns_the_sub_scene_user_case,
+    test_two_scene_objects_playing_one_scene_warn_and_keep_plain_rounding,
+    test_scene_object_rules_name_the_first_failed_rule,
+    test_scene_object_with_integer_k_is_not_aligned_and_matches_the_previous_output,
+    test_scene_object_precise_shifts_the_keyframes_of_the_aligned_scene,
+    test_frame_dependent_effects_are_refused_when_k_is_not_one,
+    test_frame_dependent_effects_pass_at_the_same_rate_and_in_kept_scenes,
+    test_scene_id_selects_the_plan_of_each_object,
+    test_scene_id_object_uses_its_scene_when_the_section_number_differs,
+    test_display_scene_naming_another_section_is_ambiguous,
+    test_scene_id_must_be_a_non_negative_integer_and_unique,
+    test_section_without_scene_line_has_the_section_number_as_id,
 ]
 
 

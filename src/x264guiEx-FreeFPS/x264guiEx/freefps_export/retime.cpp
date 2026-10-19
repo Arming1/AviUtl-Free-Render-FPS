@@ -487,6 +487,18 @@ const std::set<std::string> kFrameCountModes = {kFrameCountRepeat, kFrameCountRa
 const std::string kFrameCountFlag = "4";
 constexpr std::size_t kFrameCountMaxPlaces = 6;
 const Rational kFrameCountTolerance{1, 2};  // a rewritten value may be off by at most half a frame (355/113 bounds pi above)
+// Effects whose look depends on the frame number or on a per-frame random value. 手ぶれ, ラスター and フレア were measured
+// to differ from the original at another frame rate (D:\tutorial\compare). 振動 and ノイズ are not measured; they are listed
+// too, so they are refused until a probe lets them through. Refused in a followed object whose scene has k != 1.
+const std::set<std::string> kFrameEffectNames = {"手ぶれ", "振動", "ラスター", "フレア", "ノイズ"};
+// The シーン effect plays a scene from its 再生位置 (seconds, or a 再生範囲 trackbar) at 再生速度 and ループ再生. Read by the
+// scene alignment (plan_scene_alignment).
+const std::string kScenePlayerEffect = "シーン";
+const std::string kScenePlayerKey = "シーン";
+const std::string kScenePlayPosition = "再生位置";
+const std::string kScenePlaySpeed = "再生速度";
+const std::string kScenePlayLoop = "ループ再生";
+const std::string kPlayRangeMode = "再生範囲";
 
 // ---------------------------------------------------------------------------
 // Line structure
@@ -1627,6 +1639,170 @@ std::map<std::size_t, std::string> plan_frame_modes(const std::vector<std::strin
     return bodies;
 }
 
+// ---------------------------------------------------------------------------
+// Scene alignment. A sub scene that an シーン object plays starts at that object's first frame S, but its frames are rounded
+// from its own origin. At a rate where the origin times k is not an integer, its boundaries can fall one frame away from
+// the exported scene's (the sub scene shows its new content a frame before a filter of the main scene starts). A scene that
+// can be aligned is rescaled on the timeline of its player: scene frame f is exported frame f + D, with D = S - P (P: the
+// player's start position in frames of the scene), and its new frame is rescale(f + D) - Dn, with Dn = round(S k) - P k.
+// Any rule that fails leaves the scene on its own origin and says why in a WARNING note.
+// ---------------------------------------------------------------------------
+
+// The offsets of one aligned scene (see above).
+struct SceneAlignment {
+    i64 shift = 0;                // D
+    i64 new_shift = 0;            // Dn
+    std::size_t player_line = 0;  // frame= line of the player object (1-based)
+    bool fractional = false;      // S k is not an integer: the scene is rescaled on the player's timeline (note)
+};
+
+// One シーン effect that names a scene: its object and its keys (the effect's own key-value map).
+struct ScenePlayer {
+    i64 obj = 0;
+    const std::map<std::string, Prop>* props = nullptr;
+};
+
+// A scene number written as digits. Empty when it does not fit in 64 bits: no scene has such a number, so the effect plays
+// no scene (not an error).
+std::optional<i64> scene_number_of(const std::string& digits) {
+    i64 value = 0;
+    try {
+        for (char c : digits) {
+            value = checked_add(checked_mul(value, 10), c - '0');
+        }
+    } catch (const Overflow&) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+// The rules for the one player of a scene, in order. Returns the reason the scene cannot be aligned, or an empty string when
+// it can; al is filled then.
+std::string player_problem(const ScenePlayer& player, const SceneRate& sr, i64 scene_no, i64 export_scene,
+                           const std::map<std::pair<i64, i64>, std::map<std::string, Prop>>& effect_props,
+                           const std::map<i64, i64>& object_scene, const std::map<i64, std::vector<i64>>& frame_values,
+                           const std::map<i64, std::size_t>& frame_line_of, const Rational& k, SceneAlignment& al) {
+    const std::map<std::string, Prop>& props = *player.props;
+    const auto prop_text = [&props](const std::string& key, const std::string& fallback) {
+        const auto found = props.find(key);
+        return found == props.end() ? fallback : found->second.value;
+    };
+
+    // The player is an object of the exported scene.
+    const auto owner = object_scene.find(player.obj);
+    if (owner == object_scene.end() || owner->second != export_scene) {
+        return "its scene object is not in the exported scene";
+    }
+    const auto frames = frame_values.find(player.obj);
+    if (frames == frame_values.end() || frames->second.size() != 2) {
+        return "its scene object has more than two frame points";
+    }
+    // Plays at speed 100 without loop (both default when absent).
+    std::size_t digits = 0;
+    const std::string speed = prop_text(kScenePlaySpeed, "100");
+    if (!is_number(speed) || !rat_equal(parse_decimal(speed, digits), Rational{100, 1}) ||
+        prop_text(kScenePlayLoop, "0") != "0") {
+        return "its scene object does not play at speed 100 without loop";
+    }
+    // The start position: a plain number, or a 再生範囲 trackbar with two values (its first value). The start must be a whole
+    // frame of the scene at both rates.
+    Rational origin{0, 1};  // seconds
+    TrackText track;
+    const std::string position = prop_text(kScenePlayPosition, "0");
+    if (parse_track_text(position, track)) {
+        if (track.mode != kPlayRangeMode || track.values.size() != 2) {
+            return "its scene object starts at a position that is not a whole frame at both rates";
+        }
+        origin = parse_decimal(track.values[0], digits);
+    } else if (is_number(position)) {
+        origin = parse_decimal(position, digits);
+    } else {
+        return "its scene object starts at a position that is not a whole frame at both rates";
+    }
+    const Rational start = rat_mul(origin, sr.rate);   // P: the start in frames of the scene
+    const Rational start_scaled = rat_mul(start, k);   // P k
+    if (rat_less(origin, Rational{0, 1}) || start.den != 1 || start_scaled.den != 1) {  // a negative start is rule 5 too
+        return "its scene object starts at a position that is not a whole frame at both rates";
+    }
+    // A time control object in the scene would be rescaled on its own timeline (its 位置 is worked out from the frames).
+    for (const auto& [key, eff] : effect_props) {
+        const auto name = eff.find("effect.name");
+        const auto in_scene = object_scene.find(key.first);
+        if (name != eff.end() && name->second.value == kTimeControlEffect && in_scene != object_scene.end() &&
+            in_scene->second == scene_no) {
+            return "it contains a time control object";
+        }
+    }
+
+    const i64 first = frames->second.front();  // S
+    al.shift = checked_sub(first, start.num);
+    al.new_shift = checked_sub(round_scaled(first, k), start_scaled.num);
+    al.player_line = frame_line_of.at(player.obj) + 1;
+    al.fractional = rat_mul(Rational{first, 1}, k).den != 1;
+    return std::string();
+}
+
+// The aligned scenes (scene number -> offsets) of the followed scenes at the exported scene's k. A scene is visited only when
+// its k is that of the exported scene and it has at least one player; the notes are appended here, in scene-number order: a
+// WARNING for each scene that cannot be aligned (also in res.warnings, as in the Python tool's warnings list), and a note
+// for each aligned scene whose origin times k is not an integer. Empty when k is an integer.
+std::map<i64, SceneAlignment> plan_scene_alignment(
+    const std::map<std::pair<i64, i64>, std::map<std::string, Prop>>& effect_props,
+    const std::map<i64, i64>& object_scene, const std::map<i64, SceneRate>& scene_rate_lines, i64 export_scene,
+    const Rational& k, const std::map<i64, std::vector<i64>>& frame_values,
+    const std::map<i64, std::size_t>& frame_line_of, RetimeResult& res) {
+    std::map<i64, SceneAlignment> aligned;
+    if (k.den == 1) {
+        return aligned;
+    }
+
+    // Every シーン effect that names a scene number, by that number (a number that does not fit names no scene).
+    std::map<i64, std::vector<ScenePlayer>> players_of;
+    for (const auto& [owner, props] : effect_props) {
+        const auto name = props.find("effect.name");
+        const auto target = props.find(kScenePlayerKey);
+        if (name == props.end() || name->second.value != kScenePlayerEffect || target == props.end() ||
+            !all_digits(target->second.value)) {
+            continue;
+        }
+        if (const std::optional<i64> scene = scene_number_of(target->second.value)) {
+            players_of[*scene].push_back(ScenePlayer{owner.first, &props});
+        }
+    }
+
+    for (const auto& [scene_no, sr] : scene_rate_lines) {
+        if (scene_no == export_scene || !sr.follow || !rat_equal(sr.k, k)) {
+            continue;
+        }
+        const auto found = players_of.find(scene_no);
+        if (found == players_of.end()) {
+            continue;
+        }
+        const std::string no = std::to_string(scene_no);
+        SceneAlignment al;
+        std::string problem;
+        if (found->second.size() != 1) {
+            problem = "it is played by " + std::to_string(found->second.size()) + " scene objects";
+        } else {
+            problem = player_problem(found->second[0], sr, scene_no, export_scene, effect_props, object_scene,
+                                     frame_values, frame_line_of, k, al);
+        }
+        if (!problem.empty()) {
+            const std::string warning = "WARNING: scene " + no + " cannot be aligned to the exported scene (" + problem +
+                                        "); object boundaries inside it may be one frame off at this rate";
+            res.notes.push_back(warning);
+            res.warnings.push_back(warning);
+            continue;
+        }
+        aligned[scene_no] = al;
+        if (al.fractional) {
+            res.notes.push_back("scene " + no + " is rescaled on the timeline of its scene object at line " +
+                                std::to_string(al.player_line));
+        }
+    }
+    return aligned;
+}
+
 // Python convert(). Writes into res and returns the output bytes. Throws Refused or Overflow.
 std::string convert(std::string_view data, const Mode& mode, const std::string& out_utf8, RetimeResult& res) {
     if (mode.factor && mode.factor_k < 2) {
@@ -1655,7 +1831,7 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
     // scene is left alone.
     std::vector<std::pair<std::size_t, Section>> column_lines;
     bool project_seen = false;
-    std::map<i64, std::vector<std::size_t>> scene_lines;
+    std::map<i64, std::vector<std::size_t>> section_lines;  // by section number N; re-keyed by scene ID below
     std::vector<i64> scene_order;
     std::vector<std::pair<i64, std::size_t>> frame_lines;  // (object, line index), file order
     std::map<i64, std::size_t> frame_line_of;
@@ -1677,8 +1853,8 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
             std::string d2;
             if (scene_header(body, d1)) {
                 const i64 n = parse_digits(d1, idx + 1, "scene number");
-                if (scene_lines.find(n) == scene_lines.end()) {
-                    scene_lines[n];
+                if (section_lines.find(n) == section_lines.end()) {
+                    section_lines[n];
                     scene_order.push_back(n);
                 }
                 header_scene = n;
@@ -1716,7 +1892,7 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
             }
             break;
         case Kind::kScene:
-            scene_lines[section.a].push_back(idx);
+            section_lines[section.a].push_back(idx);
             break;
         case Kind::kObject:
             if (key == "frame") {
@@ -1746,11 +1922,47 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
     if (!project_seen || project_file_lines.size() != 1) {
         refuse(0, "expected exactly one 'file=' line in [project]");
     }
-    if (scene_lines.empty()) {
+    if (section_lines.empty()) {
         refuse(0, "no [scene.N] section found");
     }
 
-    // Each object belongs to one scene: its scene= line if it has one, else the [scene.N] section above it,
+    // Scene IDs. The ID of a [scene.N] section is the value of its first scene= line (an integer), or N when it has none.
+    // Objects and シーン effects name scenes by ID, so every table of scenes is keyed by ID. Each ID belongs to one section.
+    std::map<i64, i64> section_id;  // section number N -> scene ID
+    std::map<i64, i64> id_section;  // scene ID -> section number N
+    std::set<i64> scene_ids_seen;
+    // The sections in ascending section number: the first section with a bad or repeated ID is the one reported.
+    std::vector<i64> sections_ascending = scene_order;
+    std::sort(sections_ascending.begin(), sections_ascending.end());
+    for (i64 section_no : sections_ascending) {
+        i64 id = section_no;
+        std::optional<std::size_t> id_line;  // the scene= line that gives the ID, when there is one
+        for (std::size_t idx : section_lines[section_no]) {
+            if (key_of(lines[idx]) == "scene") {
+                const std::string value = value_of(lines[idx]);
+                if (!all_digits(value)) {
+                    refuse(idx + 1, "scene= in [scene." + std::to_string(section_no) +
+                                        "] must be a non-negative integer, got '" + value + "'");
+                }
+                id = parse_digits(value, idx + 1, "scene=");
+                id_line = idx;
+                break;
+            }
+        }
+        if (!scene_ids_seen.insert(id).second) {
+            refuse(id_line ? *id_line + 1 : 0,
+                   "scene id " + std::to_string(id) + " is used by more than one [scene.N] section");
+        }
+        section_id[section_no] = id;
+        id_section[id] = section_no;
+    }
+    // The lines of each scene, by scene ID (a section's lines go to its ID).
+    std::map<i64, std::vector<std::size_t>> scene_lines;
+    for (i64 section_no : scene_order) {
+        scene_lines[section_id.at(section_no)] = section_lines[section_no];
+    }
+
+    // Each object belongs to one scene: its scene= line if it has one, else the [scene.N] section above it (its ID),
     // else scene 0.
     std::map<i64, i64> object_scene;
     for (i64 obj : obj_header_order) {
@@ -1761,15 +1973,17 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
             }
             object_scene[obj] = parse_digits(sl->second.first, sl->second.second + 1, "object scene=");
         } else {
-            object_scene[obj] = obj_header_scene[obj].value_or(0);
+            const std::optional<i64> header = obj_header_scene[obj];
+            object_scene[obj] = header ? section_id.at(*header) : 0;
         }
     }
 
     // Pass 2: scene checks. Scenes may have different rates; the exported scene (display.scene) decides the
     // target rate, and each other scene follows it or is kept as it is (subscene_rate).
     res.subscene_rate = policy_name(mode.subscene_rate);
-    std::map<i64, SceneRate> scene_rate_lines;
-    for (const auto& [scene_no, idxs] : scene_lines) {
+    std::map<i64, SceneRate> scene_rate_lines;  // by scene ID
+    for (const auto& [scene_id, idxs] : scene_lines) {  // ascending by scene ID
+        const i64 section_no = id_section.at(scene_id);
         std::optional<std::pair<i64, std::size_t>> rate_v;
         std::optional<std::pair<i64, std::size_t>> scale_v;
         std::string scene_name;  // the first name= line
@@ -1800,7 +2014,7 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
             }
         }
         if (!rate_v) {
-            refuse(0, "[scene." + std::to_string(scene_no) + "] has no video.rate");
+            refuse(0, "[scene." + std::to_string(section_no) + "] has no video.rate");
         }
         i64 scale_value = 1;
         std::optional<std::size_t> scale_idx;
@@ -1815,7 +2029,7 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         sr.scale_value = scale_value;
         sr.rate = make_rational(sr.rate_value, sr.scale_value);
         sr.name = scene_name;
-        scene_rate_lines[scene_no] = sr;
+        scene_rate_lines[scene_id] = sr;
     }
 
     // The exported scene: display.scene, 0 when absent.
@@ -1830,6 +2044,13 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
     const auto export_found = scene_rate_lines.find(export_scene);
     if (export_found == scene_rate_lines.end()) {
         refuse(0, "display.scene " + std::to_string(export_scene) + " does not exist");
+    }
+    // display.scene names an ID. A [scene.V] section with another ID makes the number ambiguous (only when the row exists).
+    const auto same_number = section_id.find(export_scene);
+    if (display_scene && same_number != section_id.end() && same_number->second != export_scene) {
+        refuse(display_scene->second + 1,
+               "display.scene " + std::to_string(export_scene) + " is ambiguous: [scene." +
+                   std::to_string(export_scene) + "] has scene=" + std::to_string(same_number->second));
     }
     const SceneRate& export_rate = export_found->second;
     const i64 src_rate = export_rate.rate_value;
@@ -1875,7 +2096,7 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         if (!sr.follow) {
             res.notes.push_back("scene " + std::to_string(scene_no) + " kept at its own rate " + plan.source_rate);
         } else if (!sr.scale_idx) {
-            res.notes.push_back("[scene." + std::to_string(scene_no) +
+            res.notes.push_back("[scene." + std::to_string(id_section.at(scene_no)) +
                                 "] has no video.scale; read as 1 and written after video.rate");
         }
     }
@@ -1906,7 +2127,7 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
     for (const auto& [idx, sec] : column_lines) {
         const SceneRate* owner = &export_rate;
         if (sec.kind == Kind::kScene) {
-            owner = &scene_rate_lines.at(sec.a);
+            owner = &scene_rate_lines.at(section_id.at(sec.a));
         } else if (sec.kind == Kind::kObject || sec.kind == Kind::kEffect) {
             owner = &scene_of_object(sec.a);
         }
@@ -1934,6 +2155,18 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
             frame_values[obj] = parse_frames(value_of(lines[idx]), idx + 1);
         }
     }
+    // Scene alignment (see plan_scene_alignment): its notes come after the scene notes and before the object notes.
+    const std::map<i64, SceneAlignment> alignments = plan_scene_alignment(
+        effect_props, object_scene, scene_rate_lines, export_scene, k, frame_values, frame_line_of, res);
+    // The alignment of the scene an object belongs to, or null when that scene is not aligned.
+    const auto alignment_of = [&](i64 obj) -> const SceneAlignment* {
+        const auto owner = object_scene.find(obj);
+        if (owner == object_scene.end()) {
+            return nullptr;
+        }
+        const auto found = alignments.find(owner->second);
+        return found == alignments.end() ? nullptr : &found->second;
+    };
     std::vector<std::size_t> counter_lines;
     for (const auto& entry : effect_props) {
         const auto& props = entry.second;
@@ -2013,6 +2246,12 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         if (name != props.end()) {
             effect_name = name->second.value;
         }
+        if (key == "effect.name" && kFrameEffectNames.count(value) != 0 &&
+            !rat_equal(scene_of_object(sec.a).k, Rational{1, 1})) {
+            refuse(idx + 1, "effect '" + value +
+                                "' depends on the frame number or a per-frame random value and is not verified at another "
+                                "frame rate; refused");
+        }
         std::string marker;
         if (find_marker(decode_utf8(script_text(effect_name, key, value)), marker)) {
             refuse(idx + 1, "script text uses frame-dependent marker '" + marker + "' in " +
@@ -2066,7 +2305,26 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
         followed_frame_lines.push_back(entry);
         object_k[obj] = owner.k;
         bool was_short = false;
-        new_frames[obj] = rescale_frames(frame_values[obj], owner.k, idx + 1, was_short);
+        if (const SceneAlignment* al = alignment_of(obj)) {
+            // The unshifted rescale runs first, so an object refused for its own frames gets the same text as before.
+            bool unshifted_short = false;
+            rescale_frames(frame_values[obj], owner.k, idx + 1, unshifted_short);
+            std::vector<i64> shifted;
+            for (i64 v : frame_values[obj]) {
+                shifted.push_back(checked_add(v, al->shift));
+            }
+            try {
+                new_frames[obj] = rescale_frames(shifted, owner.k, idx + 1, was_short);
+            } catch (const Refused&) {
+                refuse(idx + 1, "frame= points collide or stop increasing after rescaling on the timeline of the scene "
+                                "object at line " + std::to_string(al->player_line) + "; refused");
+            }
+            for (i64& f : new_frames[obj]) {
+                f = checked_sub(f, al->new_shift);
+            }
+        } else {
+            new_frames[obj] = rescale_frames(frame_values[obj], owner.k, idx + 1, was_short);
+        }
         if (was_short) {
             shortened.insert(idx + 1);
             res.notes.push_back("object at line " + std::to_string(idx + 1) + " shortened to 1 frame");
@@ -2086,9 +2344,31 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
                           new_frames, object_k, written_frames, res);
     std::map<std::size_t, std::string> precise_bodies;
     if (mode.precise) {
-        precise_bodies = apply_precise(lines, effect_lines, section_of, followed_frame_lines, frame_values, new_frames,
-                                       object_k, time_control_sections, mode.precise_extra_decimals, written_frames,
-                                       res);
+        // An aligned scene is re-sampled on its player's timeline: the copies hold its frames at the exported positions
+        // (+D) and its new frames before the shift back (+Dn). The frames written are shifted back by Dn.
+        std::map<i64, std::vector<i64>> aligned_values = frame_values;
+        std::map<i64, std::vector<i64>> aligned_new = new_frames;
+        for (const auto& entry : followed_frame_lines) {
+            if (const SceneAlignment* al = alignment_of(entry.first)) {
+                for (i64& v : aligned_values[entry.first]) {
+                    v = checked_add(v, al->shift);
+                }
+                for (i64& f : aligned_new[entry.first]) {
+                    f = checked_add(f, al->new_shift);
+                }
+            }
+        }
+        std::map<i64, std::vector<i64>> precise_frames;
+        precise_bodies = apply_precise(lines, effect_lines, section_of, followed_frame_lines, aligned_values, aligned_new,
+                                       object_k, time_control_sections, mode.precise_extra_decimals, precise_frames, res);
+        for (auto& [obj, frames] : precise_frames) {
+            if (const SceneAlignment* al = alignment_of(obj)) {
+                for (i64& f : frames) {
+                    f = checked_sub(f, al->new_shift);
+                }
+            }
+            written_frames[obj] = frames;
+        }
     }
 
     // Pass 4: build the rewritten lines.
@@ -2103,12 +2383,12 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
 
     set_line(project_file_lines.front(), "file=" + out_utf8);
 
-    for (i64 scene_no : scene_order) {
-        const SceneRate& sr = scene_rate_lines[scene_no];
+    for (const auto& [scene_id, scene_idxs] : scene_lines) {  // ascending by scene ID (the order of the changes)
+        const SceneRate& sr = scene_rate_lines.at(scene_id);
         if (!sr.follow) {
             continue;  // a kept scene: its section is written byte for byte
         }
-        for (std::size_t idx : scene_lines[scene_no]) {
+        for (std::size_t idx : scene_idxs) {
             const std::string key = key_of(lines[idx]);
             const std::string value = value_of(lines[idx]);
             if (idx == sr.rate_idx) {

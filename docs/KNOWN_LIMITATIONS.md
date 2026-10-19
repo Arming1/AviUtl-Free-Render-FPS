@@ -28,6 +28,10 @@ Conversion rules are in [RETIME_RULES.md](RETIME_RULES.md). Only limits that sti
 - **Without precise motion**, a linear move ends at `e'/Rt` instead of `e/Rp`. The end-time deviation is at most `|1/Rp − 1/Rt| + half an output frame`.
 - **Converted time-control projects** have not yet been run in AviUtl2 as whole files. The local corpus of 138 projects (121 converted before 1.3.0, about 10 more expected) is also not yet confirmed in AviUtl2.
 - **Sub-scenes.** Whether AviUtl2 plays a kept sub-scene at its own rate inside a main scene at another rate is a host property. It is not checked by the tool. The sub-scene frame shown at a given main-scene time (round down or nearest) is not verified.
+- **Sub-scenes that cannot be aligned.** At a target rate that is not an integer multiple of the source, object boundaries inside such a sub-scene
+  may be one frame off. A WARNING is written. See [RETIME_RULES.md](RETIME_RULES.md).
+- **Frame-dependent effects** (`手ぶれ`, `振動`, `ラスター`, `フレア`, `ノイズ`) are refused when the object's rate changes. They are not verified at another frame rate,
+  so they stay refused until a host probe allows them.
 
 ## Plugin and runtime
 

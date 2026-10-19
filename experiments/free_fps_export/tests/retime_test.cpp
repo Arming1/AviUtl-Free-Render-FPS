@@ -2765,6 +2765,295 @@ void test_frame_count_modes() {
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// Scene alignment (an シーン object plays a sub scene), scene IDs and frame-dependent effects
+// ---------------------------------------------------------------------------
+
+std::string join_lines(const std::vector<std::string>& lines) {
+    std::string out;
+    for (const std::string& line : lines) {
+        out += (out.empty() ? "" : " | ") + line;
+    }
+    return out;
+}
+
+// An シーン effect in object `no` (layer 0 of the main scene): it plays scene scene_value from 再生位置 at 再生速度 and ループ再生.
+std::string player_at(int no, const std::string& frames, const std::string& scene_value,
+                      const std::string& position = "0.000,5.819,再生範囲,0", const std::string& speed = "100.00",
+                      const std::string& loop = "0") {
+    const std::string n = std::to_string(no);
+    return "[" + n + "]\nlayer=0\nframe=" + frames + "\n[" + n + ".0]\neffect.name=シーン\n再生位置=" + position +
+           "\n再生速度=" + speed + "\nシーン=" + scene_value + "\nループ再生=" + loop + "\n";
+}
+
+std::string player_object(const std::string& frames, const std::string& scene_value,
+                          const std::string& position = "0.000,5.819,再生範囲,0", const std::string& speed = "100.00",
+                          const std::string& loop = "0") {
+    return player_at(0, frames, scene_value, position, speed, loop);
+}
+
+// One [scene.section] section whose first scene= line is id (no scene= line when id is negative), then its objects.
+std::string scene_section(int section, int id, const std::string& name, std::int64_t rate_value,
+                          std::int64_t scale_value, const std::string& objects) {
+    const std::string n = std::to_string(section);
+    const std::string id_line = id < 0 ? std::string() : "scene=" + std::to_string(id) + "\n";
+    return "[scene." + n + "]\n" + id_line + "name=" + name + "\nlabel=\nvideo.width=640\nvideo.height=360\n" +
+           "video.rate=" + std::to_string(rate_value) + "\nvideo.scale=" + std::to_string(scale_value) +
+           "\naudio.rate=44100\ncursor.frame=30\npreview.frame=60\ndisplay.frame=90\n" + objects;
+}
+
+// Object `no` on layer 0 with a 直線移動 X track from 0 to 100 (no scene= line: it belongs to the section above it).
+std::string x_object(int no, const std::string& frames) {
+    const std::string n = std::to_string(no);
+    return "[" + n + "]\nlayer=0\nframe=" + frames + "\n[" + n + ".0]\neffect.name=標準描画\nX=0.00,100.00,直線移動,0\n";
+}
+
+// The user's case (66 -> 60): the exported scene 0 (66 FPS) holds the player (object 0) and the given objects; sub scene 1
+// (66 FPS) holds two objects, 0..71 and 72..143 (both on layer 0), and the given objects.
+std::string sub_case(const std::string& player, const std::string& scene0_objects = std::string(),
+                     const std::string& sub_objects = std::string()) {
+    return multi_scene_project("display.scene=0\n",
+                               scene_section(0, 0, "main", 66, 1, player + scene0_objects) +
+                                   scene_section(1, 1, "sub", 66, 1,
+                                                 x_object(2, "0,71") + x_object(3, "72,143") + sub_objects));
+}
+
+// Object 1 of the user's case: a plain object of scene 0 at 552..575 (the old and the aligned rescale differ for its start).
+const std::string kUserObject1 = "[1]\nlayer=1\nframe=552,575\n[1.0]\neffect.name=標準描画\n";
+
+std::string align_warning(int scene, const std::string& reason) {
+    return "WARNING: scene " + std::to_string(scene) + " cannot be aligned to the exported scene (" + reason +
+           "); object boundaries inside it may be one frame off at this rate";
+}
+
+// Rule 1 and the aligned result: scene 1 is placed on the timeline of the player at frame 480 (P = 0): 0,65 and 66,130
+// (the plain rescale gives 0,64 and 65,130). Scene 0 keeps its plain rescale: 436,784 for the player, 502,523 for object 1.
+void test_scene_alignment_user_case() {
+    const std::string text = sub_case(player_object("480,863", "1"), kUserObject1);
+    const RetimeResult r = retime_target(text, rate(60));
+    const std::vector<std::string> expected = {"frame=436,784", "frame=502,523", "frame=0,65", "frame=66,130"};
+    check(r.ok && rows_with_prefix(r, "frame=") == expected,
+          "alignment 66->60: scene 1 aligned to the player (0,65 and 66,130)",
+          r.ok ? join_lines(rows_with_prefix(r, "frame=")) : refusal_message(r));
+    const std::string note = "scene 1 is rescaled on the timeline of its scene object at line " +
+                             std::to_string(line_of_first(text, "frame=480,863\n"));
+    check(r.ok && r.notes.size() == 1 && r.notes[0] == note && r.warnings.empty(),
+          "alignment 66->60: note names the player's frame= line, no warning", r.ok ? join_lines(r.notes) : refusal_message(r));
+
+    // The same with the scene's id written as 7 (the player plays id 7, the section is [scene.1]).
+    const std::string by_id = multi_scene_project(
+        "display.scene=0\n", scene_section(0, 0, "main", 66, 1, player_object("480,863", "7") + kUserObject1) +
+                                 scene_section(1, 7, "sub", 66, 1, x_object(2, "0,71") + x_object(3, "72,143")));
+    const RetimeResult ri = retime_target(by_id, rate(60));
+    check(ri.ok && rows_with_prefix(ri, "frame=") == expected && ri.notes.size() == 1 &&
+              ri.notes[0] == "scene 7 is rescaled on the timeline of its scene object at line " +
+                                 std::to_string(line_of_first(by_id, "frame=480,863\n")),
+          "alignment: シーン=7 plays the scene whose id is 7 (section 1)", ri.ok ? join_lines(ri.notes) : refusal_message(ri));
+}
+
+// Rule 2: two シーン objects play scene 1. Scene 1 keeps its plain rescale (0,64 and 65,130) and the reason is given.
+void test_scene_alignment_two_players() {
+    const std::string text = sub_case(player_object("480,863", "1") + player_at(4, "100,200", "1"));
+    const RetimeResult r = retime_target(text, rate(60));
+    const std::vector<std::string> rows = {"frame=436,784", "frame=91,182", "frame=0,64", "frame=65,130"};
+    check(r.ok && rows_with_prefix(r, "frame=") == rows && r.notes.size() == 1 &&
+              r.notes[0] == align_warning(1, "it is played by 2 scene objects") &&
+              r.warnings == r.notes,
+          "alignment R1: two players give the warning and the plain rescale",
+          r.ok ? join_lines(r.notes) + " / " + join_lines(rows_with_prefix(r, "frame=")) : refusal_message(r));
+}
+
+// Rules 2 to 6: each reason gives the warning, and scene 1 keeps its plain rescale (0,64 and 65,130 are in the output).
+void expect_unaligned(const std::string& name, const std::string& text, const std::string& reason) {
+    const RetimeResult r = retime_target(text, rate(60));
+    const std::string warning = align_warning(1, reason);
+    const bool has_warning = std::find(r.notes.begin(), r.notes.end(), warning) != r.notes.end();
+    check(r.ok && has_warning && contains_lines(r.output, "frame=0,64\n") && contains_lines(r.output, "frame=65,130\n"),
+          name, r.ok ? join_lines(r.notes) : refusal_message(r));
+}
+
+void test_scene_alignment_refusal_rules() {
+    // R2: the player is in scene 2, not in the exported scene 0.
+    expect_unaligned("alignment R2: player outside the exported scene",
+                     multi_scene_project("display.scene=0\n", scene_section(0, 0, "main", 66, 1, "") +
+                                                                  scene_section(1, 1, "sub", 66, 1,
+                                                                                x_object(2, "0,71") + x_object(3, "72,143")) +
+                                                                  scene_section(2, 2, "other", 66, 1,
+                                                                                player_object("100,200", "1"))),
+                     "its scene object is not in the exported scene");
+    // R3: three frame points.
+    expect_unaligned("alignment R3: player with three frame points", sub_case(player_object("480,600,863", "1")),
+                     "its scene object has more than two frame points");
+    // R4: speed 200, and a loop.
+    expect_unaligned("alignment R4: player at speed 200",
+                     sub_case(player_object("480,863", "1", "0.000,5.819,再生範囲,0", "200.00")),
+                     "its scene object does not play at speed 100 without loop");
+    expect_unaligned("alignment R4: player with a loop",
+                     sub_case(player_object("480,863", "1", "0.000,5.819,再生範囲,0", "100.00", "1")),
+                     "its scene object does not play at speed 100 without loop");
+    // R5: 0.010 s at 66 FPS is 0.66 frames (not whole at 66 and at 60); the same with a 再生範囲 trackbar.
+    expect_unaligned("alignment R5: start 0.010 s (plain number)", sub_case(player_object("480,863", "1", "0.010")),
+                     "its scene object starts at a position that is not a whole frame at both rates");
+    expect_unaligned("alignment R5: start 0.010 s (再生範囲 trackbar)",
+                     sub_case(player_object("480,863", "1", "0.010,5.819,再生範囲,0")),
+                     "its scene object starts at a position that is not a whole frame at both rates");
+    // R5 also for a negative start: -0.010 s is -0.66 frames at 66 FPS.
+    expect_unaligned("alignment R5: negative start -0.010 s", sub_case(player_object("480,863", "1", "-0.010")),
+                     "its scene object starts at a position that is not a whole frame at both rates");
+    // R6: a time control object in scene 1.
+    expect_unaligned("alignment R6: scene contains a time control object",
+                     sub_case(player_object("480,863", "1"), std::string(), tc_object(4, 2, "0,71", tc_row("0", "100"))),
+                     "it contains a time control object");
+}
+
+// An integer k (66 -> 132, k = 2) never aligns: no note and no warning, and scene 1 is the same as in the project without
+// the player (its start 0.010 s would be refused by rule 5 at any other k).
+void test_scene_alignment_integer_k_unchanged() {
+    const std::string with_player = sub_case(player_object("480,863", "1", "0.010"));
+    const std::string without = sub_case(std::string());
+    const RetimeResult a = retime_target(with_player, rate(132));
+    const RetimeResult b = retime_target(without, rate(132));
+    check(a.ok && b.ok && a.notes.empty() && b.notes.empty() &&
+              from_marker(a.output, "[scene.1]") == from_marker(b.output, "[scene.1]"),
+          "alignment k 2 (66->132): no note, no warning, scene 1 identical to the plain conversion",
+          a.ok ? join_lines(a.notes) : refusal_message(a));
+}
+
+// Precise mode: the aligned object is re-sampled on the player's timeline. Object 3 (72..143) starts at frame 66 and its
+// values are those at the same moment: 502 (exported 552.2 at the original rate) -> 0.28, and 566 -> 99.44.
+void test_scene_alignment_precise() {
+    const std::string text = sub_case(player_object("480,863", "1"));
+    const RetimeResult r = run_policy(text, rate(60), SubsceneRatePolicy::Auto, true, 0);
+    check(r.ok && contains_lines(r.output, "frame=66,130\n") && contains_lines(r.output, "X=0.28,99.44,直線移動,0\n"),
+          "alignment precise: object 3 re-sampled on the player's timeline (X=0.28,99.44 at 66,130)",
+          r.ok ? join_lines(rows_with_prefix(r, "X=")) : refusal_message(r));
+}
+
+// Scene IDs: the numbers of the sections and the scene= lines differ.
+void test_scene_ids() {
+    // Object scene=5 belongs to scene 5 (15 FPS, kept under auto), not to the exported scene 0 (30 FPS).
+    const std::string kept = multi_scene_project(
+        "display.scene=0\n", scene_section(0, 0, "main", 30, 1, "") +
+                                 scene_section(1, 5, "sub", 15, 1, "[1]\nlayer=0\nscene=5\nframe=0,29\n[1.0]\neffect.name=標準描画\n"));
+    const RetimeResult k = retime_target(kept, rate(60));
+    check(k.ok && contains(k.output, "[1]\nlayer=0\nscene=5\nframe=0,29\n") && k.notes.size() == 1 &&
+              k.notes[0] == "scene 5 kept at its own rate 15/1" && k.scenes.size() == 2 &&
+              plan_is(k.scenes[1], 5, "sub", "15/1", "15/1", "1/1", false, false),
+          "ids: object scene=5 is kept with scene 5 (15 FPS), not converted with the exported scene",
+          k.ok ? plan_text(k) : refusal_message(k));
+
+    // Section 1 has scene=2 (30 FPS) and section 2 has scene=1 (60 FPS). Object 1 (no scene= line, section 1) is scene 2:
+    // k = 2. Object 2 (scene=1) is scene 1: k = 1.
+    const std::string crossed = multi_scene_project(
+        "display.scene=0\n", scene_section(0, 0, "main", 30, 1, "") +
+                                 scene_section(1, 2, "A", 30, 1, "[1]\nlayer=0\nframe=0,29\n[1.0]\neffect.name=標準描画\n") +
+                                 scene_section(2, 1, "B", 60, 1, "[2]\nlayer=0\nscene=1\nframe=0,29\n[2.0]\neffect.name=標準描画\n"));
+    const RetimeResult c = retime_target(crossed, rate(60));
+    check(c.ok && contains(c.output, "[1]\nlayer=0\nframe=0,59\n") && contains(c.output, "[2]\nlayer=0\nscene=1\nframe=0,29\n") &&
+              c.scenes.size() == 3 && plan_is(c.scenes[1], 1, "B", "60/1", "60/1", "1/1", true, false) &&
+              plan_is(c.scenes[2], 2, "A", "30/1", "60/1", "2/1", true, false),
+          "ids: sections 1 and 2 with crossed scene= lines keep each object on its own scene",
+          c.ok ? plan_text(c) : refusal_message(c));
+
+    // Without a display.scene row there is no ambiguity check: exported is id 0 (section 1 here), section 0 has id 5.
+    const std::string no_row = multi_scene_project(
+        "", scene_section(0, 5, "five", 30, 1, "") + scene_section(1, 0, "zero", 30, 1, ""));
+    const RetimeResult nr = retime_target(no_row, rate(60));
+    check(nr.ok && nr.scenes.size() == 2 && nr.scenes[0].scene == 0 && nr.scenes[0].exported && !nr.scenes[1].exported,
+          "ids: no display.scene row, no ambiguity check (exported is id 0)", refusal_message(nr));
+
+    // Two bad sections: the lower section number is reported first, whatever the file order.
+    const std::string two_bad = multi_scene_project(
+        "display.scene=0\n", scene_section(0, 0, "main", 30, 1, "") +
+                                 "[scene.2]\nscene=xyz\nname=b\nvideo.rate=30\nvideo.scale=1\n" +
+                                 "[scene.1]\nscene=abc\nname=a\nvideo.rate=30\nvideo.scale=1\n");
+    expect_refused("ids: sections checked in ascending section number", two_bad, rate(60),
+                   line_of_first(two_bad, "scene=abc\n"), "scene= in [scene.1] must be a non-negative integer, got 'abc'");
+
+    // The changes follow the scene IDs: scene 0 is written after scene 1 when section 1 comes first in the file.
+    const std::string order = multi_scene_project(
+        "display.scene=0\n", scene_section(1, 1, "one", 30, 1, "") + scene_section(0, 0, "zero", 30, 1, ""));
+    const RetimeResult ord = retime_target(order, rate(60));
+    // (the [project] file= change comes first; then scene 0's lines, which are below [scene.0] in the file, before scene 1's)
+    const std::size_t zero_at = line_of_first(order, "[scene.0]");
+    const std::size_t one_at = line_of_first(order, "[scene.1]");
+    std::size_t first_zero = ord.changes.size();
+    std::size_t first_one = ord.changes.size();
+    for (std::size_t i = 0; i < ord.changes.size(); ++i) {
+        if (ord.changes[i].line >= zero_at && first_zero == ord.changes.size()) {
+            first_zero = i;
+        }
+        if (ord.changes[i].line >= one_at && ord.changes[i].line < zero_at && first_one == ord.changes.size()) {
+            first_one = i;
+        }
+    }
+    check(ord.ok && first_zero < first_one && first_one < ord.changes.size(),
+          "ids: changes listed in scene ID order (scene 0 before scene 1 in the file)",
+          ord.ok ? std::to_string(ord.changes.size()) + " changes" : refusal_message(ord));
+
+    // display.scene=1 names id 1, but section [scene.1] has id 2: ambiguous.
+    const std::string ambiguous = multi_scene_project(
+        "display.scene=1\n", scene_section(0, 0, "main", 30, 1, "") + scene_section(1, 2, "A", 30, 1, "") +
+                                 scene_section(2, 1, "B", 60, 1, ""));
+    expect_refused("ids: display.scene 1 ambiguous with [scene.1] scene=2", ambiguous, rate(60),
+                   line_of_first(ambiguous, "display.scene=1\n"),
+                   "display.scene 1 is ambiguous: [scene.1] has scene=2");
+
+    // A scene= value that is not an integer.
+    const std::string bad = multi_scene_project(
+        "display.scene=0\n", scene_section(0, 0, "main", 30, 1, "") +
+                                 "[scene.1]\nscene=abc\nname=bad\nvideo.width=640\nvideo.height=360\nvideo.rate=30\n"
+                                 "video.scale=1\naudio.rate=44100\n");
+    expect_refused("ids: scene=abc refused", bad, rate(60), line_of_first(bad, "scene=abc\n"),
+                   "scene= in [scene.1] must be a non-negative integer, got 'abc'");
+
+    // Two sections with the same id: the second section's scene= line.
+    const std::string twice = multi_scene_project(
+        "display.scene=0\n", scene_section(0, 0, "main", 30, 1, "") + scene_section(1, 0, "dup", 30, 1, ""));
+    expect_refused("ids: two sections with scene=0 refused", twice, rate(60), line_of_first(twice, "scene=0\nname=dup"),
+                   "scene id 0 is used by more than one [scene.N] section");
+
+    // The second section has no scene= line, so its id is 1 (its section number), the same as the first section's.
+    const std::string defaulted = multi_scene_project(
+        "display.scene=1\n", scene_section(0, 1, "main", 30, 1, "") + scene_section(1, -1, "dup", 30, 1, ""));
+    expect_refused("ids: default id 1 of a section used twice refused", defaulted, rate(60), 0,
+                   "scene id 1 is used by more than one [scene.N] section");
+
+    // No scene= line at all: the id is the section number (1), and scene 1 is the exported scene (15 FPS -> 60, k = 4).
+    const std::string no_id = multi_scene_project(
+        "display.scene=1\n", scene_section(0, 0, "main", 60, 1, "") +
+                                 scene_section(1, -1, "sub", 15, 1, "[1]\nlayer=0\nframe=0,29\n[1.0]\neffect.name=標準描画\n"));
+    const RetimeResult n = retime_target(no_id, rate(60));
+    check(n.ok && contains(n.output, "[1]\nlayer=0\nframe=0,119\n") && n.scenes.size() == 2 &&
+              plan_is(n.scenes[1], 1, "sub", "15/1", "60/1", "4/1", true, true),
+          "ids: a section without scene= has the id of its number", n.ok ? plan_text(n) : refusal_message(n));
+}
+
+// Frame-dependent effects: refused in a followed object when k != 1, accepted at k = 1, and not looked at in a kept scene.
+void test_frame_effect_refusals() {
+    const std::vector<std::string> names = {"手ぶれ", "振動", "ラスター", "フレア", "ノイズ"};
+    for (const std::string& name : names) {
+        const std::string obj = "[0]\nlayer=0\nframe=0,29\n[0.0]\neffect.name=" + name + "\n";
+        const std::string text = project(scene30(), obj);
+        expect_refused("frame effect " + name + " refused at k = 2", text, rate(60), line_of_first(text, "effect.name=" + name),
+                       "effect '" + name +
+                           "' depends on the frame number or a per-frame random value and is not verified at another frame "
+                           "rate; refused");
+        const RetimeResult same = retime_target(project(scene30(), obj), rate(30));
+        check(same.ok, "frame effect " + name + " accepted at k = 1", refusal_message(same));
+    }
+    // A 15 FPS scene is kept under auto (no refusal, the section is unchanged); under follow it is refused.
+    const std::string kept = multi_scene_project(
+        "display.scene=0\n", scene_section(0, 0, "main", 30, 1, "") +
+                                 scene_section(1, 1, "sub", 15, 1, "[1]\nlayer=0\nframe=0,29\n[1.0]\neffect.name=手ぶれ\n"));
+    const RetimeResult k = retime_target(kept, rate(60));
+    check(k.ok && from_marker(k.output, "[scene.1]") == from_marker(kept, "[scene.1]"),
+          "frame effect in a kept scene is not refused", refusal_message(k));
+    const RetimeResult f = run_policy(kept, rate(60), SubsceneRatePolicy::Follow);
+    check(!f.ok && f.refusal_line == line_of_first(kept, "effect.name=手ぶれ"),
+          "frame effect in a followed 15 FPS scene is refused", refusal_message(f));
+}
+
 int main(int argc, char** argv) {
     if (argc > 1) {
         fixture_dir = argv[1];
@@ -2816,6 +3105,13 @@ int main(int argc, char** argv) {
     test_time_control_kept_scene();
     test_tcmode_and_payload();
     test_frame_count_modes();
+    test_scene_alignment_user_case();
+    test_scene_alignment_two_players();
+    test_scene_alignment_refusal_rules();
+    test_scene_alignment_integer_k_unchanged();
+    test_scene_alignment_precise();
+    test_scene_ids();
+    test_frame_effect_refusals();
     std::printf("%s (%d failure%s)\n", g_failures == 0 ? "ALL PASS" : "FAILED", g_failures,
                 g_failures == 1 ? "" : "s");
     return g_failures == 0 ? 0 : 1;

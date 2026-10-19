@@ -37,6 +37,20 @@ values or three frame points, parameter 0.5, abc, ランダム 15.4, ランダ�
 object, a time control object overlapping the row) and the accepted conversions (反復移動, ランダム移動 and 移動量指定 at 60,
 66, 60000/1001 and 24, precise off and on, with a zero Y/Z step of 移動量指定 that must stay unchanged).
 
+Sub scene alignment (a シーン object of any scene plays a sub scene; always on): synthetic 66 fps projects with the user's
+case (player at 480,863 playing scene 1, sub objects 0,71 and 72,143) at 60, 30, 60000/1001, 132 and 2x, precise off and on;
+one project per reason R1-R6 (two players, player in a sub scene, three frame points, speed 200, loop 1, position 0.010,
+a time control object in the sub scene) at 60; a 直線移動 X track with --precise at 60 and 60000/1001; ランダム移動 starting at
+frame 0 and 反復移動 in an aligned sub scene at 60. Per-frame effect refusals (手ぶれ, 振動, ラスター, フレア, ノイズ) at 60
+on a 66 fps project; the same effects at the source rate (66, precise off and on) and in a kept 15 fps sub scene are converted.
+The directory test_kit/10_次合成对齐/*.aup2 (non-recursive, read in place) at 60, 30, 60000/1001 and 132, precise off and on.
+
+Scene IDs (the scene= line of each [scene.N], always on): the ID is the first scene= value of a section (N when the line is
+missing), and objects and シーン= refer to IDs. Synthetic projects: section number 1 with ID 5 at 15 fps; swapped IDs 2 and 1
+at 60 and 15 fps; display.scene=1 that is ambiguous (refused); scene=abc (refused); two sections with ID 1 (refused); a
+section without scene= (ID = number); and an alignment with ID 7 at section 1 (targets as in align_cases). Each at 60 and
+--factor 2, precise off and on. Test_kit/10_次合成对齐 is read by align_cases, not here.
+
 Each case runs both tools one after the other with the same absolute --out path. Exit codes, stderr (the
 refusal text) and the .aup2 and .convert.json files must match exactly. The C++ and Python refusal texts are now
 identical (no known difference except a コマ落ち beyond 64 bits, which the port refuses and Python converts); any difference
@@ -70,6 +84,7 @@ HOST_SAMPLE = r"C:\Users\gaoha\Desktop\test 30 and 30or60.aup2"
 ARZ_TEMPLATE = r"D:\ARZv2.0.1\ARZv2.0.1\template\15_mer1\.aup2"
 PROBE_DIR = os.path.join(REPO, "test_kit", "5_抽帧探针")
 FRAME_MODE_DIR = os.path.join(REPO, "test_kit", "9_其他移动方式")
+ALIGN_DIR = os.path.join(REPO, "test_kit", "10_次合成对齐")
 
 SUBSCENE_POLICIES = ("auto", "follow", "keep")
 
@@ -622,6 +637,169 @@ def frame_mode_cases(synthetic_dir):
     return cases
 
 
+ALIGN_TARGETS = [["--target-fps", rate] for rate in ("60", "30", "60000/1001", "132")] + [["--factor", "2"]]
+ALIGN_DIR_TARGETS = [["--target-fps", rate] for rate in ("60", "30", "60000/1001", "132")]
+ALIGN_TARGET_60 = [["--target-fps", "60"]]
+FRAME_EFFECT_NAMES = ("手ぶれ", "振動", "ラスター", "フレア", "ノイズ")
+PLAYER_POSITION = "0.000,5.819,再生範囲,0"
+
+
+def player_object(no, frames, target, layer, scene=None, position=PLAYER_POSITION, speed="100.00", loop="0"):
+    """A シーン object that plays scene `target`; the keys are in the order the host writes them."""
+    extra = ["再生位置=%s" % position, "再生速度=%s" % speed, "シーン=%d" % target, "ループ再生=%s" % loop]
+    return object_lines(no, frames, scene=scene, layer=layer, effect="シーン", extra=extra)
+
+
+def align_text(main_objects, sub_objects, *extra_scenes):
+    """Exported scene 0 and scene 1 (both 66 fps, followed), then any extra scene sections."""
+    return multi_text(["display.scene=0"], scene_section(0, "main", 66, 1, main_objects),
+                      scene_section(1, "sub", 66, 1, sub_objects, cursor=17), *extra_scenes)
+
+
+def align_user_main():
+    """The user's case: scene 0 plays scene 1 from frame 480 and its 552 object starts the 放射ブラー."""
+    return player_object(1, "480,863", 1, 6) + object_lines(2, "552,575", layer=11, effect="放射ブラー")
+
+
+def align_user_sub():
+    return object_lines(3, "0,71", scene=1, layer=0) + object_lines(4, "72,143", scene=1, layer=1)
+
+
+def align_cases(synthetic_dir):
+    """The (label, path, arguments) cases of sub scene alignment and of the per-frame effect refusals; see the module docstring."""
+    cases = []
+
+    def write(name, text):
+        path = os.path.join(synthetic_dir, name + ".aup2")
+        with open(path, "wb") as fh:
+            fh.write(text.encode("utf-8"))
+        return "synthetic " + name, path
+
+    def add(name, text, targets, modes=((), ("--precise",))):
+        label, path = write(name, text)
+        for target in targets:
+            for mode in modes:
+                cases.append((label, path, target + list(mode)))
+
+    add("align_user_case", align_text(align_user_main(), align_user_sub()), ALIGN_TARGETS)
+
+    # One project per refusal reason R1-R6 (R4 also with loop 1); each one must be refused as a whole at 60.
+    main_only = align_user_main()
+    add("align_r1_two_players", align_text(main_only + player_object(5, "100,200", 1, 7), align_user_sub()),
+        ALIGN_TARGET_60, ((),))
+    add("align_r2_player_outside_exported",
+        align_text(object_lines(2, "552,575", layer=11, effect="放射ブラー"), align_user_sub(),
+                   scene_section(2, "other", 66, 1, player_object(5, "480,863", 1, 0, scene=2))),
+        ALIGN_TARGET_60, ((),))
+    add("align_r3_three_points", align_text(player_object(1, "480,600,863", 1, 6) +
+                                            object_lines(2, "552,575", layer=11, effect="放射ブラー"), align_user_sub()),
+        ALIGN_TARGET_60, ((),))
+    add("align_r4_speed_200", align_text(player_object(1, "480,863", 1, 6, speed="200.00") +
+                                         object_lines(2, "552,575", layer=11, effect="放射ブラー"), align_user_sub()),
+        ALIGN_TARGET_60, ((),))
+    add("align_r4_loop_1", align_text(player_object(1, "480,863", 1, 6, loop="1") +
+                                      object_lines(2, "552,575", layer=11, effect="放射ブラー"), align_user_sub()),
+        ALIGN_TARGET_60, ((),))
+    add("align_r5_position_not_whole", align_text(player_object(1, "480,863", 1, 6, position="0.010") +
+                                                  object_lines(2, "552,575", layer=11, effect="放射ブラー"), align_user_sub()),
+        ALIGN_TARGET_60, ((),))
+    add("align_r6_time_control_in_sub",
+        align_text(main_only, tc_object(3, 0, "0,71", tc_row("0.000", "100.000"), "1", scene=1) +
+                   object_lines(4, "72,143", scene=1, layer=1)),
+        ALIGN_TARGET_60, ((),))
+
+    # A 直線移動 X track in an aligned scene, with --precise (the keyframes are shifted with the scene).
+    linear_sub = object_lines(3, "0,71", scene=1, layer=0, tracks=["X=0.00,100.00,直線移動,0"]) + \
+        object_lines(4, "72,143", scene=1, layer=1, tracks=["X=-50.00,50.00,直線移動,0"])
+    add("align_precise_linear", align_text(align_user_main(), linear_sub),
+        [["--target-fps", "60"], ["--target-fps", "60000/1001"]], (("--precise",),))
+
+    # ランダム移動 starting at frame 0 and 反復移動 in an aligned scene.
+    frame_count_sub = object_lines(3, "0,149", scene=1, layer=0, tracks=["X=-600.00,600.00,ランダム移動,4|11"]) + \
+        object_lines(4, "0,143", scene=1, layer=1, tracks=["X=-600.00,600.00,反復移動,4|11"])
+    add("align_frame_count", align_text(align_user_main(), frame_count_sub), ALIGN_TARGET_60, ((),))
+
+    # Per-frame effects: refused at 60 when the scene is followed and 66 -> 60 (k != 1).
+    for index, name in enumerate(FRAME_EFFECT_NAMES):
+        add("fx_refused_%d" % index, synthetic_text(object_lines(1, "0,59", effect=name), rate=66), ALIGN_TARGET_60, ((),))
+    # Same rate (k == 1) changes no frame, so nothing is refused.
+    same_rate = [line for i, name in enumerate(FRAME_EFFECT_NAMES)
+                 for line in object_lines(i + 1, "0,59", layer=i, effect=name)]
+    add("fx_same_rate", synthetic_text(same_rate, rate=66), [["--target-fps", "66"]])
+    # A 15 fps sub scene next to the 30 fps main scene is kept under auto, so its effects are not refused.
+    kept = [line for i, name in enumerate(FRAME_EFFECT_NAMES)
+            for line in object_lines(i + 3, "0,14", scene=1, layer=i, effect=name)]
+    add("fx_kept_sub", multi_text(["display.scene=0"], scene_section(0, "a", 30, 1, object_lines(1, "0,29")),
+                                  scene_section(1, "b", 15, 1, kept)), ALIGN_TARGET_60, ((),))
+
+    # The directory group: read in place, like FRAME_MODE_DIR; absent or empty means no cases.
+    inputs = sorted(glob.glob(os.path.join(ALIGN_DIR, "*.aup2")))
+    if not inputs:
+        print("SKIP align inputs: no .aup2 in %s (directory missing or empty)" % ALIGN_DIR)
+    for path in inputs:
+        label = "10 align " + os.path.basename(path)
+        for target in ALIGN_DIR_TARGETS:
+            cases.append((label, path, target))
+            cases.append((label, path, target + ["--precise"]))
+    return cases
+
+
+SCENE_ID_TARGETS = [["--target-fps", "60"], ["--factor", "2"]]
+
+
+def sec_id(no, sid, name, rate, objects, extra=()):
+    """A [scene.N] section whose first scene= line holds the scene ID sid (None: the line is left out)."""
+    lines = scene_section(no, name, rate, 1, objects, extra=extra)
+    if sid is None:
+        del lines[1]
+    else:
+        lines[1] = "scene=%s" % sid
+    return lines
+
+
+def scene_id_cases(synthetic_dir):
+    """The (label, path, arguments) cases of scene IDs (scene= in [scene.N]) that differ from the section number; see the
+    module docstring. Each synthetic project is run at 60 and --factor 2, precise off and on."""
+    cases = []
+
+    def add(name, text, targets=SCENE_ID_TARGETS):
+        path = os.path.join(synthetic_dir, name + ".aup2")
+        with open(path, "wb") as fh:
+            fh.write(text.encode("utf-8"))
+        for target in targets:
+            for mode in ((), ("--precise",)):
+                cases.append(("synthetic " + name, path, target + list(mode)))
+
+    main = scene_section(0, "a", 30, 1, object_lines(1, "0,29"))
+    # Section 1 has ID 5 at 15 fps (kept under auto); the object refers to ID 5.
+    add("scene_id_not_section_no", multi_text(
+        ["display.scene=0"], main, sec_id(1, 5, "b", 15, object_lines(3, "0,14", scene=5))))
+    # Two sections whose IDs are swapped with their numbers, at different rates (60 followed, 15 kept).
+    add("scene_id_swapped", multi_text(
+        ["display.scene=0"], main,
+        sec_id(1, 2, "b", 60, object_lines(3, "0,59", scene=2, tracks=["X=0.00,10.00,直線移動,0"])),
+        sec_id(2, 1, "c", 15, object_lines(4, "0,14", scene=1))))
+    # display.scene=1 names ID 1 (section 2) while section 1 has ID 2: ambiguous, refused.
+    add("scene_id_display_ambiguous", multi_text(
+        ["display.scene=1"], main,
+        sec_id(1, 2, "b", 60, object_lines(3, "0,59", scene=2)),
+        sec_id(2, 1, "c", 15, object_lines(4, "0,14", scene=1))))
+    add("scene_id_not_integer", multi_text(["display.scene=0"], main, sec_id(1, "abc", "b", 15, object_lines(3, "0,14"))))
+    add("scene_id_duplicate", multi_text(
+        ["display.scene=0"], main,
+        sec_id(1, 1, "b", 15, object_lines(3, "0,14", scene=1)),
+        sec_id(2, 1, "c", 60, object_lines(4, "0,59", scene=1))))
+    # No scene= line in the section: the ID is the section number (1), and the object without scene= belongs to it.
+    add("scene_id_missing_line", multi_text(["display.scene=0"], main, sec_id(1, None, "b", 15, object_lines(3, "0,14"))))
+    # Alignment with ID 7 at section 1: the player's シーン= and the sub objects' scene= both use the ID.
+    combo_main = player_object(1, "480,863", 7, 6) + object_lines(2, "552,575", layer=11, effect="放射ブラー")
+    combo_sub = object_lines(3, "0,71", scene=7, layer=0) + object_lines(4, "72,143", scene=7, layer=1)
+    add("scene_id_align_player", multi_text(
+        ["display.scene=0"], scene_section(0, "main", 66, 1, combo_main),
+        sec_id(1, 7, "sub", 66, combo_sub)), ALIGN_TARGETS)
+    return cases
+
+
 def user_project_sources():
     """(label, path) of the read-only user projects that exist: the desktop samples and every ARZ output.aup2."""
     found = [(os.path.splitext(os.path.basename(path))[0], path) for path in USER_PROJECTS if os.path.isfile(path)]
@@ -828,6 +1006,8 @@ def main(argv=None):
             print("SKIP ARZ template: %s is missing" % ARZ_TEMPLATE)
         cases.extend(time_control_cases(template_copy, synthetic_dir))
         cases.extend(frame_mode_cases(synthetic_dir))
+        cases.extend(align_cases(synthetic_dir))
+        cases.extend(scene_id_cases(synthetic_dir))
         cases.extend(user_project_cases(work))
         for name, text, extra in REFUSAL_CASES + refusal_cases_extra:
             path = os.path.join(synthetic_dir, name + ".aup2")

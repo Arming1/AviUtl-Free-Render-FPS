@@ -522,6 +522,32 @@ Scene requirements:
   verified against AviUtl2. The fixtures and the real-world file used here all write `video.scale`. The note
   `[scene.N] has no video.scale; ...` is recorded when the default is used for a followed scene.
 
+## Sub-scene alignment
+
+A scene object (`effect.name=シーン`, `シーン=ID`) plays scene `ID` from its first frame `S`, at the scene frame `P` given by
+`再生位置` (seconds, times the rate of that scene). When `k` is not an integer, a plain rescale rounds each scene on its own
+origin, so a boundary of the sub-scene can fall one frame before the object that starts it. Such a sub-scene is rounded on
+the timeline of its scene object instead: shift `D = S - P` on the source frames and `Dn = round(S x k) - P x k` on the
+target frames. This is done only when, for the sub-scene: it is followed with the same `k` as the exported scene; exactly
+one scene object plays it; that object is in the exported scene, has exactly two `frame=` points, plays at speed 100 without
+loop, and `P` is a whole, non-negative frame at both rates; and it holds no time control object. Otherwise the sub-scene keeps
+plain rounding and a `WARNING: scene ID cannot be aligned to the exported scene (reason); ...` is printed and recorded in
+`notes`. When `S x k` is a whole number the result equals plain rounding and no note is written; otherwise `notes` gets
+`scene ID is rescaled on the timeline of its scene object at line N`. `--precise` shifts the keyframes of such objects in the
+same way. If the shifted frames collide, the object is refused with its line.
+
+Scene ids: the first `scene=` line of each `[scene.N]` section is its id (`N` is only the position of the section; without
+the line the id is `N`). Objects and scene objects refer to ids. `[project] display.scene` names an id; it is refused when
+the section with number `display.scene` has another id.
+
+## Frame-dependent effects
+
+`手ぶれ`, `振動`, `ラスター`, `フレア` and `ノイズ` depend on the frame number or a per-frame random value. In a followed object
+with `k != 1` they are refused: `REFUSED: line N: effect '<name>' depends on the frame number or a per-frame random value and is
+not verified at another frame rate; refused`. `手ぶれ`, `ラスター` and `フレア` were measured to differ at another rate
+(`D:	utorial\compare`); `振動` and `ノイズ` were not measured and are refused on the same rule until a probe passes them.
+`k = 1` and kept scenes are not checked.
+
 ## Script in effects
 
 Only effect values are checked. The frame-dependent markers are:

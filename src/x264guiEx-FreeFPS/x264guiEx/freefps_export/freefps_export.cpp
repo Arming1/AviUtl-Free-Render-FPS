@@ -408,6 +408,7 @@ struct Run {
     std::wstring failure;      // first failure reason
     std::wstring restore_note;
     std::wstring rate_text;
+    std::vector<std::wstring> warnings;  // the conversion's WARNING texts (this host converts in both modes)
     bool done = false;
 };
 
@@ -577,6 +578,12 @@ void finish_run() {
                 text += L"\nEncoder: " + run->child_encoder;
             }
         }
+        if (!run->warnings.empty()) {
+            text += L"\nWarnings:";
+            for (const std::wstring& warning : run->warnings) {
+                text += L"\n" + warning;
+            }
+        }
     } else {
         text = L"Export failed.\n" + run->failure;
     }
@@ -640,6 +647,9 @@ void tick(Run& run) {
         if (!result.ok) {
             fail(run, to_wide(free_fps::refusal_message(result)));
             return;
+        }
+        for (const std::string& warning : result.warnings) {
+            run.warnings.push_back(to_wide(warning));
         }
         if (!write_file_bytes(run.retimed_path, result.output)) {
             fail(run, L"cannot write " + run.retimed_path);
@@ -1386,6 +1396,9 @@ void refresh_scene_plan(HWND dlg) {
             } else if (result.scenes.size() > 1) {
                 text = mes(AuoFreeFpsExportScenePlanPrefix, L"Preview from the saved project: ") +
                        scene_plan_text(result);
+                for (const std::string& warning : result.warnings) {
+                    text += L"\r\n" + to_wide(warning);
+                }
                 show = true;
             }
         }

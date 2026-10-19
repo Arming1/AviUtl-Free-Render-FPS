@@ -95,6 +95,7 @@ struct RetimeResult {
                                            // that comes after the scenes were read (empty otherwise)
     std::vector<RetimeChange> changes;
     std::vector<std::string> notes;
+    std::vector<std::string> warnings;     // the WARNING texts, also in notes (the Python tool's warnings list)
     std::string max_start_error_s;
     std::string max_end_error_s;
     std::vector<RetimeObjectTiming> objects;

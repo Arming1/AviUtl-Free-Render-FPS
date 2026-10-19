@@ -113,6 +113,11 @@ PRECISE_NOTE_RATIO = Fraction(1, 10000)  # 0.01 %
 
 # Effect names that cannot be converted safely. Empty: カウンター is time-based (速度 = counts per second).
 REFUSED_EFFECT_NAMES = frozenset()
+# Effects whose result depends on the frame number or on a per-frame random value. They are refused in an object whose k is
+# not 1 (k = 1 changes no frame and is kept). 手ぶれ, ラスター and フレア were measured to differ at another frame rate
+# (D:\tutorial\compare); 振動 and ノイズ were not measured and are refused on the same rule until a probe passes them.
+FRAME_EFFECT_NAMES = frozenset({"手ぶれ", "振動", "ラスター", "フレア", "ノイズ"})
+FRAME_EFFECT_REASON = "effect %r depends on the frame number or a per-frame random value and is not verified at another frame rate; refused"
 # Effect whose text value may hold script between '<?' and '?>'.
 TEXT_EFFECT_NAME = "テキスト"
 # Effect whose 速度 must be a plain number (checked, then passed through).
@@ -144,6 +149,29 @@ TIME_CONTROL_STEP_MODE = "瞬間移動"
 TIME_CONTROL_STEP_FLAG = "0"
 TIME_CONTROL_MAX_POINTS = 4096
 TIME_CONTROL_LAST_FRAME_NOTE = "last frame shows the previous step"
+# Scene object (effect.name=シーン): it plays scene シーン=N from the position 再生位置 (seconds, a trackbar or a plain number),
+# at 再生速度 and ループ再生. A sub-scene whose k is not an integer is rounded on the timeline of its scene object
+# (see "Sub-scene alignment" in tools/aup2_fps_upconvert.md). These are the keys read and the texts of the rules.
+SCENE_OBJECT_EFFECT_NAME = "シーン"
+SCENE_OBJECT_KEY = "シーン"
+SCENE_OBJECT_KEY_POSITION = "再生位置"
+SCENE_OBJECT_POSITION_MODE = "再生範囲"
+SCENE_OBJECT_KEY_SPEED = "再生速度"
+SCENE_OBJECT_SPEED_DEFAULT = "100"
+SCENE_OBJECT_SPEED = Fraction(100)
+SCENE_OBJECT_KEY_LOOP = "ループ再生"
+SCENE_OBJECT_LOOP_DEFAULT = "0"
+SCENE_ALIGN_COUNT_REASON = "it is played by %d scene objects"
+SCENE_ALIGN_SCENE_REASON = "its scene object is not in the exported scene"
+SCENE_ALIGN_POINTS_REASON = "its scene object has more than two frame points"
+SCENE_ALIGN_SPEED_REASON = "its scene object does not play at speed 100 without loop"
+SCENE_ALIGN_POSITION_REASON = "its scene object starts at a position that is not a whole frame at both rates"
+SCENE_ALIGN_TIME_CONTROL_REASON = "it contains a time control object"
+SCENE_ALIGN_WARNING = ("WARNING: scene %d cannot be aligned to the exported scene (%s); object boundaries inside it may be "
+                       "one frame off at this rate")
+SCENE_ALIGN_NOTE = "scene %d is rescaled on the timeline of its scene object at line %d"
+SCENE_ALIGN_COLLIDE_REASON = ("frame= points collide or stop increasing after rescaling on the timeline of the scene object "
+                              "at line %d; refused")
 
 UTF8_BOM = b"\xef\xbb\xbf"
 SUFFIX_JSON = ".convert.json"
@@ -163,7 +191,7 @@ RE_SCENE_HDR = re.compile(r"^\[scene\.(\d+)\]$")
 
 # One scene's plan: rate_src is the scene's own rate; for a followed scene k = target rate / rate_src, for a kept
 # scene k is 1 and nothing of the scene is rewritten.
-ScenePlan = namedtuple("ScenePlan", "scene name rate_src follow k exported")
+ScenePlan = namedtuple("ScenePlan", "scene_no name rate_src follow k exported")
 
 
 class Refusal(Exception):
@@ -813,7 +841,26 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
     if not scene_lines:
         raise Refusal(None, "no [scene.N] section found")
 
-    # Each object belongs to one scene: its scene= line if it has one, else the [scene.N] section above it.
+    # Scene id of each [scene.N] section: the value of its first scene= line (N is only the position of the section in the
+    # file, and the scene= value is what objects and scene objects refer to). A section without scene= has the id N.
+    scene_id_of = {}  # section number N -> scene id
+    section_of_id = {}  # scene id -> section number N
+    for seg_no in sorted(scene_lines):
+        scene_id, id_line = seg_no, None
+        for idx in scene_lines[seg_no]:
+            key, _, value = lines[idx].partition("=")
+            if key == "scene":
+                if not RE_INT.match(value):
+                    raise Refusal(idx + 1, "scene= in [scene.%d] must be a non-negative integer, got %r" % (seg_no, value))
+                scene_id, id_line = int(value), idx
+                break
+        if scene_id in section_of_id:
+            raise Refusal(None if id_line is None else id_line + 1,
+                          "scene id %d is used by more than one [scene.N] section" % scene_id)
+        scene_id_of[seg_no] = scene_id
+        section_of_id[scene_id] = seg_no
+
+    # Each object belongs to one scene: its scene= line if it has one, else the [scene.N] section above it (its id).
     object_scene = {}
     for obj_no, header in obj_header_scene.items():
         if obj_no in object_scene_lines:
@@ -822,17 +869,18 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
                 raise Refusal(idx + 1, "object scene= must be an integer, got %r" % value)
             object_scene[obj_no] = int(value)
         else:
-            object_scene[obj_no] = 0 if header is None else header
+            object_scene[obj_no] = 0 if header is None else scene_id_of[header]
 
     # Pass 2: scene checks and the plan of each scene (follow the target rate or keep its own).
-    scene_rate_lines = {}  # scene_no -> (video.rate line index, video.scale line index or None)
-    scene_rates = {}  # scene_no -> (video.rate, video.scale)
-    scene_names = {}  # scene_no -> value of the first name= line ('' when there is none)
-    for scene_no, idxs in sorted(scene_lines.items()):
+    # Scenes are keyed by scene id and visited in ascending id order; section_of_id gives the [scene.N] section of an id.
+    scene_rate_lines = {}  # scene id -> (video.rate line index, video.scale line index or None)
+    scene_rates = {}  # scene id -> (video.rate, video.scale)
+    scene_names = {}  # scene id -> value of the first name= line ('' when there is none)
+    for scene_no in sorted(section_of_id):
         values = {}
         scene_names[scene_no] = ""
         name_seen = False
-        for idx in idxs:
+        for idx in scene_lines[section_of_id[scene_no]]:
             key, _, value = lines[idx].partition("=")
             if key in ("video.rate", "video.scale"):
                 if not RE_INT.match(value) or int(value) == 0:
@@ -847,7 +895,7 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
             elif any(marker in key for marker in SCENE_UNKNOWN_REFUSE_MARKERS):
                 raise Refusal(idx + 1, "unknown scene key %r may hold frame/mark/range data" % key)
         if "video.rate" not in values:
-            raise Refusal(None, "[scene.%d] has no video.rate" % scene_no)
+            raise Refusal(None, "[scene.%d] has no video.rate" % section_of_id[scene_no])
         scale_value, scale_idx = values.get("video.scale", (1, None))
         scene_rate_lines[scene_no] = (values["video.rate"][1], scale_idx)
         scene_rates[scene_no] = (values["video.rate"][0], scale_value)
@@ -861,6 +909,9 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
         exported = int(display_scene[0])
     if exported not in scene_rates:
         raise Refusal(None, "display.scene %d does not exist" % exported)
+    if display_scene is not None and exported in scene_id_of and scene_id_of[exported] != exported:
+        raise Refusal(display_scene[1] + 1, "display.scene %d is ambiguous: [scene.%d] has scene=%d"
+                      % (exported, exported, scene_id_of[exported]))
     src_rate, src_scale = scene_rates[exported]
     if factor is not None:
         target_num, target_den = src_rate * factor, src_scale
@@ -884,7 +935,8 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
         if not plan.follow:
             notes.append("scene %d kept at its own rate %s" % (scene_no, fraction_text(plan.rate_src)))
         elif scene_rate_lines[scene_no][1] is None:
-            notes.append("[scene.%d] has no video.scale; read as 1 and written after video.rate" % scene_no)
+            notes.append("[scene.%d] has no video.scale; read as 1 and written after video.rate"
+                         % section_of_id[scene_no])
 
     # An object whose scene has no [scene.N] section is converted like the exported scene.
     def plan_of(obj_no):
@@ -900,7 +952,7 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
 
     for idx, value, sec in frame_drop_lines:
         if sec[0] == "scene":
-            plan = scene_plan[sec[1]]
+            plan = scene_plan[scene_id_of[sec[1]]]
         elif sec[0] in ("object", "effect"):
             plan = plan_of(sec[1])
         else:
@@ -919,6 +971,75 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
     frame_values = {}
     for obj_no, idx in followed_frame_lines.items():
         frame_values[obj_no] = parse_frames(lines[idx].partition("=")[2], idx + 1)
+
+    # Sub-scene alignment. A scene object plays scene N from its first frame S at the whole frame P of scene N (speed 100,
+    # no loop), so frame P of scene N is shown at frame S. When k is not an integer, a plain rescale rounds each scene on its
+    # own origin; a scene that meets the rules below is rounded on the timeline of its scene object instead, with the
+    # shift D = S - P (source frames) and Dn = round(S x k) - P x k (target frames). Scenes are judged in ascending order.
+    scene_objects = []  # (object number, played scene number, effect properties) of every scene object
+    for (obj_no, eff_no), props in sorted(effect_props.items()):
+        if props.get("effect.name", (None, None))[0] == SCENE_OBJECT_EFFECT_NAME and SCENE_OBJECT_KEY in props:
+            if RE_INT.match(props[SCENE_OBJECT_KEY][0]):
+                scene_objects.append((obj_no, int(props[SCENE_OBJECT_KEY][0]), props))
+
+    def scene_alignment(scene_no, players, rate_src):
+        """(reason, None) when scene_no cannot be aligned, else (None, (S, P, line of the scene object's frame=)).
+
+        The rules are checked in order and the first one that fails gives the reason. players are the scene objects that
+        play scene_no; the scene is judged by the object that plays it.
+        """
+        if len(players) != 1:
+            return SCENE_ALIGN_COUNT_REASON % len(players), None
+        obj_no, props = players[0]
+        if object_scene.get(obj_no) != exported:
+            return SCENE_ALIGN_SCENE_REASON, None
+        if len(frame_values.get(obj_no, ())) != 2:
+            return SCENE_ALIGN_POINTS_REASON, None
+        speed = props.get(SCENE_OBJECT_KEY_SPEED, (SCENE_OBJECT_SPEED_DEFAULT, None))[0]
+        loop = props.get(SCENE_OBJECT_KEY_LOOP, (SCENE_OBJECT_LOOP_DEFAULT, None))[0]
+        if not (RE_NUMBER.match(speed) and Fraction(speed) == SCENE_OBJECT_SPEED) or loop != SCENE_OBJECT_LOOP_DEFAULT:
+            return SCENE_ALIGN_SPEED_REASON, None
+        if SCENE_OBJECT_KEY_POSITION in props:
+            position_text = props[SCENE_OBJECT_KEY_POSITION][0]
+            track = trackbar_parts(position_text)
+            if track is not None:
+                texts, mode, _ = track
+                start_s = Fraction(texts[0]) if mode == SCENE_OBJECT_POSITION_MODE and len(texts) == 2 else None
+            elif RE_NUMBER.match(position_text):
+                start_s = Fraction(position_text)
+            else:
+                start_s = None
+        else:
+            start_s = Fraction(0)
+        # A negative position is not a frame of the sub-scene that the rules cover; it is not aligned.
+        if start_s is None or start_s < 0:
+            return SCENE_ALIGN_POSITION_REASON, None
+        position = start_s * rate_src
+        if position.denominator != 1 or (position * k).denominator != 1:
+            return SCENE_ALIGN_POSITION_REASON, None
+        if any(is_time_control(o, e) and object_scene.get(o) == scene_no for o, e in effect_props):
+            return SCENE_ALIGN_TIME_CONTROL_REASON, None
+        return None, (frame_values[obj_no][0], position, object_frame_lines[obj_no] + 1)
+
+    scene_align = {}  # scene number -> (shift D, new shift Dn, line of the scene object's frame=) of an aligned scene
+    for scene_no in sorted(scene_plan):
+        plan = scene_plan[scene_no]
+        if scene_no == exported or not plan.follow or plan.k != k or k.denominator == 1:
+            continue
+        players = [(obj_no, props) for obj_no, played, props in scene_objects if played == scene_no]
+        if not players:
+            continue
+        reason, found = scene_alignment(scene_no, players, plan.rate_src)
+        if reason is not None:
+            text = SCENE_ALIGN_WARNING % (scene_no, reason)
+            warnings.append(text)
+            notes.append(text)
+            continue
+        start, position, frame_line = found
+        scene_align[scene_no] = (int(start - position), int(round_half_up(start * k) - position * k), frame_line)
+        if (start * k).denominator != 1:
+            notes.append(SCENE_ALIGN_NOTE % (scene_no, frame_line))
+
     counter_lines = []
     for (obj_no, eff_no), props in sorted(effect_props.items()):
         if props.get("effect.name", (None, None))[0] != COUNTER_EFFECT_NAME or not plan_of(obj_no).follow:
@@ -957,6 +1078,8 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
         effect_name = props.get("effect.name", (None, None))[0]
         if key == "effect.name" and value in REFUSED_EFFECT_NAMES:
             raise Refusal(idx + 1, "effect %r is not supported" % value)
+        if key == "effect.name" and value in FRAME_EFFECT_NAMES and plan_of(section[1]).k != 1:
+            raise Refusal(idx + 1, FRAME_EFFECT_REASON % value)
         for marker in RE_FRAME_MARKER.finditer(script_text(effect_name, key, value)):
             where = "%s effect (%s)" % (effect_name, key)
             if not allow_frame_scripts:
@@ -993,7 +1116,18 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
     new_frames = {}
     shortened = set()
     for obj_no, idx in followed_frame_lines.items():
-        new_frames[obj_no], was_short = rescale_frames(frame_values[obj_no], object_k[obj_no], idx + 1)
+        align = scene_align.get(object_scene.get(obj_no))
+        if align is None:
+            new_frames[obj_no], was_short = rescale_frames(frame_values[obj_no], object_k[obj_no], idx + 1)
+        else:
+            shift, shift_new, frame_line = align
+            # The plain rescale runs first, so that its refusal text is the same as without alignment; its result is dropped.
+            rescale_frames(frame_values[obj_no], object_k[obj_no], idx + 1)
+            try:
+                scaled, was_short = rescale_frames([v + shift for v in frame_values[obj_no]], object_k[obj_no], idx + 1)
+            except Refusal:
+                raise Refusal(idx + 1, SCENE_ALIGN_COLLIDE_REASON % frame_line)
+            new_frames[obj_no] = [x - shift_new for x in scaled]
         if was_short:
             shortened.add(idx + 1)
             notes.append("object at line %d shortened to 1 frame" % (idx + 1))
@@ -1122,11 +1256,23 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
     precise_bodies, precise_report = {}, None
     if precise:
         time_control_objects = {obj_no for obj_no, _, _, _ in time_controls}
+        # An object of an aligned scene is resampled on its shifted timeline (frames + D, new frames + Dn); its frames are
+        # shifted back below. The values are not changed by the shift.
+        shifted_frames, shifted_new = dict(frame_values), dict(new_frames)
+        for obj_no in followed_frame_lines:
+            align = scene_align.get(object_scene.get(obj_no))
+            if align is not None:
+                shifted_frames[obj_no] = [v + align[0] for v in frame_values[obj_no]]
+                shifted_new[obj_no] = [x + align[1] for x in new_frames[obj_no]]
         precise_bodies, precise_report, precise_frames = precise_resample(
             lines, [idx for idx in effect_lines
                     if plan_of(section_of[idx][1]).follow and not is_time_control(*section_of[idx][1:])],
-            section_of, followed_frame_lines, frame_values, new_frames, object_k, notes,
+            section_of, followed_frame_lines, shifted_frames, shifted_new, object_k, notes,
             extra_decimals=precise_extra_decimals, skip_objects=time_control_objects)
+        for obj_no in precise_frames:
+            align = scene_align.get(object_scene.get(obj_no))
+            if align is not None:
+                precise_frames[obj_no] = [x - align[1] for x in precise_frames[obj_no]]
         final_frames.update(precise_frames)
 
     # Pass 4: build the rewritten lines.
@@ -1142,12 +1288,12 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
 
     set_line(project_idx, "file=" + os.path.abspath(out_path))
 
-    for scene_no, idxs in scene_lines.items():
+    for scene_no in sorted(scene_plan):
         if not scene_plan[scene_no].follow:
             continue
         scene_k = scene_plan[scene_no].k
         rate_idx, scale_idx = scene_rate_lines[scene_no]
-        for idx in idxs:
+        for idx in scene_lines[section_of_id[scene_no]]:
             key, _, value = lines[idx].partition("=")
             if idx == rate_idx:
                 set_line(idx, "video.rate=%d" % target_num)
@@ -1198,7 +1344,7 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
         "k": fraction_text(k),
         "subscene_rate": subscene_rate,
         "scenes": [{
-            "scene": plan.scene,
+            "scene": plan.scene_no,
             "name": plan.name,
             "source_rate": fraction_text(plan.rate_src),
             "target_rate": fraction_text(rate_dst if plan.follow else plan.rate_src),
