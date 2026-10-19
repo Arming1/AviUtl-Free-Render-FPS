@@ -11,6 +11,7 @@
 
 ### Changed
 
+- Free FPS Export can export without saving the project first. It writes a snapshot of the current project (including unsaved changes) to a temporary folder and exports it in a separate AviUtl2 window; the original window's project path and unsaved state do not change. **Export in a separate process** is checked by default, and forced on for a project that has never been saved. Exporting in the original window (checkbox off) still requires saving the project first, because switching projects discards unsaved changes. Verified by probe 11 in AviUtl2 v2.1.12.
 - Frame-dependent effects `手ぶれ`, `振動`, `ラスター`, `フレア` and `ノイズ` are refused when the object's rate changes (k ≠ 1). Projects that use them are now refused at other rates; remove the effects or export at the project's own rate.
 
 ### Fixed
@@ -22,6 +23,8 @@
 
 ### Validation
 
+- Probe 10 (`test_kit/10_次合成对齐/`), AviUtl2 v2.1.12: with one scene object (P1), the exported scene and the sub-scene start on the same output frame at 66, 60 and 30 fps. With two scene objects (P2, not aligned), the sub-scene is one frame late at 60 fps and the WARNING is shown; at 30 fps it happens to match.
+- Probe 11 (`test_kit/11_快照保存/`), AviUtl2 v2.1.12: `save_project_file` to another path writes a snapshot that includes unsaved changes, and does not change the project path or the unsaved state. Checked for a never-saved project (case A) and a saved project with unsaved changes (case B).
 - Probe 9 (`test_kit/9_其他移动方式/`), AviUtl2 v2.1.12, two rounds: at the same instant, the largest position
   difference between the original and the converted project is 0.24 px.
 - Probe 9 round 3, end to end (Free FPS Export, test plugin 7F3CC96B): E1–E4, E6, E7 pass (≤ 0.24 px against the original or the formula).

@@ -607,9 +607,10 @@ AuoFreeFpsExportScenePlanKeep=保留
 AuoFreeFpsExportScenePlanUnsaved=保存工程后可预览
 AuoFreeFpsExportScenePlanMain=主合成
 AuoFreeFpsExportScenePlanSub=次合成
-AuoFreeFpsExportScenePlanPrefix=按已保存的工程预览：
+AuoFreeFpsExportScenePlanPrefix=按当前工程预览：
 AuoFreeFpsExportSeparateProcess=在独立进程中导出（避免切换工程时崩溃）
 AuoFreeFpsExportSeparateProcessHint=检测到工程使用了 SceneMotionBlur_K：该滤镜会在切换工程时导致 AviUtl2 崩溃，因此默认在独立进程中导出。
+AuoFreeFpsExportSeparateUnsaved=工程尚未保存：将在独立进程中导出，不会保存或改动当前工程。
 
 [AUO_CONFIG_CX]
 AUO_CONFIG_CX_X264_ENCMODE_SINGLE_CBR=单通道编码 - 指定码率

@@ -608,9 +608,10 @@ AuoFreeFpsExportScenePlanKeep=keep
 AuoFreeFpsExportScenePlanUnsaved=Save the project to preview
 AuoFreeFpsExportScenePlanMain=Main
 AuoFreeFpsExportScenePlanSub=Sub-scene
-AuoFreeFpsExportScenePlanPrefix=Preview from the saved project: 
+AuoFreeFpsExportScenePlanPrefix=Preview from the current project: 
 AuoFreeFpsExportSeparateProcess=Export in a separate process (avoids a crash when switching projects)
 AuoFreeFpsExportSeparateProcessHint=This project uses SceneMotionBlur_K, which crashes AviUtl2 when the project is switched. Exporting in a separate process by default.
+AuoFreeFpsExportSeparateUnsaved=The project has not been saved. It is exported in a separate process, and the current project is not saved or changed.
 
 [AUO_CONFIG_CX]
 AUO_CONFIG_CX_X264_ENCMODE_SINGLE_CBR=Single Pass - Bitrate mode

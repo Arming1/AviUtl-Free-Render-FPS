@@ -37,7 +37,7 @@ FreeRenderFPS is an x264guiEx-based output plugin that re-evaluates the real sce
 
 ## Usage
 
-In AviUtl2 v2.1.12, save the project, then choose **Edit > Free FPS Export...**. Set **Target FPS** (59.94 is 60000/1001), **Sub-scene frame rate** (Auto by default), and **Encoder settings...** for bitrate, preset, audio and container.
+In AviUtl2 v2.1.12, choose **Edit > Free FPS Export...**. You do not need to save the project first: with **Export in a separate process** checked (the default; forced on for a project that has never been saved), the plugin exports a snapshot of the current project, including unsaved changes, in a second AviUtl2 window, and the original project is unchanged. With it unchecked, the export runs in the original window and the project must be saved first. Set **Target FPS** (59.94 is 60000/1001), **Sub-scene frame rate** (Auto by default), and **Encoder settings...** for bitrate, preset, audio and container.
 
 ## Support
 

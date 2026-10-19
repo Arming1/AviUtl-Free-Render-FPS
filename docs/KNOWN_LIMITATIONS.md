@@ -41,7 +41,7 @@ Conversion rules are in [RETIME_RULES.md](RETIME_RULES.md). Only limits that sti
   A one-frame project cannot use the neighbour eviction workaround.
 - FreeFPS mode disables AFS, x264guiEx keyframe pre-scan, and timecode output.
 - **Separate-process export** (Export in a separate process). A second AviUtl2 window opens and may take focus. Do not close it
-  before the export finishes. The plugin ends that window when the export is done, so its settings are not saved.
+  before the export finishes. The plugin ends that window when the export is done, so its settings are not saved. The option is on by default. Export works without saving the project first: the plugin writes a snapshot of the current state (including unsaved changes) and exports that. With the option off, the export runs in the original window and the project must be saved first, because switching projects discards unsaved changes.
 - FFmpeg and L-SMASH are source/build-provenance locked, but cross-root byte-for-byte reproducibility is not claimed.
 - The installer is a minimal console EXE rather than a graphical wizard.
 - Side-by-side use must keep the original x264guiEx and FreeRenderFPS in separate directories; the installer refuses the original x264guiEx target.

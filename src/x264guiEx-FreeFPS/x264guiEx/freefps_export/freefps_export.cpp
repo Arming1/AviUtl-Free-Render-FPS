@@ -8,31 +8,41 @@
 //
 // Flow (one run at a time, driven by a 100 ms thread timer on the host main thread):
 //   1. Project path: taken from the project load and save callbacks (PROJECT_FILE::get_project_file_path,
-//      plugin2.h). A project with no path is refused: save it first.
+//      plugin2.h). Only normal mode needs it (step 4). Normal mode refuses a project with no path: save it first.
+//      Separate-process mode exports a project with no path (see below).
 //   2. Dialog: target FPS (exact rational: 66, 60000/1001; decimals refused), output file, and the precise motion
 //      option (always on; shown only in debug mode, see DebugConfig; linear trackbars are re-sampled exactly, see
-//      retime.h), and the sub-scene rate policy
-//      (auto by default; SubsceneRatePolicy in retime.h). A read-only scene plan shows what each scene will become: a
-//      dry run of retime() on the saved project file, nothing written. The encoder settings button opens the
-//      x264guiEx settings window (the output settings, edited in place); a read-only summary shows them.
-//   3. Confirm: the SDK has no unsaved-changes flag, so the user is always asked whether to save the project to its
-//      own path first. No (or closing the prompt) aborts with no side effects.
-//   4. save_project_file(original) once confirmed, then copy the saved original to
-//      %TEMP%\FreeFpsExport\<timestamp>\src.aup2 (a file copy, not a save to temp).
+//      retime.h), and the sub-scene rate policy (auto by default; SubsceneRatePolicy in retime.h).
+//      When the dialog opens it takes a snapshot of the current project: save_project_file(%TEMP%\FreeFpsExport\
+//      preview-<pid>.aup2). The snapshot holds the current state, unsaved changes included, and the project keeps its
+//      path and its unsaved state (see write_snapshot). The read-only scene plan (a dry run of retime() on that
+//      snapshot, nothing written) and the SceneMotionBlur_K check read it. The snapshot is deleted when the dialog
+//      closes. If the snapshot fails, the plan falls back to the saved project file (when there is one) and shows the
+//      reason. The encoder settings button opens the x264guiEx settings window (the output settings, edited in place);
+//      a read-only summary shows them.
+//   3. Confirm (normal mode only): the SDK has no unsaved-changes flag, so the user is asked whether to save the
+//      project to its own path first. No (or closing the prompt) aborts with no side effects. Separate-process mode
+//      asks nothing, because it saves nothing.
+//   4. Normal mode: save_project_file(original) once confirmed, then copy the saved original to
+//      %TEMP%\FreeFpsExport\<timestamp>\src.aup2 (a file copy, not a save to temp). Separate-process mode:
+//      save_project_file(<temp>\src.aup2) writes a snapshot of the current state into the temp folder. The project is
+//      not saved, keeps its path and its unsaved state, and is not reopened (test_kit probe 11, cases A and B).
 //   5. retime() writes retimed.aup2 and retimed.aup2.convert.json beside it, in the same temp folder.
-//   6. open_project_file(retimed.aup2, false), then output_file(out, <own plugin name>, nullptr, nullptr).
-//   7. Wait for CHANGE_EDIT_STATE (SAVE, then EDIT) and check the output file.
-//   8. open_project_file(original, false) on every outcome once the user has confirmed. The original project is
-//      the one reopened, never the temp copy.
+//   6. Normal mode: open_project_file(retimed.aup2, false), then output_file(out, <own plugin name>, nullptr, nullptr).
+//   7. Normal mode: wait for CHANGE_EDIT_STATE (SAVE, then EDIT) and check the output file.
+//   8. Normal mode: open_project_file(original, false) on every outcome once the user has confirmed. The original
+//      project is the one reopened, never the temp copy.
 //   9. Delete the temp folder. FREE_FPS_EXPORT_KEEP_TEMP=1 keeps it for debugging. The debug ini (keep_temp=1) keeps
 //      retimed.aup2 and its sidecar only.
 //
-// Separate-process mode (dialog check box; default on when the saved project uses SceneMotionBlur_K, whose
-// unload crashes AviUtl2 when the project is switched). The running host never switches project. Steps 1 to 5 are the
-// same, then: the plugin writes job.ini beside retimed.aup2 and starts a second aviutl2.exe (this host's own exe) with
-// the environment variable FREE_FPS_EXPORT_JOB=<job.ini>. In that process this DLL opens retimed.aup2, runs
-// output_file, writes result.ini and ends the process. The first host only polls the process handle, reads
-// result.ini, checks the output file again, and shows the result. The original project is neither closed nor reopened.
+// Separate-process mode (dialog check box; on by default for every project. For a project with no path the box is
+// forced on and disabled, with a notice. SceneMotionBlur_K has its own notice when the project uses it: that filter's
+// unload crashes AviUtl2 when the project is switched). The running host never switches project and never saves it.
+// Steps 1 to 5 are the same, with step 4 as above. Then the plugin writes job.ini beside retimed.aup2 and starts a
+// second aviutl2.exe (this host's own exe) with the environment variable FREE_FPS_EXPORT_JOB=<job.ini>. In that
+// process this DLL opens retimed.aup2, runs output_file, writes result.ini and ends the process. The first host only
+// polls the process handle, reads result.ini, checks the output file again, and shows the result. The original
+// project is neither closed nor reopened.
 //
 // Threading: as in experiments/auto_export. SDK calls run on the main thread (menu callback and timer). The
 // CHANGE_EDIT_STATE listener only sets an atomic flag. The project load and save handlers only store the path.
@@ -276,9 +286,17 @@ DebugConfig load_debug_config() {
     return config;
 }
 
-// Creates <root><yyyymmdd-hhmmss-mmm>[-n]\ and returns its path with a trailing backslash. Root defaults to
-// %TEMP%\FreeFpsExport\. Empty string on failure.
-std::wstring make_work_dir() {
+// save_project_file to path: a snapshot of the current project, unsaved changes included. The project's own path and
+// its unsaved state are unchanged (test_kit probe 11, cases A and B), and the save callback (on_project_save) reports
+// the same path as before. Callable from the menu callback and from the timer, not while the host is locked for
+// reference or editing (plugin2.h, save_project_file).
+bool write_snapshot(const std::wstring& path) {
+    return g_edit != nullptr && g_edit->save_project_file(path.c_str());
+}
+
+// Root of the temp folders, with a trailing backslash, created if missing: g_work_root, or %TEMP%\FreeFpsExport\.
+// Empty string on failure.
+std::wstring work_root() {
     std::wstring base = g_work_root;
     if (base.empty()) {
         wchar_t temp[MAX_PATH + 1] = {};
@@ -288,6 +306,16 @@ std::wstring make_work_dir() {
         base = std::wstring(temp) + L"FreeFpsExport\\";
     }
     CreateDirectoryW(base.c_str(), nullptr);  // ERROR_ALREADY_EXISTS is fine
+    return base;
+}
+
+// Creates <root><yyyymmdd-hhmmss-mmm>[-n]\ and returns its path with a trailing backslash. Root defaults to
+// %TEMP%\FreeFpsExport\. Empty string on failure.
+std::wstring make_work_dir() {
+    const std::wstring base = work_root();
+    if (base.empty()) {
+        return std::wstring();
+    }
     SYSTEMTIME now{};
     GetLocalTime(&now);
     wchar_t stamp[64] = {};
@@ -628,13 +656,22 @@ void tick(Run& run) {
         return;
 
     case Phase::kSave: {
-        if (!g_edit->save_project_file(original.c_str())) {
-            fail(run, L"save_project_file returned false");
-            return;
-        }
-        if (!CopyFileW(original.c_str(), run.src_path.c_str(), FALSE)) {
-            fail(run, L"cannot copy the saved project to " + run.src_path);
-            return;
+        if (run.request.separate_process) {
+            // A snapshot of the current state, unsaved changes included, straight into the temp folder. The project
+            // keeps its path and its unsaved state, and is not reopened.
+            if (!write_snapshot(run.src_path)) {
+                fail(run, L"save_project_file returned false (snapshot of the current project)");
+                return;
+            }
+        } else {
+            if (!g_edit->save_project_file(original.c_str())) {
+                fail(run, L"save_project_file returned false");
+                return;
+            }
+            if (!CopyFileW(original.c_str(), run.src_path.c_str(), FALSE)) {
+                fail(run, L"cannot copy the saved project to " + run.src_path);
+                return;
+            }
         }
         std::string src_bytes;
         if (!read_file_bytes(run.src_path, src_bytes)) {
@@ -840,7 +877,8 @@ bool start_export(const ExportRequest& request, const std::wstring& work_dir) {
     return true;
 }
 
-// Checks the project path, asks the user to confirm the save, creates the temp folder and starts the run.
+// Normal mode checks the project path and asks the user to confirm the save. Separate-process mode does neither: it
+// saves nothing, and its snapshot is written by tick(). Then creates the temp folder and starts the run.
 // Refusals before the confirmation have no side effects. Cancelling the prompt has none either.
 bool begin_export(ExportRequest request) {
     if (g_run) {
@@ -851,13 +889,16 @@ bool begin_export(ExportRequest request) {
         return false;
     }
     request.original = current_project_path();
-    if (request.original.empty()) {
-        g_notify(false, L"The project has no file yet. Save it first, then run Free FPS Export again.");
-        return false;
-    }
-    if (!g_confirm_save(request.original)) {
-        log(false, L"export cancelled by the user");
-        return false;
+    if (!request.separate_process) {
+        // Normal mode saves the project to its own path and reopens it afterwards, so it needs a path.
+        if (request.original.empty()) {
+            g_notify(false, L"The project has no file yet. Save it first, then run Free FPS Export again.");
+            return false;
+        }
+        if (!g_confirm_save(request.original)) {
+            log(false, L"export cancelled by the user");
+            return false;
+        }
     }
     const std::wstring work_dir = make_work_dir();
     if (work_dir.empty()) {
@@ -1088,14 +1129,44 @@ struct DialogValues {
     bool precise = true;
     free_fps::SubsceneRatePolicy policy = free_fps::SubsceneRatePolicy::Auto;
     bool separate = false;           // export in a separate process (check box)
-    bool separate_detected = false;  // the saved project uses SceneMotionBlur_K: the check box starts on, with a hint
+    bool separate_detected = false;  // the project uses SceneMotionBlur_K: the SceneMotionBlur_K notice is shown
     DebugConfig debug;
-    // The scene plan reads the saved project. It is read once when the dialog opens: the path and the bytes, or no
-    // path when the project has no file yet.
+    // The project's own path, or "" when it has never been saved (the check box is then forced on and disabled).
     std::wstring project_path;
+    // The scene plan and the SceneMotionBlur_K check read a snapshot of the current project, taken once when the dialog
+    // opens (the project cannot change while the modal dialog is up). preview_path is that snapshot's file. When the
+    // snapshot fails, the bytes come from the saved project file (if there is one) and preview_note says why.
+    std::wstring preview_path;
     std::string project_bytes;
     bool project_read = false;
+    std::wstring preview_note;  // shown above the scene plan area when set
 };
+
+// Takes the dialog's snapshot (write_snapshot to preview_path) and reads its bytes into values. If that fails, the
+// bytes come from the saved project file when there is one, and values.preview_note gives the reason.
+void take_preview(DialogValues& values) {
+    std::string reason;
+    if (values.preview_path.empty()) {
+        reason = "no temp folder";
+    } else if (!write_snapshot(values.preview_path)) {
+        reason = "save_project_file returned false";
+    } else if (!read_file_bytes(values.preview_path, values.project_bytes)) {
+        reason = "the snapshot could not be read";
+    }
+    if (reason.empty()) {
+        values.project_read = true;
+        return;
+    }
+    std::wstring note = L"Preview: " + to_wide(reason) + L", so ";
+    if (!values.project_path.empty()) {
+        note += L"the preview uses the saved project file.";
+        values.project_read = read_file_bytes(values.project_path, values.project_bytes);
+    } else {
+        note += L"there is no saved project file to use instead.";
+    }
+    values.preview_note = note;
+    log(true, note);
+}
 
 class TemplateBuilder {
 public:
@@ -1371,9 +1442,10 @@ void init_policy_combo(HWND dlg) {
     SendMessageW(policy, CB_SETCURSEL, 0, 0);
 }
 
-// Re-runs the plan for the target rate, sub-scene policy and precise setting in the dialog. retime() never writes, so
-// the output path is only the placeholder it needs. Hidden when the target rate is not valid yet, and for a single
-// scene (the policy has nothing to decide there). Shown as the message when the project is unsaved or refused.
+// Re-runs the plan for the target rate, sub-scene policy and precise setting in the dialog, on the snapshot taken
+// when the dialog opened. retime() never writes, so the path it gets is only the placeholder it needs. Hidden when
+// the target rate is not valid yet, and for a single scene (the policy has nothing to decide there). A snapshot
+// failure is shown above the plan, or alone when there is no snapshot.
 void refresh_scene_plan(HWND dlg) {
     DialogValues* values = reinterpret_cast<DialogValues*>(GetWindowLongPtrW(dlg, DWLP_USER));
     std::wstring text;
@@ -1382,19 +1454,18 @@ void refresh_scene_plan(HWND dlg) {
     std::string error;
     const std::wstring rate = trim(get_text(dlg, kIdRate));
     if (values != nullptr && free_fps::parse_target_rate(free_fps::wide_to_utf8(rate), target, error)) {
-        if (values->project_path.empty()) {
-            text = mes(AuoFreeFpsExportScenePlanUnsaved, L"Save the project to preview");
-            show = true;
-        } else if (values->project_read) {
+        if (values->project_read) {
             const bool precise = IsDlgButtonChecked(dlg, kIdPrecise) == BST_CHECKED;
+            // A project with no path has no file name to show; the snapshot's file name is the placeholder then.
+            const std::wstring placeholder = values->project_path.empty() ? values->preview_path : values->project_path;
             const RetimeResult result =
-                free_fps::retime(values->project_bytes, target, values->project_path, precise,
+                free_fps::retime(values->project_bytes, target, placeholder, precise,
                                  static_cast<std::size_t>(values->debug.extra_decimals), selected_policy(dlg));
             if (!result.ok) {
                 text = to_wide(free_fps::refusal_message(result));
                 show = true;
             } else if (result.scenes.size() > 1) {
-                text = mes(AuoFreeFpsExportScenePlanPrefix, L"Preview from the saved project: ") +
+                text = mes(AuoFreeFpsExportScenePlanPrefix, L"Preview from the current project: ") +
                        scene_plan_text(result);
                 for (const std::string& warning : result.warnings) {
                     text += L"\r\n" + to_wide(warning);
@@ -1402,6 +1473,10 @@ void refresh_scene_plan(HWND dlg) {
                 show = true;
             }
         }
+    }
+    if (values != nullptr && !values->preview_note.empty()) {
+        text = text.empty() ? values->preview_note : values->preview_note + L"\r\n" + text;
+        show = true;
     }
     ShowWindow(GetDlgItem(dlg, kIdScenePlan), show ? SW_SHOW : SW_HIDE);
     SetDlgItemTextW(dlg, kIdScenePlan, text.c_str());
@@ -1431,12 +1506,29 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
         SetDlgItemTextW(dlg, kIdSeparate,
                         mes(AuoFreeFpsExportSeparateProcess,
                             L"Export in a separate process (avoids a crash when switching projects)"));
-        SetDlgItemTextW(dlg, kIdSeparateHint,
-                        mes(AuoFreeFpsExportSeparateProcessHint,
-                            L"This project uses SceneMotionBlur_K, which crashes AviUtl2 when the project is "
-                            L"switched. Exporting in a separate process by default."));
+        // The notices under the check box: the unsaved project (no path), then SceneMotionBlur_K when it is used.
+        std::wstring hint;
+        if (init->project_path.empty()) {
+            hint = mes(AuoFreeFpsExportSeparateUnsaved,
+                       L"The project has not been saved. It is exported in a separate process, and the current "
+                       L"project is not saved or changed.");
+        }
+        if (init->separate_detected) {
+            if (!hint.empty()) {
+                hint += L"\r\n";
+            }
+            hint += mes(AuoFreeFpsExportSeparateProcessHint,
+                        L"This project uses SceneMotionBlur_K, which crashes AviUtl2 when the project is "
+                        L"switched. Exporting in a separate process by default.");
+        }
+        SetDlgItemTextW(dlg, kIdSeparateHint, hint.c_str());
+        ShowWindow(GetDlgItem(dlg, kIdSeparateHint), hint.empty() ? SW_HIDE : SW_SHOW);
         CheckDlgButton(dlg, kIdSeparate, init->separate ? BST_CHECKED : BST_UNCHECKED);
-        ShowWindow(GetDlgItem(dlg, kIdSeparateHint), init->separate_detected ? SW_SHOW : SW_HIDE);
+        if (init->project_path.empty()) {
+            // No path: the export runs in a separate process, which saves nothing. The box cannot be turned off.
+            CheckDlgButton(dlg, kIdSeparate, BST_CHECKED);
+            EnableWindow(GetDlgItem(dlg, kIdSeparate), FALSE);
+        }
         init_policy_combo(dlg);
         CheckDlgButton(dlg, kIdPrecise, init->precise ? BST_CHECKED : BST_UNCHECKED);
         if (!init->debug.enabled) {
@@ -1540,7 +1632,7 @@ INT_PTR CALLBACK dialog_proc(HWND dlg, UINT message, WPARAM wparam, LPARAM lpara
             values->output = output;
             values->precise = values->debug.enabled ? IsDlgButtonChecked(dlg, kIdPrecise) == BST_CHECKED : true;
             values->policy = selected_policy(dlg);
-            values->separate = IsDlgButtonChecked(dlg, kIdSeparate) == BST_CHECKED;
+            values->separate = values->project_path.empty() || IsDlgButtonChecked(dlg, kIdSeparate) == BST_CHECKED;
             EndDialog(dlg, IDOK);
             return TRUE;
         }
@@ -1609,12 +1701,18 @@ void on_menu(void*) {
     values.debug = load_debug_config();
     values.precise = values.debug.precise;
     values.project_path = current_project_path();
-    if (!values.project_path.empty()) {
-        values.project_read = read_file_bytes(values.project_path, values.project_bytes);
+    values.separate = true;  // on by default for every project (forced on for a project with no path, in the dialog)
+    const std::wstring root = work_root();
+    if (!root.empty()) {
+        values.preview_path = root + L"preview-" + std::to_wstring(GetCurrentProcessId()) + L".aup2";
     }
+    take_preview(values);
     values.separate_detected = values.project_read && uses_scene_motion_blur(values.project_bytes);
-    values.separate = values.separate_detected;
-    if (!ask_for_request(g_edit->get_host_app_window(), values)) {
+    const bool accepted = ask_for_request(g_edit->get_host_app_window(), values);
+    if (!values.preview_path.empty()) {
+        DeleteFileW(values.preview_path.c_str());  // the snapshot is only for the dialog
+    }
+    if (!accepted) {
         return;
     }
     Rational target;
@@ -1653,7 +1751,9 @@ void on_project_load(PROJECT_FILE* project) {
     child_start_timer_once();  // second host only: the first load callback starts the export
 }
 
-// Project save callback: the path the project is saved to (covers Save As).
+// Project save callback: the path the project is saved to (covers Save As). A snapshot (write_snapshot) also calls it,
+// and reports the project's own path (none for a project never saved), as test_kit probe 11 showed. Storing that path
+// changes nothing, so snapshots need no flag here.
 void on_project_save(PROJECT_FILE* project) {
     if (project == nullptr || project->get_project_file_path == nullptr) {
         return;

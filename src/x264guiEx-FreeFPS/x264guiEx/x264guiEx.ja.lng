@@ -606,9 +606,10 @@ AuoFreeFpsExportScenePlanKeep=維持
 AuoFreeFpsExportScenePlanUnsaved=保存後にプレビューできます
 AuoFreeFpsExportScenePlanMain=メインシーン
 AuoFreeFpsExportScenePlanSub=サブシーン
-AuoFreeFpsExportScenePlanPrefix=保存済みのプロジェクトでのプレビュー：
+AuoFreeFpsExportScenePlanPrefix=現在のプロジェクトでのプレビュー：
 AuoFreeFpsExportSeparateProcess=別プロセスで出力（プロジェクト切替時のクラッシュを回避）
 AuoFreeFpsExportSeparateProcessHint=プロジェクトで SceneMotionBlur_K が使われています。このフィルタはプロジェクトの切替時に AviUtl2 をクラッシュさせるため、既定で別プロセスで出力します。
+AuoFreeFpsExportSeparateUnsaved=プロジェクトはまだ保存されていません。別プロセスで出力し、現在のプロジェクトは保存も変更もしません。
 
 [AUO_CONFIG_CX]
 AUO_CONFIG_CX_X264_ENCMODE_SINGLE_CBR=シングルパス - ビットレート指定
