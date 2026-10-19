@@ -3308,9 +3308,15 @@ def test_frame_mode_precise_skips_the_object_and_still_converts_the_parameter():
 # ---------------------------------------------------------------------------
 
 PROJECT_HEAD = "[project]\nversion=2010400\nfile=synthetic.aup2\ndisplay.scene=%d\npreview.scene=0\n"
-FRAME_EFFECT_NAMES = ["手ぶれ", "振動", "ラスター", "フレア", "ノイズ"]
+# Refused at k != 1 (the tool's FRAME_EFFECT_NAMES). 手ぶれ and ラスター are time-based and フレア is refused only unless 点滅=0
+# (FLARE_BLINK_TEXT); see the tests below.
+FRAME_EFFECT_NAMES = ["振動", "ノイズ"]
+TIME_BASED_EFFECT_NAMES = ["手ぶれ", "ラスター"]
+ALL_EFFECT_NAMES = ["手ぶれ", "振動", "ラスター", "フレア", "ノイズ"]
 FRAME_EFFECT_TEXT = ("REFUSED: line %d: effect '%s' depends on the frame number or a per-frame random value "
                      "and is not verified at another frame rate; refused")
+FLARE_BLINK_TEXT = ("REFUSED: line %d: effect 'フレア' with 点滅=%s is not verified at another frame rate (only 点滅=0 is); "
+                    "refused")
 ALIGN_WARNING = ("WARNING: scene %d cannot be aligned to the exported scene (%s); object boundaries inside it may be "
                  "one frame off at this rate")
 ALIGN_NOTE = "scene %d is rescaled on the timeline of its scene object at line %d"
@@ -3487,8 +3493,77 @@ def test_frame_dependent_effects_are_refused_when_k_is_not_one():
         assert_no_output(out)
 
 
+def flare_src(name, body):
+    """Write the 30 FPS fixture with its 標準描画 effect renamed フレア and `body` (lines after the name) into a case dir.
+    Returns (dir, src_path)."""
+    d = case_dir(name)
+    src = os.path.join(d, "src.aup2")
+    text = read_text_lf(FIX_30).replace("effect.name=標準描画\n", "effect.name=フレア\n" + body, 1)
+    write_bytes(src, text.encode("utf-8"))
+    return d, src
+
+
+def test_time_based_effects_convert_at_another_rate_like_the_plain_project():
+    # 手ぶれ and ラスター were removed from the refused list: the conversion equals the one without the effect, and the
+    # effect section is kept as it is (only its name line differs from the plain project).
+    d, plain_src = fixture_variant("time_based_plain", lambda text: text)
+    plain_out = os.path.join(d, "plain.aup2")
+    code, _, err = convert_target(plain_src, plain_out, "60")
+    assert code == 0 and err == "", "plain: exit %d: %s" % (code, err)
+    plain = lines_without_file(plain_out)
+    for n, name in enumerate(TIME_BASED_EFFECT_NAMES):
+        d, src = fixture_variant("time_based_%d" % n, lambda text, name=name:
+                                 text.replace("effect.name=標準描画\n", "effect.name=%s\n" % name, 1))
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert_target(src, out, "60")
+        assert code == 0 and err == "", "%s: exit %d: %s" % (name, code, err)
+        got = lines_without_file(out)
+        assert "effect.name=%s" % name in got, name
+        assert [line.replace("effect.name=%s" % name, "effect.name=標準描画") for line in got] == plain, name
+        assert read_report(out)["notes"] == [], read_report(out)["notes"]
+
+
+def test_flare_passes_at_another_rate_when_blink_is_zero():
+    for n, blink in enumerate(["点滅=0.0", "点滅=0", "点滅=0.00"]):
+        d, src = flare_src("flare_zero_%d" % n, blink + "\n")
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert_target(src, out, "60")
+        assert code == 0 and err == "", "%s: exit %d: %s" % (blink, code, err)
+        assert "effect.name=フレア\n%s\n" % blink in read_text_lf(out), blink
+
+
+def test_flare_is_refused_at_another_rate_unless_blink_is_zero_or_missing_or_a_track():
+    cases = [
+        ("点滅=1.0", "1.0"),
+        ("点滅=0.0,5.0,直線移動,0", "0.0,5.0,直線移動,0"),
+        ("", "(missing)"),
+    ]
+    for n, (body, shown) in enumerate(cases):
+        d, src = flare_src("flare_refused_%d" % n, body + "\n" if body else "")
+        out = os.path.join(d, "out.aup2")
+        code, _, err = convert_target(src, out, "60")
+        line = line_number_of(src, "effect.name=フレア")
+        assert code == 2 and err.strip() == FLARE_BLINK_TEXT % (line, shown), "%s: exit %d: %s" % (shown, code, err)
+        assert_no_output(out)
+
+
+def test_flare_blink_is_not_checked_at_the_same_rate_or_in_a_kept_scene():
+    d, src = flare_src("flare_same_rate", "点滅=1.0\n")
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "30")
+    assert code == 0 and err == "", "exit %d: %s" % (code, err)
+    assert "effect.name=フレア\n点滅=1.0\n" in read_text_lf(out)
+    d, src, _ = align_project("flare_kept", [(0, None, 30), (1, None, 15)],
+                              [(0, 0, "0,119", []), (1, 0, "0,59", ["effect.name=フレア\n点滅=1.0\n"])])
+    out = os.path.join(d, "out.aup2")
+    code, _, err = convert_target(src, out, "60")
+    assert code == 0 and err == "", "exit %d: %s" % (code, err)
+    assert "effect.name=フレア\n点滅=1.0\n" in read_text_lf(out) and frames_of(out)[1] == [0, 59], frames_of(out)
+    assert read_report(out)["notes"] == ["scene 1 kept at its own rate 15/1"], read_report(out)["notes"]
+
+
 def test_frame_dependent_effects_pass_at_the_same_rate_and_in_kept_scenes():
-    for n, name in enumerate(FRAME_EFFECT_NAMES):
+    for n, name in enumerate(ALL_EFFECT_NAMES):
         d = case_dir("frame_effect_same_%d" % n)
         src = os.path.join(d, "src.aup2")
         text = read_text_lf(FIX_30).replace("effect.name=標準描画", "effect.name=%s" % name, 1)
@@ -3713,6 +3788,10 @@ TESTS = [
     test_scene_object_precise_shifts_the_keyframes_of_the_aligned_scene,
     test_frame_dependent_effects_are_refused_when_k_is_not_one,
     test_frame_dependent_effects_pass_at_the_same_rate_and_in_kept_scenes,
+    test_time_based_effects_convert_at_another_rate_like_the_plain_project,
+    test_flare_passes_at_another_rate_when_blink_is_zero,
+    test_flare_is_refused_at_another_rate_unless_blink_is_zero_or_missing_or_a_track,
+    test_flare_blink_is_not_checked_at_the_same_rate_or_in_a_kept_scene,
     test_scene_id_selects_the_plan_of_each_object,
     test_scene_id_object_uses_its_scene_when_the_section_number_differs,
     test_display_scene_naming_another_section_is_ambiguous,

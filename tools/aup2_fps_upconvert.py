@@ -114,10 +114,20 @@ PRECISE_NOTE_RATIO = Fraction(1, 10000)  # 0.01 %
 # Effect names that cannot be converted safely. Empty: カウンター is time-based (速度 = counts per second).
 REFUSED_EFFECT_NAMES = frozenset()
 # Effects whose result depends on the frame number or on a per-frame random value. They are refused in an object whose k is
-# not 1 (k = 1 changes no frame and is kept). 手ぶれ, ラスター and フレア were measured to differ at another frame rate
-# (D:\tutorial\compare); 振動 and ノイズ were not measured and are refused on the same rule until a probe passes them.
-FRAME_EFFECT_NAMES = frozenset({"手ぶれ", "振動", "ラスター", "フレア", "ノイズ"})
+# not 1 (k = 1 changes no frame and is kept). Basis: probe 13 (test_kit/13_按帧滤镜, AviUtl2 v2.1.12, portable host). 手ぶれ and
+# ラスター are no longer listed: they follow time in seconds (the same-time difference between 30 and 60 fps is 2-4 times the
+# encoding noise; the same-frame-number difference is 100-300 times the same-time one). 10 3.aup2 exclusion test (66 -> 60):
+# removing all 手ぶれ or all フレア effects did not reduce the differing spans. フレア is checked by its 点滅 value below.
+# 振動 stays refused: its period is counted in frames and it is random; after scaling the period the same time still differs.
+# ノイズ stays refused: not measured.
+FRAME_EFFECT_NAMES = frozenset({"振動", "ノイズ"})
 FRAME_EFFECT_REASON = "effect %r depends on the frame number or a per-frame random value and is not verified at another frame rate; refused"
+# フレア is time-invariant only at 点滅=0 (probe 13: with 点滅=0.0 and 光芒変化速度 0.2 and 5.0, the frame 0 difference equals the
+# median of the whole clip, so the 30/60 fps differences are encoding noise). Any other 点滅 value is refused: a number other
+# than 0, a trackbar or other text, or a missing key ("(missing)").
+FLARE_EFFECT_NAME = "フレア"
+FLARE_BLINK_KEY = "点滅"
+FLARE_BLINK_REASON = "effect 'フレア' with 点滅=%s is not verified at another frame rate (only 点滅=0 is); refused"
 # Effect whose text value may hold script between '<?' and '?>'.
 TEXT_EFFECT_NAME = "テキスト"
 # Effect whose 速度 must be a plain number (checked, then passed through).
@@ -1080,6 +1090,10 @@ def convert(data, out_path, factor=None, target=None, allow_frame_scripts=False,
             raise Refusal(idx + 1, "effect %r is not supported" % value)
         if key == "effect.name" and value in FRAME_EFFECT_NAMES and plan_of(section[1]).k != 1:
             raise Refusal(idx + 1, FRAME_EFFECT_REASON % value)
+        if key == "effect.name" and value == FLARE_EFFECT_NAME and plan_of(section[1]).k != 1:
+            blink = props.get(FLARE_BLINK_KEY, ("(missing)", None))[0]
+            if not (RE_NUMBER.match(blink) and Fraction(blink) == 0):
+                raise Refusal(idx + 1, FLARE_BLINK_REASON % blink)
         for marker in RE_FRAME_MARKER.finditer(script_text(effect_name, key, value)):
             where = "%s effect (%s)" % (effect_name, key)
             if not allow_frame_scripts:

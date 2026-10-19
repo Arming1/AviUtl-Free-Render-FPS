@@ -172,6 +172,12 @@ bool is_number(std::string_view s) {
     return i > frac_start && i == s.size();
 }
 
+// A RE_NUMBER text whose exact value is 0 (0, 0.0, 0.00, -0.0). Checked on the characters: parse_decimal would overflow on a
+// fraction of more than 18 digits, which would refuse the whole file instead of the effect.
+bool is_zero_number(std::string_view s) {
+    return is_number(s) && std::all_of(s.begin(), s.end(), [](char c) { return c == '-' || c == '.' || c == '0'; });
+}
+
 // Digits to int64. Refuses when the value does not fit.
 i64 parse_digits(std::string_view digits, std::size_t line, const std::string& what) {
     i64 value = 0;
@@ -487,10 +493,19 @@ const std::set<std::string> kFrameCountModes = {kFrameCountRepeat, kFrameCountRa
 const std::string kFrameCountFlag = "4";
 constexpr std::size_t kFrameCountMaxPlaces = 6;
 const Rational kFrameCountTolerance{1, 2};  // a rewritten value may be off by at most half a frame (355/113 bounds pi above)
-// Effects whose look depends on the frame number or on a per-frame random value. 手ぶれ, ラスター and フレア were measured
-// to differ from the original at another frame rate (D:\tutorial\compare). 振動 and ノイズ are not measured; they are listed
-// too, so they are refused until a probe lets them through. Refused in a followed object whose scene has k != 1.
-const std::set<std::string> kFrameEffectNames = {"手ぶれ", "振動", "ラスター", "フレア", "ノイズ"};
+// Effects whose look depends on the frame number or on a per-frame random value. Refused in a followed object whose scene
+// has k != 1. 手ぶれ and ラスター are not listed: probe 13 (test_kit/13_按帧滤镜, data/probe13_verdict.csv) found that their
+// difference between two frame rates follows the time, not the frame number (same moment: 2-4 times the encoding noise;
+// same frame number: 100-300 times). 振動 stays listed: it counts its period per frame and is random, so after the period is
+// rescaled the same moment still differs (probe 13). ノイズ was not measured and stays refused until a probe lets it through.
+// フレア is not listed: with 点滅 = 0 its look does not change over time (probe 13), so kFlareBlinkKey decides it. The 10 3.aup2
+// exclusion test (66 -> 60, same AviUtl2 and encoding) did not reduce the significant differences when all 8 フレア objects
+// or all 6 手ぶれ effects were removed, so these effects are not the cause of the remaining differences.
+const std::set<std::string> kFrameEffectNames = {"振動", "ノイズ"};
+// The only フレア 点滅 value that is verified at another frame rate is 0 (a plain number that equals 0). Any other value,
+// a track written in 点滅, or a missing 点滅 key is refused in a followed object whose scene has k != 1.
+const std::string kFlareEffectName = "フレア";
+const std::string kFlareBlinkKey = "点滅";
 // The シーン effect plays a scene from its 再生位置 (seconds, or a 再生範囲 trackbar) at 再生速度 and ループ再生. Read by the
 // scene alignment (plan_scene_alignment).
 const std::string kScenePlayerEffect = "シーン";
@@ -2251,6 +2266,14 @@ std::string convert(std::string_view data, const Mode& mode, const std::string& 
             refuse(idx + 1, "effect '" + value +
                                 "' depends on the frame number or a per-frame random value and is not verified at another "
                                 "frame rate; refused");
+        }
+        if (key == "effect.name" && value == kFlareEffectName && !rat_equal(scene_of_object(sec.a).k, Rational{1, 1})) {
+            const auto blink = props.find(kFlareBlinkKey);
+            if (blink == props.end() || !is_zero_number(blink->second.value)) {
+                refuse(idx + 1, "effect '" + kFlareEffectName + "' with " + kFlareBlinkKey + "=" +
+                                    (blink == props.end() ? std::string("(missing)") : blink->second.value) +
+                                    " is not verified at another frame rate (only " + kFlareBlinkKey + "=0 is); refused");
+            }
         }
         std::string marker;
         if (find_marker(decode_utf8(script_text(effect_name, key, value)), marker)) {

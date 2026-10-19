@@ -39,7 +39,7 @@ Full specification, formulas and sidecar fields: [tools/aup2_fps_upconvert.md](.
 | `video.rate`, `video.scale` | Followed scene: set to `rt/st`. Missing `video.scale` is read as 1 and written | — | Default 1 is an assumption, not verified | spec "Scene requirements" |
 | Frame-dependent script (`obj.frame`, `obj.totalframe`, `obj.index`, `obj.rand`, `rand(`, `math.random(`, `math.randomseed`) | Refused by default. With `--allow-frame-scripts`: converted, warning and note | — | Such animation runs `k` times faster; per-frame random sequences change | spec "Script in effects" |
 | Short object overlap (low target rate) | Shortened to one frame; if that breaks touching or overlap with a neighbour on the same layer, refused with the later object's line | — | Tool never moves boundaries to fix it. See KNOWN_LIMITATIONS | spec "Object rules"; host-free tests (`tests/aup2_upconvert/`) |
-| Frame-dependent effect `手ぶれ`, `振動`, `ラスター`, `フレア`, `ノイズ` | Refused when the object's `k` ≠ 1 (per-frame random or frame-based animation). Object at `k` = 1 is kept | — | `手ぶれ`, `ラスター`, `フレア` differ from the original at another rate. `振動`, `ノイズ` not measured, refused until probed | Local comparison of user project `10 3` (not in repo) |
+| Frame-dependent effect `振動`, `ノイズ`, `フレア` | Refused when the object's `k` ≠ 1, except `フレア` with `点滅` = 0 (plain number; a missing key or track syntax counts as not 0). Object at `k` = 1 is kept. `手ぶれ`, `ラスター` are not refused: time-based, converted unchanged | — | `振動`: per-frame period with randomness, still differs after converting its period. `ノイズ`: not measured. `フレア` with `点滅` ≠ 0: not measured. `フレア` with `点滅` = 0 does not change over time | Probe 13 (`test_kit/13_按帧滤镜/`, AviUtl2 v2.1.12) |
 | `繰り返し`, `対象レイヤー数`, seconds-based values (`audio.rate`, tempo, `display.grid.*`), unknown lines | Copied unchanged | — | — | spec "What it changes" |
 
 ## When the tool refuses
@@ -47,7 +47,7 @@ Full specification, formulas and sidecar fields: [tools/aup2_fps_upconvert.md](.
 Refusals print `REFUSED: line N: reason` to stderr, exit with code 2 and write no output file.
 
 - **Frame-dependent script.** Remove the marker from the effect text, or convert with `--allow-frame-scripts` and accept that the animation runs `k` times faster.
-- **Frame-dependent effect** (`手ぶれ`, `振動`, `ラスター`, `フレア`, `ノイズ`) at a rate other than the project's. Remove or replace the effect, or export at the project's own rate.
+- **Frame-dependent effect** (`振動`, `ノイズ`, or `フレア` whose `点滅` is not 0) at a rate other than the project's. Remove or replace the effect, or export at the project's own rate.
 - **Sub-scene alignment warning.** Use a target rate that is an integer multiple of the source rate (for example 66 → 132).
 - **`コマ落ち` not a positive integer.** Set it to `1` (no drop) or a whole number of 2 or more. Drops other than in 時間制御(オブジェクト) are not converted.
 - **時間制御 `位置` not two plain numbers with `直線移動(時間制御)`, or object not two frame points.** Fix the source project so the effect has exactly that form.

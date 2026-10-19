@@ -542,11 +542,20 @@ the section with number `display.scene` has another id.
 
 ## Frame-dependent effects
 
-`手ぶれ`, `振動`, `ラスター`, `フレア` and `ノイズ` depend on the frame number or a per-frame random value. In a followed object
-with `k != 1` they are refused: `REFUSED: line N: effect '<name>' depends on the frame number or a per-frame random value and is
-not verified at another frame rate; refused`. `手ぶれ`, `ラスター` and `フレア` were measured to differ at another rate
-(`D:	utorial\compare`); `振動` and `ノイズ` were not measured and are refused on the same rule until a probe passes them.
-`k = 1` and kept scenes are not checked.
+In a followed object with `k != 1` these effects are refused, with `REFUSED: line N: effect '<name>' depends on the frame
+number or a per-frame random value and is not verified at another frame rate; refused`:
+
+- `振動` and `ノイズ`. `振動` has a period counted in frames and is random per frame; after scaling the period the same
+  time still differs (probe 13). `ノイズ` was not measured.
+- `フレア` unless its `点滅` is the plain number `0` (`0`, `0.0`, `0.00`). Otherwise the refusal is
+  `REFUSED: line N: effect 'フレア' with 点滅=<value> is not verified at another frame rate (only 点滅=0 is); refused`,
+  where `<value>` is the text of the `点滅` line (`(missing)` when there is none; a trackbar such as `0.0,5.0,直線移動,0` is
+  not a plain number, so it is refused).
+
+`手ぶれ` and `ラスター` are not refused. Probe 13 (`test_kit/13_按帧滤镜`, AviUtl2 v2.1.12) shows them time-based: the
+difference between 30 and 60 fps at the same time is 2-4 times the encoding noise, and at the same frame number it is
+100-300 times the same-time difference. A 66 to 60 exclusion test on the user project `10 3.aup2` (same host and encoder) showed that
+removing all `フレア` or all `手ぶれ` effects does not reduce the differing spans. `k = 1` and kept scenes are not checked.
 
 ## Script in effects
 

@@ -3029,28 +3029,87 @@ void test_scene_ids() {
           "ids: a section without scene= has the id of its number", n.ok ? plan_text(n) : refusal_message(n));
 }
 
-// Frame-dependent effects: refused in a followed object when k != 1, accepted at k = 1, and not looked at in a kept scene.
+// Frame-dependent effects. 振動 and ノイズ are refused in a followed object when k != 1. 手ぶれ and ラスター are converted like
+// a plain object. フレア is converted only at 点滅 = 0. Nothing is refused at k = 1 or in a kept scene.
+std::string flare_object(const std::string& blink_line) {
+    return "[0]\nlayer=0\nframe=0,29\n[0.0]\neffect.name=フレア\n" + blink_line;
+}
+
+// text with the first occurrence of from replaced by to.
+std::string replace_first(std::string text, const std::string& from, const std::string& to) {
+    const std::size_t at = text.find(from);
+    if (at != std::string::npos) {
+        text.replace(at, from.size(), to);
+    }
+    return text;
+}
+
 void test_frame_effect_refusals() {
-    const std::vector<std::string> names = {"手ぶれ", "振動", "ラスター", "フレア", "ノイズ"};
-    for (const std::string& name : names) {
+    // 振動 and ノイズ: refused at k = 2 with the unchanged message, accepted at k = 1.
+    const std::vector<std::string> refused = {"振動", "ノイズ"};
+    for (const std::string& name : refused) {
         const std::string obj = "[0]\nlayer=0\nframe=0,29\n[0.0]\neffect.name=" + name + "\n";
         const std::string text = project(scene30(), obj);
         expect_refused("frame effect " + name + " refused at k = 2", text, rate(60), line_of_first(text, "effect.name=" + name),
                        "effect '" + name +
                            "' depends on the frame number or a per-frame random value and is not verified at another frame "
                            "rate; refused");
+    }
+    // 手ぶれ and ラスター: converted at k = 2 with the frames of the same project with a plain object, and the effect block is
+    // kept as written.
+    const std::vector<std::string> converted = {"手ぶれ", "ラスター"};
+    const RetimeResult plain = retime_target(project(scene30(), "[0]\nlayer=0\nframe=0,29\n[0.0]\neffect.name=標準描画\n"), rate(60));
+    for (const std::string& name : converted) {
+        const std::string obj = "[0]\nlayer=0\nframe=0,29\n[0.0]\neffect.name=" + name + "\n";
+        const RetimeResult r = retime_target(project(scene30(), obj), rate(60));
+        check(r.ok && plain.ok && frame_line(r, "frame=0,59") == "frame=0,59" &&
+                  r.output == replace_first(plain.output, "effect.name=標準描画", "effect.name=" + name),
+              "frame effect " + name + " converted at k = 2 like a plain object, effect kept", refusal_message(r));
+    }
+    // フレア: refused at k = 2 unless 点滅 is a plain number equal to 0. The refusal is at the effect.name line.
+    auto flare_refused = [](const std::string& label, const std::string& blink_line, const std::string& shown) {
+        const std::string text = project(scene30(), flare_object(blink_line));
+        expect_refused("フレア " + label + " refused at k = 2", text, rate(60), line_of_first(text, "effect.name=フレア"),
+                       "effect 'フレア' with 点滅=" + shown + " is not verified at another frame rate (only 点滅=0 is); refused");
+    };
+    flare_refused("点滅=1.0", "点滅=1.0\n", "1.0");
+    flare_refused("track 点滅=0.0,5.0,直線移動,0", "点滅=0.0,5.0,直線移動,0\n", "0.0,5.0,直線移動,0");
+    flare_refused("missing 点滅", "", "(missing)");
+    flare_refused("nonzero with 19 fraction digits", "点滅=0." + std::string(19, '0') + "1\n", "0." + std::string(19, '0') + "1");
+    const std::vector<std::string> zero_blinks = {"0.0", "0", "0.00", "0." + std::string(20, '0')};
+    for (const std::string& blink : zero_blinks) {
+        const std::string text = project(scene30(), flare_object("点滅=" + blink + "\n"));
+        const RetimeResult r = retime_target(text, rate(60));
+        check(r.ok && frame_line(r, "frame=0,59") == "frame=0,59" && contains(r.output, "effect.name=フレア\n点滅=" + blink + "\n"),
+              "フレア 点滅=" + blink + " converted at k = 2, effect kept", refusal_message(r));
+    }
+    // k = 1: nothing is checked, whatever the effect or its 点滅 value.
+    const std::vector<std::string> names = {"手ぶれ", "振動", "ラスター", "フレア", "ノイズ"};
+    for (const std::string& name : names) {
+        const std::string obj = "[0]\nlayer=0\nframe=0,29\n[0.0]\neffect.name=" + name + "\n";
         const RetimeResult same = retime_target(project(scene30(), obj), rate(30));
         check(same.ok, "frame effect " + name + " accepted at k = 1", refusal_message(same));
     }
-    // A 15 FPS scene is kept under auto (no refusal, the section is unchanged); under follow it is refused.
+    const RetimeResult flare_k1 = retime_target(project(scene30(), flare_object("点滅=1.0\n")), rate(30));
+    check(flare_k1.ok, "フレア 点滅=1.0 accepted at k = 1", refusal_message(flare_k1));
+    // A 15 FPS scene is kept under auto (no refusal, the section is unchanged); under follow 振動 is refused.
     const std::string kept = multi_scene_project(
         "display.scene=0\n", scene_section(0, 0, "main", 30, 1, "") +
                                  scene_section(1, 1, "sub", 15, 1, "[1]\nlayer=0\nframe=0,29\n[1.0]\neffect.name=手ぶれ\n"));
     const RetimeResult k = retime_target(kept, rate(60));
     check(k.ok && from_marker(k.output, "[scene.1]") == from_marker(kept, "[scene.1]"),
           "frame effect in a kept scene is not refused", refusal_message(k));
-    const RetimeResult f = run_policy(kept, rate(60), SubsceneRatePolicy::Follow);
-    check(!f.ok && f.refusal_line == line_of_first(kept, "effect.name=手ぶれ"),
+    const std::string kept_flare = multi_scene_project(
+        "display.scene=0\n", scene_section(0, 0, "main", 30, 1, "") +
+                                 scene_section(1, 1, "sub", 15, 1, "[1]\nlayer=0\nframe=0,29\n[1.0]\neffect.name=フレア\n点滅=1.0\n"));
+    const RetimeResult kf = retime_target(kept_flare, rate(60));
+    check(kf.ok && from_marker(kf.output, "[scene.1]") == from_marker(kept_flare, "[scene.1]"),
+          "フレア 点滅=1.0 in a kept scene is not refused", refusal_message(kf));
+    const std::string followed = multi_scene_project(
+        "display.scene=0\n", scene_section(0, 0, "main", 30, 1, "") +
+                                 scene_section(1, 1, "sub", 15, 1, "[1]\nlayer=0\nframe=0,29\n[1.0]\neffect.name=振動\n"));
+    const RetimeResult f = run_policy(followed, rate(60), SubsceneRatePolicy::Follow);
+    check(!f.ok && f.refusal_line == line_of_first(followed, "effect.name=振動"),
           "frame effect in a followed 15 FPS scene is refused", refusal_message(f));
 }
 

@@ -12,7 +12,7 @@
 ### Changed
 
 - Free FPS Export can export without saving the project first. It writes a snapshot of the current project (including unsaved changes) to a temporary folder and exports it in a separate AviUtl2 window; the original window's project path and unsaved state do not change. **Export in a separate process** is checked by default, and forced on for a project that has never been saved. Exporting in the original window (checkbox off) still requires saving the project first, because switching projects discards unsaved changes. Verified by probe 11 in AviUtl2 v2.1.12.
-- Frame-dependent effects `手ぶれ`, `振動`, `ラスター`, `フレア` and `ノイズ` are refused when the object's rate changes (k ≠ 1). Projects that use them are now refused at other rates; remove the effects or export at the project's own rate.
+- Frame-dependent effects `振動` and `ノイズ` are refused when the object's rate changes (k ≠ 1). `フレア` is refused at k ≠ 1 unless its `点滅` is the number 0. `手ぶれ` and `ラスター` are no longer refused: they are time-based and are converted unchanged (probe 13). Projects that use refused effects must remove them or export at the project's own rate.
 
 ### Fixed
 
@@ -29,6 +29,7 @@
   difference between the original and the converted project is 0.24 px.
 - Probe 9 round 3, end to end (Free FPS Export, test plugin 7F3CC96B): E1–E4, E6, E7 pass (≤ 0.24 px against the original or the formula).
   `移動量指定` 30 → 59.94 (written as 2.002, host reads 2.00, 0.59 px at the last frame) failed; that step now uses the source's decimal count.
+- Probe 13 (`test_kit/13_按帧滤镜/`), AviUtl2 v2.1.12, portable build, exported automatically with the same encoder: `手ぶれ` and `ラスター` change with time, not with the frame number; `フレア` with 点滅=0 does not change over time; `振動` uses a per-frame period with randomness. `ノイズ` was not measured. Removing all 8 `フレア` objects, or all 6 `手ぶれ` effects, from user project `10 3` (66 → 60) did not reduce the significant differences in any time range, so those differences come from misaligned sub-scenes and other causes.
 
 ## [1.3.1] — 2026-10-18
 

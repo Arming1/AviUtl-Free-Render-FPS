@@ -41,8 +41,9 @@ Sub scene alignment (a シーン object of any scene plays a sub scene; always o
 case (player at 480,863 playing scene 1, sub objects 0,71 and 72,143) at 60, 30, 60000/1001, 132 and 2x, precise off and on;
 one project per reason R1-R6 (two players, player in a sub scene, three frame points, speed 200, loop 1, position 0.010,
 a time control object in the sub scene) at 60; a 直線移動 X track with --precise at 60 and 60000/1001; ランダム移動 starting at
-frame 0 and 反復移動 in an aligned sub scene at 60. Per-frame effect refusals (手ぶれ, 振動, ラスター, フレア, ノイズ) at 60
-on a 66 fps project; the same effects at the source rate (66, precise off and on) and in a kept 15 fps sub scene are converted.
+frame 0 and 反復移動 in an aligned sub scene at 60. Per-frame effects at 60 on a 66 fps project: 振動 and ノイズ refused,
+手ぶれ and ラスター converted, フレア refused unless 点滅=0.0 (cases for 0.0, 1.0, a 点滅 track and a missing 点滅); the same
+effects at the source rate (66, precise off and on) and in a kept 15 fps sub scene are converted.
 The directory test_kit/10_次合成对齐/*.aup2 (non-recursive, read in place) at 60, 30, 60000/1001 and 132, precise off and on.
 
 Scene IDs (the scene= line of each [scene.N], always on): the ID is the first scene= value of a section (N when the line is
@@ -719,9 +720,14 @@ def align_cases(synthetic_dir):
         object_lines(4, "0,143", scene=1, layer=1, tracks=["X=-600.00,600.00,反復移動,4|11"])
     add("align_frame_count", align_text(align_user_main(), frame_count_sub), ALIGN_TARGET_60, ((),))
 
-    # Per-frame effects: refused at 60 when the scene is followed and 66 -> 60 (k != 1).
+    # Per-frame effects at 60 when the scene is followed and 66 -> 60 (k != 1). 振動 and ノイズ are refused. 手ぶれ and ラスター
+    # (indexes 0 and 2) are no longer refused: their cases convert. フレア (index 3) is refused here (no 点滅 key); see below.
     for index, name in enumerate(FRAME_EFFECT_NAMES):
         add("fx_refused_%d" % index, synthetic_text(object_lines(1, "0,59", effect=name), rate=66), ALIGN_TARGET_60, ((),))
+    # フレア passes only at 点滅=0 (a plain number equal to 0); 点滅=1.0, a track written in 点滅 and a missing 点滅 are refused.
+    for name, extra in (("fx_flare_blink_0_0", ["点滅=0.0"]), ("fx_flare_blink_1_0", ["点滅=1.0"]),
+                        ("fx_flare_track", ["点滅=0.0,5.0,直線移動,0"]), ("fx_flare_no_blink", [])):
+        add(name, synthetic_text(object_lines(1, "0,59", effect="フレア", extra=extra), rate=66), ALIGN_TARGET_60, ((),))
     # Same rate (k == 1) changes no frame, so nothing is refused.
     same_rate = [line for i, name in enumerate(FRAME_EFFECT_NAMES)
                  for line in object_lines(i + 1, "0,59", layer=i, effect=name)]

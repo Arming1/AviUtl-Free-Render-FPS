@@ -30,8 +30,7 @@ Conversion rules are in [RETIME_RULES.md](RETIME_RULES.md). Only limits that sti
 - **Sub-scenes.** Whether AviUtl2 plays a kept sub-scene at its own rate inside a main scene at another rate is a host property. It is not checked by the tool. The sub-scene frame shown at a given main-scene time (round down or nearest) is not verified.
 - **Sub-scenes that cannot be aligned.** At a target rate that is not an integer multiple of the source, object boundaries inside such a sub-scene
   may be one frame off. A WARNING is written. See [RETIME_RULES.md](RETIME_RULES.md).
-- **Frame-dependent effects** (`手ぶれ`, `振動`, `ラスター`, `フレア`, `ノイズ`) are refused when the object's rate changes. They are not verified at another frame rate,
-  so they stay refused until a host probe allows them.
+- **Frame-dependent effects** `振動` and `ノイズ` are refused when the object's rate changes (`振動`: per-frame period with randomness; `ノイズ`: not measured). `フレア` is refused in that case unless `点滅` is 0. `手ぶれ` and `ラスター` are time-based and are not refused (host probe 13). Refusals stay until more host probes allow them.
 
 ## Plugin and runtime
 
