@@ -7,7 +7,7 @@
 - The frame-count move modes `反復移動`, `ランダム移動` and `移動量指定` (flag `4`, two frame points) are converted:
   `反復移動` and `ランダム移動` parameters are multiplied by k, and the `移動量指定` per-frame step is divided by k, written with the source's decimal count.
   `ランダム移動` is converted only for objects that start at frame 0. Objects that overlap a time control object, or whose values cannot be written exactly, are refused.
-- A sub-scene played by one scene object in the exported scene is rescaled on that scene object's timeline when the rate ratio is not an integer, so its object boundaries land on the same output frames as the exported scene. Otherwise a WARNING is written. Host probe pending.
+- A sub-scene played by one scene object in the exported scene is rescaled on that scene object's timeline when the rate ratio is not an integer, so its object boundaries land on the same output frames as the exported scene. Otherwise a WARNING is written, shown in the Free FPS Export dialog and in the completion message. Verified by probe 10 in AviUtl2 v2.1.12.
 
 ### Changed
 
