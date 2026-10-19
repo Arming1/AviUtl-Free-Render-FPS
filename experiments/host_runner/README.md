@@ -56,3 +56,18 @@ python -I experiments/host_runner/host_export.py --host build/host/aviutl2/aviut
 - 只能在 Windows 上运行，需要 `ffmpeg`/`ffprobe` 在 PATH 中（比对步骤用）。
 - 便携副本是快照：插件一改动，需要重新执行第 1 节的复制步骤。
 - 脚本不检查插件 `.aux2` 的版本，只检查 `data` 文件夹是否存在。
+
+## 5. 批量导出 batch_export.py
+
+```
+python -I experiments/host_runner/batch_export.py --host build/host/aviutl2/aviutl2.exe ^
+    --list build/host/lists/NAME.txt [--timeout 600] [--skip-existing]
+```
+
+- 清单是 UTF-8 文本，每行 `工程路径<TAB>输出路径`。`#` 开头的行与空行忽略。相对路径相对于清单文件所在文件夹；多于或少于一个 TAB 的行是错误（退出码 2）。两行指向同一个输出也是错误。
+- 逐个顺序导出，每个任务都走第 2 节同样的单次导出（`host_export.py` 的 `check_args`、`start_host`，以及 job.ini / result.ini 的读写）。每个任务结束后打印 `ok` 与耗时、bytes，或 `失败` 与 error；失败不会中止批量。
+- 输出文件已存在：默认作为失败（与单次导出一致）；给了 `--skip-existing` 则跳过并计入“已跳过”。
+- 结束时打印汇总（共 / 成功 / 失败 / 已跳过 / 总耗时）与失败清单（工程名、输出、错误）。
+- 退出码：0 全部成功或跳过；1 有任务失败；2 参数、host 或清单错误（此时不会启动 host）。
+- 同样只能在用户本机、用户在场时运行：每个任务都会弹出 AviUtl2 窗口。
+- 只重试失败的任务：同一清单再跑一次并加 `--skip-existing`，已成功的会被跳过。

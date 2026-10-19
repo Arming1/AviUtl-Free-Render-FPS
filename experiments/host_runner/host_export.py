@@ -66,6 +66,54 @@ def read_result(path: Path) -> dict[str, str]:
     return dict(parser["result"]) if parser.has_section("result") else {}
 
 
+def check_args(host: Path, project: Path, output: Path, timeout: int) -> str:
+    """Return an error message for unusable inputs, or "" when they can be used.
+
+    host, project and output must already be resolved to absolute paths.
+    """
+    if timeout <= 0:
+        return "--timeout must be positive"
+    if not host.is_file() or host.suffix.lower() != ".exe":
+        return f"host exe not found: {host}"
+    if not (host.parent / "data").is_dir():
+        return f"no data folder beside {host}: refusing a host that would use ProgramData"
+    if not project.is_file():
+        return f"project not found: {project}"
+    if output.exists():
+        return f"output already exists, remove it first: {output}"
+    if not output.parent.is_dir():
+        return f"output folder not found: {output.parent}"
+    for label, value in (("project", str(project)), ("output", str(output))):
+        if "\r" in value or "\n" in value:
+            return f"{label} path contains a line break"
+    return ""
+
+
+def start_host(host: Path, job_path: Path, timeout: int) -> tuple[int | None, float, bool]:
+    """Run host with FREE_FPS_EXPORT_JOB=job_path and wait at most timeout seconds.
+
+    Returns (exit code, elapsed seconds, timed out). On timeout the host is killed.
+    The process is always reaped before returning.
+    """
+    env = os.environ.copy()
+    env[JOB_ENV] = str(job_path)
+    started = time.monotonic()
+    proc = subprocess.Popen([str(host)], cwd=str(host.parent), env=env)
+    timed_out = False
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+        proc.wait()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    elapsed = time.monotonic() - started
+    return proc.returncode, elapsed, timed_out
+
+
 def new_run_dir() -> Path:
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     base = time.strftime("%Y%m%d-%H%M%S")
@@ -91,24 +139,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=600, help="seconds before the host is killed (default 600)")
     args = parser.parse_args(argv)
 
-    if args.timeout <= 0:
-        return fail_usage("--timeout must be positive")
     host = args.host.resolve()
-    if not host.is_file() or host.suffix.lower() != ".exe":
-        return fail_usage(f"host exe not found: {host}")
-    if not (host.parent / "data").is_dir():
-        return fail_usage(f"no data folder beside {host}: refusing a host that would use ProgramData")
     project = args.project.resolve()
-    if not project.is_file():
-        return fail_usage(f"project not found: {project}")
     output = args.output.resolve()
-    if output.exists():
-        return fail_usage(f"output already exists, remove it first: {output}")
-    if not output.parent.is_dir():
-        return fail_usage(f"output folder not found: {output.parent}")
-    for label, value in (("project", str(project)), ("output", str(output))):
-        if "\r" in value or "\n" in value:
-            return fail_usage(f"{label} path contains a line break")
+    error = check_args(host, project, output, args.timeout)
+    if error:
+        return fail_usage(error)
 
     run_dir = new_run_dir()
     job_path = run_dir / "job.ini"
@@ -117,23 +153,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"运行目录: {run_dir}")
     print(f"host: {host}")
 
-    env = os.environ.copy()
-    env[JOB_ENV] = str(job_path)
-    started = time.monotonic()
-    proc = subprocess.Popen([str(host)], cwd=str(host.parent), env=env)
-    timed_out = False
-    try:
-        proc.wait(timeout=args.timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        proc.kill()
-        proc.wait()
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
-    elapsed = time.monotonic() - started
-    print(f"host 进程结束: 退出码 {proc.returncode}    耗时 {elapsed:.1f} s")
+    returncode, elapsed, timed_out = start_host(host, job_path, args.timeout)
+    print(f"host 进程结束: 退出码 {returncode}    耗时 {elapsed:.1f} s")
     if timed_out:
         print(f"超时（{args.timeout} s），已结束 host 进程。", file=sys.stderr)
 
