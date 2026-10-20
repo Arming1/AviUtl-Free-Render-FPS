@@ -1,0 +1,11 @@
+# probe 14: test_kit/14_嵌套次合成对齐/<name>.aup2 -> test_kit/14_嵌套次合成对齐/out/<name>.mp4 (TAB separated)
+D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\N1_66.aup2	D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\out\N1_66.mp4
+D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\N1_60g.aup2	D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\out\N1_60g.mp4
+D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\N1_60l.aup2	D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\out\N1_60l.mp4
+D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\N2_66.aup2	D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\out\N2_66.mp4
+D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\N2_60g.aup2	D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\out\N2_60g.mp4
+D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\N2_60l.aup2	D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\out\N2_60l.mp4
+D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\N3_66.aup2	D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\out\N3_66.mp4
+D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\N3_60g.aup2	D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\out\N3_60g.mp4
+D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\N3_60l.aup2	D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\out\N3_60l.mp4
+D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\N4_66.aup2	D:\AviUtl Free Render FPS\test_kit\14_嵌套次合成对齐\out\N4_66.mp4
